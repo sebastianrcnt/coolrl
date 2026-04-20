@@ -153,13 +153,17 @@ class Trainer:
             simulations = self.current_simulations()
             logger.info("Iteration {} started: simulations={}", self.iteration, simulations)
 
+            selfplay_started = time.monotonic()
             selfplay_stats = self.generate_selfplay(simulations)
+            selfplay_seconds = time.monotonic() - selfplay_started
             if self._should_stop():
                 self.save_runtime_state({"iteration": self.iteration, "status": "stopped_after_selfplay"})
                 break
 
             training_stats: dict[str, float | int] = {}
             arena_stats: dict[str, float | int | bool | str] = {}
+            train_seconds = 0.0
+            arena_seconds = 0.0
             if self.replay.games_seen < self.config.optimization.warmup_games:
                 logger.info(
                     "Warmup: replay_games={} warmup_games={}",
@@ -168,8 +172,12 @@ class Trainer:
                 )
                 status = "warmup"
             else:
+                train_started = time.monotonic()
                 training_stats = self.train_model()
+                train_seconds = time.monotonic() - train_started
+                arena_started = time.monotonic()
                 arena_stats = self.evaluate_candidate(simulations)
+                arena_seconds = time.monotonic() - arena_started
                 if bool(arena_stats.get("accepted", False)):
                     self.best_model = clone_model(self.model)
                     self.best_model_evaluator = ModelEvaluator(self.best_model, device=self.device)
@@ -198,12 +206,18 @@ class Trainer:
                 "best_arena_win_rate": round(self.best_arena_win_rate, 4),
                 "total_updates": self.total_updates,
                 "duration_seconds": round(time.monotonic() - iteration_started, 3),
+                "selfplay_seconds": round(selfplay_seconds, 3),
+                "train_seconds": round(train_seconds, 3),
+                "arena_seconds": round(arena_seconds, 3),
                 **selfplay_stats,
                 **training_stats,
                 **arena_stats,
             }
-            self._log(metadata)
+            checkpoint_started = time.monotonic()
             self.save_model_checkpoints(metadata)
+            checkpoint_seconds = time.monotonic() - checkpoint_started
+            metadata["checkpoint_seconds"] = round(checkpoint_seconds, 3)
+            self._log(metadata)
             self.save_runtime_state(metadata)
 
         logger.success(
