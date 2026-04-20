@@ -23,6 +23,25 @@ priors, values = priors[:n], values[:n]
 
 Unique shapes collapse from O(batch_size) to O(log batch_size). Padding wastes at most ~2x compute on the last bucket boundary; the avoided compile stalls more than pay for it.
 
+## Evaluator lifetime matters
+
+Bucketing only reduces the number of unique shapes seen by a given evaluator/JIT
+lifetime. If the training loop constructs a new `ModelEvaluator` for every
+iteration, its local "seen buckets" state starts empty each time and logs such
+as `ModelEvaluator JIT bucket: ... first use` will repeat on iteration 2, 3, and
+so on.
+
+For sequential CUDA self-play, prefer keeping one candidate evaluator alive
+across iterations and replacing it only when the underlying model object is
+replaced. The candidate model is normally updated in-place by the optimizer, so
+its evaluator can be reused. The best-model evaluator should be recreated when
+`best_model` is replaced after promotion or checkpoint restore.
+
+Repeated first-use logs do not prove tinygrad recompiled every kernel; they
+prove this `ModelEvaluator` instance had not seen the bucket before. If the log
+is accompanied by the same long stalls on later iterations, the evaluator/JIT
+lifetime is too short or the persistent tinygrad cache is not being used.
+
 ## When to apply this pattern
 
 Any tinygrad code path where a **leading (batch) dimension varies at runtime** and the same function is called many times per iteration. Examples in this repo: model inference during self-play, arena evaluation. Training batches are already fixed by `optimization.batch_size`, so they compile once and are fine.

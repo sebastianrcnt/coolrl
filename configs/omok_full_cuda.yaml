@@ -28,6 +28,7 @@ network:
   se_reduction: 8
 
 selfplay:
+  mcts_backend: c
   games_per_iteration: 64
 
   # Match the original ROCm recipe: 64 games per iteration, all active in one

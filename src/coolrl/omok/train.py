@@ -33,7 +33,7 @@ from .checkpoint import (
 from .config import RunConfig, load_config
 from .device import configure_device
 from .evaluator import ModelEvaluator
-from .mcts import MCTS
+from .mcts_backend import resolve_mcts_backend
 from .network import PolicyValueNet, clone_model
 from .openings import sample_balanced_openings
 from .replay import PendingSample, ReplayBuffer
@@ -65,8 +65,11 @@ class Trainer:
         self.log_file = self.checkpoint_dir / "metrics.jsonl"
         self.progress_file = self.checkpoint_dir / "runtime_progress.json"
         self.replay = ReplayBuffer(config.optimization.replay_capacity)
+        self.mcts_module = resolve_mcts_backend(config.selfplay.mcts_backend)
         self.model = PolicyValueNet(config.rules.board_size, config.network)
         self.best_model = clone_model(self.model)
+        self.model_evaluator: ModelEvaluator | None = None
+        self.best_model_evaluator: ModelEvaluator | None = None
         self.optimizer = self._build_optimizer()
         self.selfplay_rng = random.Random(config.seed + 1_048_583)
         self.iteration = 0
@@ -96,6 +99,7 @@ class Trainer:
         signal.signal(signal.SIGTERM, self._handle_stop_signal)
         if resume_path:
             self._restore_from_checkpoint(resume_path)
+        self._refresh_model_evaluators()
 
     def _build_optimizer(self) -> AdamW:
         return AdamW(
@@ -103,6 +107,21 @@ class Trainer:
             lr=self.config.optimization.learning_rate,
             weight_decay=self.config.optimization.weight_decay,
         )
+
+    def _refresh_model_evaluators(self) -> None:
+        self.model_evaluator = ModelEvaluator(self.model, device=self.device)
+        self.best_model_evaluator = ModelEvaluator(self.best_model, device=self.device)
+
+    def _evaluator_for_model(self, model: PolicyValueNet) -> ModelEvaluator:
+        if model is self.model:
+            if self.model_evaluator is None:
+                self.model_evaluator = ModelEvaluator(self.model, device=self.device)
+            return self.model_evaluator
+        if model is self.best_model:
+            if self.best_model_evaluator is None:
+                self.best_model_evaluator = ModelEvaluator(self.best_model, device=self.device)
+            return self.best_model_evaluator
+        return ModelEvaluator(model, device=self.device)
 
     @property
     def elapsed_hours(self) -> float:
@@ -143,6 +162,7 @@ class Trainer:
                 arena_stats = self.evaluate_candidate(simulations)
                 if bool(arena_stats.get("accepted", False)):
                     self.best_model = clone_model(self.model)
+                    self.best_model_evaluator = ModelEvaluator(self.best_model, device=self.device)
                     self.best_iteration = self.iteration
                     self.best_arena_win_rate = float(arena_stats.get("arena_win_rate", 0.0))
                     self.best_checkpoint_metadata = {
@@ -325,7 +345,8 @@ class Trainer:
         progress: Progress,
         progress_task: TaskID,
     ) -> dict[str, int]:
-        evaluator = ModelEvaluator(model, device=self.device)
+        evaluator = self._evaluator_for_model(model)
+        MCTS = self.mcts_module.MCTS
         batch_size = max(1, self.config.selfplay.batch_size)
         black_wins = 0
         white_wins = 0
@@ -720,6 +741,9 @@ class Trainer:
             simulations=simulations,
             c_puct=self.config.selfplay.c_puct,
             leaves_per_batch=self.config.selfplay.leaves_per_batch,
+            mcts_backend=self.config.selfplay.mcts_backend,
+            candidate_evaluator=self.model_evaluator,
+            best_evaluator=self.best_model_evaluator,
         )
         result = arena.evaluate(games)
         side_games = max(1, result.games // 2)

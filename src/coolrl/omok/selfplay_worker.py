@@ -26,16 +26,17 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
 
     from .config import config_from_dict
     from .evaluator import ModelEvaluator
-    from .mcts import MCTS
+    from .mcts_backend import resolve_mcts_backend
     from .network import PolicyValueNet
 
     Device.DEFAULT = "CPU"
     config = config_from_dict(config_payload)
+    mcts_module = resolve_mcts_backend(config.selfplay.mcts_backend)
     model = PolicyValueNet(config.rules.board_size, config.network)
     tensor_state = {key: Tensor(np.asarray(value)) for key, value in state_numpy.items()}
     load_state_dict(model, tensor_state, strict=True, verbose=False)
     evaluator = ModelEvaluator(model, device="CPU")
-    search = MCTS(
+    search = mcts_module.MCTS(
         c_puct=config.selfplay.c_puct,
         dirichlet_alpha=config.selfplay.dirichlet_alpha,
         dirichlet_epsilon=config.selfplay.dirichlet_epsilon,

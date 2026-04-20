@@ -29,6 +29,7 @@ class NetworkConfig:
 
 @dataclass(slots=True)
 class SelfPlayConfig:
+    mcts_backend: str = "python"
     games_per_iteration: int = 4
     batch_size: int = 2
     num_workers: int | str = 0
