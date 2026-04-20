@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import warnings
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -99,7 +99,37 @@ def _state_from_moves(moves: tuple[int, ...]) -> GameState:
     return state
 
 
+@cache
+def _ensure_native_rust_backend_built() -> None:
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        pytest.skip("cargo is not available")
+
+    completed = subprocess.run(
+        [
+            cargo,
+            "build",
+            "--locked",
+            "--manifest-path",
+            str(RUST_MANIFEST),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        pytest.fail(
+            "native Rust backend build failed\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+
+
 def _run_backend(name: str, case: ParityCase, *, leaves_per_batch: int) -> NativeSearchResult:
+    if name == "rust":
+        _ensure_native_rust_backend_built()
+
     backend = resolve_mcts_backend(name)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
@@ -131,56 +161,6 @@ def _run_backend(name: str, case: ParityCase, *, leaves_per_batch: int) -> Nativ
     )
 
 
-def _run_native_rust(case: ParityCase) -> NativeSearchResult:
-    cargo = shutil.which("cargo")
-    if cargo is None:
-        pytest.skip("cargo is not available")
-
-    command = [
-        cargo,
-        "run",
-        "--quiet",
-        "--locked",
-        "--manifest-path",
-        str(RUST_MANIFEST),
-        "--bin",
-        "parity_probe",
-        "--",
-        "--moves",
-        ",".join(str(move) for move in case.moves),
-        "--preferred-action",
-        str(case.preferred_action),
-        "--simulations",
-        str(case.simulations),
-        "--c-puct",
-        "1.25",
-        "--temperature",
-        "0.0",
-        "--value",
-        str(case.value),
-    ]
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if completed.returncode != 0:
-        pytest.fail(
-            "native Rust parity probe failed\n"
-            f"stdout:\n{completed.stdout}\n"
-            f"stderr:\n{completed.stderr}"
-        )
-
-    payload = json.loads(completed.stdout)
-    return NativeSearchResult(
-        action=int(payload["action"]),
-        visit_policy=np.asarray(payload["visit_policy"], dtype=np.float32),
-        root_value=float(payload["root_value"]),
-    )
-
-
 def _assert_search_results_match(
     expected: NativeSearchResult,
     actual: NativeSearchResult,
@@ -198,18 +178,19 @@ def _assert_search_results_match(
     assert actual.root_value == pytest.approx(expected.root_value, abs=value_atol)
 
 
-def test_configured_rust_backend_is_currently_python_shim() -> None:
+def test_configured_rust_backend_is_native_wrapper() -> None:
     from coolrl.omok import mcts as python_mcts
 
+    _ensure_native_rust_backend_built()
     backend = resolve_mcts_backend("rust")
 
-    assert issubclass(backend.MCTS, python_mcts.MCTS)
+    assert not issubclass(backend.MCTS, python_mcts.MCTS)
 
 
 @pytest.mark.parametrize("case", PARITY_CASES, ids=lambda case: case.name)
 def test_native_rust_mcts_matches_python_for_sequential_search(case: ParityCase) -> None:
     py = _run_backend("python", case, leaves_per_batch=1)
-    rust = _run_native_rust(case)
+    rust = _run_backend("rust", case, leaves_per_batch=1)
 
     _assert_search_results_match(py, rust, policy_atol=1.0e-6, value_atol=1.0e-6)
 

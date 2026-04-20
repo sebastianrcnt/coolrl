@@ -6,6 +6,7 @@ edition = "2021"
 [lib]
 name = "omok_rmcts"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 rand = "0.8"

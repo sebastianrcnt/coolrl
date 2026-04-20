@@ -1,8 +1,15 @@
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
+use std::cell::Cell;
+use std::ffi::c_void;
+use std::os::raw::c_int;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::slice;
 
 pub const BOARD_SIZE: usize = 9;
 pub const ACTION_SIZE: usize = BOARD_SIZE * BOARD_SIZE;
+pub const FEATURE_PLANES: usize = 4;
+pub const FEATURE_STRIDE: usize = FEATURE_PLANES * ACTION_SIZE;
 
 #[derive(Clone, Debug)]
 pub struct SearchResult {
@@ -85,6 +92,28 @@ impl GameState {
             1.0
         } else {
             -1.0
+        }
+    }
+
+    pub fn write_features(&self, out: &mut [f32; FEATURE_STRIDE]) {
+        let color = if self.to_play == 1 { 1.0 } else { 0.0 };
+        for action in 0..ACTION_SIZE {
+            out[action] = if self.board[action] == self.to_play {
+                1.0
+            } else {
+                0.0
+            };
+            out[ACTION_SIZE + action] = if self.board[action] == -self.to_play {
+                1.0
+            } else {
+                0.0
+            };
+            out[2 * ACTION_SIZE + action] = if self.last_action == Some(action) {
+                1.0
+            } else {
+                0.0
+            };
+            out[3 * ACTION_SIZE + action] = color;
         }
     }
 
@@ -178,11 +207,25 @@ impl<E: Evaluator> Mcts<E> {
         num_simulations: usize,
         temperature: f32,
     ) -> SearchResult {
+        self.search_with_root_noise(state, num_simulations, temperature, None, 0.0)
+    }
+
+    pub fn search_with_root_noise(
+        &self,
+        state: &GameState,
+        num_simulations: usize,
+        temperature: f32,
+        root_noise: Option<&[f32]>,
+        root_noise_epsilon: f32,
+    ) -> SearchResult {
         let mut root = TreeNode::new(state.to_play, 0.0);
         let mut root_value = 0.0;
         if !state.terminal {
             let (priors, value) = self.evaluator.evaluate(state);
             Self::expand(&mut root, state, &priors);
+            if let Some(noise) = root_noise {
+                Self::apply_root_noise(&mut root, noise, root_noise_epsilon);
+            }
             root_value = value;
         }
 
@@ -220,6 +263,18 @@ impl<E: Evaluator> Mcts<E> {
             action,
             visit_policy: counts,
             root_value,
+        }
+    }
+
+    fn apply_root_noise(root: &mut TreeNode, noise: &[f32], epsilon: f32) {
+        if noise.len() < ACTION_SIZE || epsilon <= 0.0 {
+            return;
+        }
+        let keep = 1.0 - epsilon;
+        for (action, child) in root.children.iter_mut().enumerate() {
+            if let Some(child) = child {
+                child.prior = keep * child.prior + epsilon * noise[action].max(0.0);
+            }
         }
     }
 
@@ -357,6 +412,124 @@ pub fn sample_action_from_policy(policy: &[f32], temperature: f32) -> usize {
     let dist = WeightedIndex::new(adjusted).ok();
     let mut rng = thread_rng();
     dist.map(|d| d.sample(&mut rng)).unwrap_or(0)
+}
+
+pub type EvalCallback = unsafe extern "C" fn(
+    features: *const f32,
+    priors_out: *mut f32,
+    value_out: *mut f32,
+    user_data: *mut c_void,
+) -> c_int;
+
+struct CallbackEvaluator {
+    callback: EvalCallback,
+    user_data: *mut c_void,
+    status: Cell<c_int>,
+}
+
+impl Evaluator for CallbackEvaluator {
+    fn evaluate(&self, state: &GameState) -> ([f32; ACTION_SIZE], f32) {
+        if self.status.get() != 0 {
+            return ([0.0; ACTION_SIZE], 0.0);
+        }
+
+        let mut features = [0.0_f32; FEATURE_STRIDE];
+        let mut priors = [0.0_f32; ACTION_SIZE];
+        let mut value = 0.0_f32;
+        state.write_features(&mut features);
+
+        let status = unsafe {
+            (self.callback)(
+                features.as_ptr(),
+                priors.as_mut_ptr(),
+                &mut value,
+                self.user_data,
+            )
+        };
+        if status != 0 {
+            self.status.set(status);
+        }
+        (priors, value)
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_search(
+    board: *const i8,
+    to_play: i8,
+    last_action: c_int,
+    move_count: usize,
+    winner: i8,
+    terminal: u8,
+    exactly_five: u8,
+    c_puct: f32,
+    num_simulations: usize,
+    temperature: f32,
+    root_noise: *const f32,
+    root_noise_epsilon: f32,
+    callback: Option<EvalCallback>,
+    user_data: *mut c_void,
+    out_action: *mut usize,
+    out_policy: *mut f32,
+    out_root_value: *mut f32,
+) -> c_int {
+    if board.is_null() || out_action.is_null() || out_policy.is_null() || out_root_value.is_null() {
+        return -1;
+    }
+    let Some(callback) = callback else {
+        return -2;
+    };
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let board_slice = slice::from_raw_parts(board, ACTION_SIZE);
+        let mut board_array = [0_i8; ACTION_SIZE];
+        board_array.copy_from_slice(board_slice);
+
+        let state = GameState {
+            board: board_array,
+            to_play,
+            terminal: terminal != 0,
+            winner,
+            last_action: if last_action < 0 {
+                None
+            } else {
+                Some(last_action as usize)
+            },
+            move_count,
+            exactly_five: exactly_five != 0,
+        };
+
+        let evaluator = CallbackEvaluator {
+            callback,
+            user_data,
+            status: Cell::new(0),
+        };
+        let mcts = Mcts::new(c_puct, evaluator);
+        let root_noise_slice = if root_noise.is_null() {
+            None
+        } else {
+            Some(slice::from_raw_parts(root_noise, ACTION_SIZE))
+        };
+        let result = mcts.search_with_root_noise(
+            &state,
+            num_simulations,
+            temperature,
+            root_noise_slice,
+            root_noise_epsilon,
+        );
+
+        let callback_status = mcts.evaluator.status.get();
+        if callback_status != 0 {
+            return callback_status;
+        }
+
+        *out_action = result.action;
+        *out_root_value = result.root_value;
+        let out_policy = slice::from_raw_parts_mut(out_policy, ACTION_SIZE);
+        out_policy.copy_from_slice(&result.visit_policy);
+        0
+    }));
+    result.unwrap_or(-3)
 }
 
 #[cfg(test)]
