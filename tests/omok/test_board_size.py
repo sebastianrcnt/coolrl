@@ -77,9 +77,10 @@ def test_config_accepts_non_nine_board_size() -> None:
     assert config.rules.board_size == 15
 
 
+@pytest.mark.parametrize("backend_name", ("c", "rust"))
 @pytest.mark.parametrize("board_size", (9, 13, 15))
-def test_c_mcts_policy_shape_tracks_board_size(board_size: int) -> None:
-    backend = resolve_mcts_backend("c")
+def test_native_mcts_policy_shape_tracks_board_size(backend_name: str, board_size: int) -> None:
+    backend = resolve_mcts_backend(backend_name)
     search = backend.MCTS(
         c_puct=1.25,
         dirichlet_alpha=0.0,
