@@ -32,22 +32,15 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
     config = config_from_dict(config_payload)
     mcts_module = resolve_mcts_backend(config.selfplay.mcts_backend)
     backend = config.selfplay.evaluator_backend.lower()
+    if backend == "auto":
+        backend = "torch"
+    if backend != "torch":
+        raise RuntimeError("unsupported evaluator backend; use 'torch'")
 
-    if backend == "torch":
-        model = PolicyValueNet(config.rules.board_size, config.network)
-        model.load_state_dict({key: torch.as_tensor(np.asarray(value)) for key, value in state_numpy.items()})
-        model.to("cpu")
-        model.eval()
-    else:
-        from tinygrad import Device, Tensor
-        from tinygrad.nn.state import load_state_dict
-
-        from .network import PolicyValueNet as TinyPolicyValueNet
-
-        Device.DEFAULT = "CPU"
-        tensor_state = {key: Tensor(np.asarray(value)) for key, value in state_numpy.items()}
-        model = TinyPolicyValueNet(config.rules.board_size, config.network)
-        load_state_dict(model, tensor_state, strict=True, verbose=False)
+    model = PolicyValueNet(config.rules.board_size, config.network)
+    model.load_state_dict({key: torch.as_tensor(np.asarray(value)) for key, value in state_numpy.items()})
+    model.to("cpu")
+    model.eval()
 
     evaluator = build_evaluator(model, backend=backend, device="CPU")
     search = mcts_module.MCTS(
@@ -65,8 +58,6 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
     _WORKER_STATE["search"] = search
     _WORKER_STATE["torch"] = torch
 
-    if backend != "torch":
-        _WORKER_STATE["Tensor"] = Tensor  # type: ignore[assignment]
 
 
 def run_selfplay_chunk(
@@ -82,12 +73,8 @@ def run_selfplay_chunk(
     config = _WORKER_STATE["config"]
     search = _WORKER_STATE["search"]
     torch = _WORKER_STATE.get("torch")
-    Tensor = _WORKER_STATE.get("Tensor")
-
     random.seed(seed)
     np.random.seed(seed & 0xFFFFFFFF)
-    if Tensor is not None:
-        Tensor.manual_seed(seed)
     if torch is not None:
         torch.manual_seed(seed)
 

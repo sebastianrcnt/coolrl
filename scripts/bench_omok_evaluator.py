@@ -5,13 +5,12 @@ import statistics
 import time
 
 import numpy as np
-from tinygrad import Tensor
 
 from coolrl.omok.config import load_config
 from coolrl.omok.device import configure_device
 from coolrl.omok.evaluator import Evaluator
-from coolrl.omok.network import PolicyValueNet
 from coolrl.omok.torch_evaluator import build_evaluator
+from coolrl.omok.torch_network import PolicyValueNet
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -29,42 +28,6 @@ def summarize(name: str, values: list[float]) -> str:
         f"p90={percentile(values, 0.90):.4f}s "
         f"min={min(values):.4f}s max={max(values):.4f}s"
     )
-
-
-def run_batch(model: PolicyValueNet, features: np.ndarray, device: str) -> dict[str, float]:
-    times: dict[str, float] = {}
-
-    t0 = time.perf_counter()
-    contiguous = np.ascontiguousarray(features)
-    times["contiguous"] = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    tensor = Tensor(contiguous, device=device)
-    times["tensor"] = time.perf_counter() - t0
-
-    with Tensor.train(False):
-        t0 = time.perf_counter()
-        logits, values = model(tensor)
-        times["forward_lazy"] = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        priors_t = logits.softmax(axis=1)
-        times["softmax_lazy"] = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        priors = priors_t.realize().numpy()
-        times["priors_numpy"] = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        value_np = values.realize().numpy()
-        times["values_numpy"] = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    priors.astype(np.float32, copy=False)
-    value_np.astype(np.float32, copy=False)
-    times["astype"] = time.perf_counter() - t0
-    times["total"] = sum(times.values())
-    return times
 
 
 def run_evaluator_batch(evaluator: Evaluator, features: np.ndarray) -> dict[str, float]:
@@ -87,10 +50,9 @@ def run_evaluator_batch(evaluator: Evaluator, features: np.ndarray) -> dict[str,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark Omok evaluator batches.")
+    parser = argparse.ArgumentParser(description="Benchmark Omok torch evaluator batches.")
     parser.add_argument("--config", default="configs/omok_full_cuda.yaml")
     parser.add_argument("--device", default="CUDA")
-    parser.add_argument("--backend", default=None, choices=["tinygrad", "torch", "auto"])
     parser.add_argument("--batches", default="512,1024,2048")
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iters", type=int, default=5)
@@ -101,28 +63,21 @@ def main() -> None:
     device = configure_device(args.device)
     rng = np.random.default_rng(args.seed)
     model = PolicyValueNet(cfg.rules.board_size, cfg.network)
-    backend = args.backend or cfg.selfplay.evaluator_backend
     batch_sizes = [int(item.strip()) for item in args.batches.split(",") if item.strip()]
 
     print(
-        "Omok evaluator benchmark: "
-        f"device={device} backend={backend} channels={cfg.network.channels} blocks={cfg.network.blocks} "
+        "Omok torch evaluator benchmark: "
+        f"device={device} channels={cfg.network.channels} blocks={cfg.network.blocks} "
         f"batches={batch_sizes} warmup={args.warmup} iters={args.iters}"
     )
-    evaluator = None if backend == "tinygrad" else build_evaluator(model, backend=backend, device=device)
+    evaluator = build_evaluator(model, backend="torch", device=device)
 
     for batch_size in batch_sizes:
         features = rng.normal(size=(batch_size, 4, 9, 9)).astype(np.float32)
         for _ in range(args.warmup):
-            if evaluator is None:
-                run_batch(model, features, device)
-            else:
-                run_evaluator_batch(evaluator, features)
+            run_evaluator_batch(evaluator, features)
 
-        rows = [
-            run_batch(model, features, device) if evaluator is None else run_evaluator_batch(evaluator, features)
-            for _ in range(args.iters)
-        ]
+        rows = [run_evaluator_batch(evaluator, features) for _ in range(args.iters)]
         keys = list(rows[0])
         print(f"\nBatch {batch_size}")
         for key in keys:

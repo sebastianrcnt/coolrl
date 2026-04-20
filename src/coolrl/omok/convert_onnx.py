@@ -11,7 +11,7 @@ Background
 ----------
 PyTorch fuses Conv + BatchNorm into a single Conv node during ONNX export,
 so the ONNX file contains fused conv weights (with BN scale absorbed) and
-no separate BN tensors.  The tinygrad model still applies Conv then BN
+no separate BN tensors. The Omok model applies Conv then BN
 separately, so we reconstruct identity BN parameters:
 
     running_mean  = 0
@@ -60,7 +60,7 @@ def _load_onnx_initializers(onnx_path: Path) -> dict[str, np.ndarray]:
 # State dict construction
 # ---------------------------------------------------------------------------
 
-_BN_EPS = 1e-5  # default eps in both PyTorch and tinygrad BatchNorm2d
+_BN_EPS = 1e-5  # default eps for BatchNorm2d
 
 
 def _identity_bn(out_channels: int, fused_bias: np.ndarray) -> dict[str, np.ndarray]:
@@ -79,7 +79,7 @@ def _build_state_dict(
     channels: int,
     blocks: int,
 ) -> dict[str, np.ndarray]:
-    """Map ONNX initializer names to tinygrad PolicyValueNet state dict keys.
+    """Map ONNX initializer names to Omok PolicyValueNet state dict keys.
 
     Fused conv initializers have opaque ``onnx::Conv_NNN`` names.  They appear
     in graph order: stem, tower[0].conv1, tower[0].conv2, ..., policy, value.
@@ -219,14 +219,12 @@ def _convert_one(
     *,
     verbose: bool = True,
 ) -> None:
-    from tinygrad import Tensor
-    from tinygrad.nn.state import safe_save
+    from safetensors.numpy import save_file
 
     raw = _load_onnx_initializers(onnx_path)
     numpy_state = _build_state_dict(raw, entry["channels"], entry["blocks"])
 
-    tinygrad_state = {k: Tensor(v) for k, v in numpy_state.items()}
-    safe_save(tinygrad_state, str(out_path), metadata={"format": "coolrl.omok.v1"})
+    save_file(numpy_state, str(out_path), metadata={"format": "coolrl.omok.legacy_weights.v1"})
 
     sidecar = _make_sidecar(entry, value_hidden, se_reduction)
     out_path.with_suffix(".json").write_text(

@@ -8,7 +8,7 @@ from typing import Any
 import torch
 
 from .config import RunConfig, config_from_dict
-from .torch_network import PolicyValueNet, load_tinygrad_state_dict
+from .torch_network import PolicyValueNet, load_legacy_state_dict
 
 
 def _coerce_cpu(state: Any) -> Any:
@@ -71,15 +71,16 @@ def save_checkpoint(
 
 
 def _load_legacy_model(path: Path) -> tuple[PolicyValueNet, RunConfig]:
-    from tinygrad.nn.state import safe_load
+    from safetensors.numpy import load_file
 
     raw_metadata_path = checkpoint_metadata_path(path)
     payload = json.loads(raw_metadata_path.read_text(encoding="utf-8"))
-    config = config_from_dict(payload["config"])
+    config_payload = payload.get("config", payload.get("metadata", {}).get("config"))
+    if config_payload is None:
+        raise ValueError(f"legacy checkpoint metadata does not include config: {raw_metadata_path}")
+    config = config_from_dict(config_payload)
     model = PolicyValueNet(config.rules.board_size, config.network)
-    state = safe_load(path)
-    numpy_state = {key: value.numpy() for key, value in state.items()}
-    load_tinygrad_state_dict(model, numpy_state)
+    load_legacy_state_dict(model, load_file(path))
     return model, config
 
 
@@ -103,7 +104,7 @@ def load_checkpoint(
 
     if target.suffix == ".safetensors":
         model, config = _load_legacy_model(target)
-        metadata = {"checkpoint_format": "coolrl.omok.tinygrad.v1"}
+        metadata = {"checkpoint_format": "coolrl.omok.legacy_weights.v1"}
         raw_metadata_path = checkpoint_metadata_path(target)
         if raw_metadata_path.exists():
             raw = json.loads(raw_metadata_path.read_text(encoding="utf-8"))

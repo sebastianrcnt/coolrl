@@ -1,8 +1,7 @@
 # Full-sized Omok profile for a discrete NVIDIA GPU, e.g. RTX 3090.
 #
 # Self-play runs single-process so NN inference stays on CUDA. num_workers > 0
-# would force workers to CPU inference (selfplay_worker.py pins Device.DEFAULT
-# = "CPU"), which is the Metal profile's strategy. Measured GPU utilization on
+# would force workers to CPU inference. Measured GPU utilization on
 # this profile sat around 15% because single-threaded Python MCTS could not
 # feed the GPU fast enough; the proper long-term fix is an inference-server
 # pattern, but until then single-process GPU self-play still tends to beat
@@ -47,8 +46,7 @@ selfplay:
   search_threads: auto
 
   # These fields are retained for compatibility with the reference profile.
-  # The current tinygrad implementation parses them, but async inference queues
-  # are not implemented yet.
+  # Async inference queues are not implemented yet.
   inference_batch_size: 512
   inference_wait_ms: 2.0
 

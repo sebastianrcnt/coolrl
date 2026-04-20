@@ -88,13 +88,13 @@ class PolicyValueNet(torch_nn.Module):
 TorchPolicyValueNet = PolicyValueNet
 
 
-def load_tinygrad_state_dict(model: PolicyValueNet, tinygrad_state: Mapping[str, Any]) -> None:
+def load_legacy_state_dict(model: PolicyValueNet, legacy_state: Mapping[str, Any]) -> None:
     target_state = model.state_dict()
-    source_state = {key: _as_numpy(value) for key, value in tinygrad_state.items()}
+    source_state = {key: _as_numpy(value) for key, value in legacy_state.items()}
     missing = sorted(set(target_state) - set(source_state))
     extra = sorted(set(source_state) - set(target_state))
     if missing or extra:
-        raise RuntimeError(f"tinygrad/torch state mismatch: missing={missing} extra={extra}")
+        raise RuntimeError(f"legacy/torch state mismatch: missing={missing} extra={extra}")
 
     converted: dict[str, torch.Tensor] = {}
     for key, target_tensor in target_state.items():

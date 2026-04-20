@@ -8,7 +8,8 @@ from loguru import logger
 from coolrl.progress import make_progress
 
 from .board import GameState
-from .evaluator import Evaluator, ModelEvaluator
+from .evaluator import Evaluator
+from .torch_evaluator import build_evaluator
 from .metrics import IterationMetrics
 from .mcts_backend import resolve_mcts_backend
 from .mcts_types import MCTSBackend
@@ -62,8 +63,8 @@ class Arena:
         self.leaves_per_batch = leaves_per_batch
         self.search_threads = max(1, int(search_threads))
         self.mcts_module = resolve_mcts_backend(mcts_backend)
-        self.candidate_evaluator = candidate_evaluator or ModelEvaluator(candidate_model, device=device)
-        self.best_evaluator = best_evaluator or ModelEvaluator(best_model, device=device)
+        self.candidate_evaluator = candidate_evaluator or build_evaluator(candidate_model, backend="torch", device=device)
+        self.best_evaluator = best_evaluator or build_evaluator(best_model, backend="torch", device=device)
         self.metrics = metrics
 
     def evaluate(self, games: int) -> ArenaResult:

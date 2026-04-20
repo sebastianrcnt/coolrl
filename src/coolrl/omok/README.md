@@ -362,5 +362,5 @@ Training writes under the configured checkpoint directory:
 - `metrics.jsonl`: one JSON metrics record per iteration.
 - `runtime_progress.json`: latest progress snapshot.
 
-Legacy tinygrad checkpoints can still be used as a model-weight-only seed path, but new
+Legacy `.safetensors` checkpoints can still be used as a model-weight-only seed path, but new
 training checkpoints are torch `.pt` only.
