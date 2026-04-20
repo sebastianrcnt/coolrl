@@ -108,6 +108,9 @@ def plot(metrics_path: Path, output_path: Path | None, show: bool) -> None:
     ax.set_xlabel("iteration")
     ax.grid(True, alpha=0.3)
 
+    for ax in axes.flat:
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+
     plt.tight_layout()
 
     if output_path:
