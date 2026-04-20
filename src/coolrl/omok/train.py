@@ -6,6 +6,7 @@ import multiprocessing as mp
 import os
 import random
 import signal
+import shutil
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from pathlib import Path
@@ -93,6 +94,8 @@ class Trainer:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = self.checkpoint_dir / "metrics.jsonl"
         self.progress_file = self.checkpoint_dir / "runtime_progress.json"
+        if resume_path is None:
+            self._archive_previous_metrics()
         self.replay = ReplayBuffer(config.optimization.replay_capacity)
         self.mcts_module = resolve_mcts_backend(config.selfplay.mcts_backend)
         self.model = PolicyValueNet(config.rules.board_size, config.network).to(self.torch_device)
@@ -141,6 +144,17 @@ class Trainer:
         if resume_path:
             self._restore_from_checkpoint(resume_path)
         self._refresh_model_evaluators()
+
+    def _archive_previous_metrics(self) -> None:
+        if not self.log_file.exists():
+            return
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        archive_path = self.log_file.with_name(f"metrics.{timestamp}.jsonl")
+        shutil.move(self.log_file, archive_path)
+        logger.warning(
+            "Starting fresh run with existing metrics log; archived previous metrics to {}",
+            archive_path,
+        )
 
     def _build_optimizer(self) -> torch.optim.AdamW:
         return torch.optim.AdamW(
