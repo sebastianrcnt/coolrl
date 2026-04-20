@@ -353,6 +353,61 @@ def expected_value_from_avg_strategy(avg_strategy: Dict[str, List[float]]) -> fl
     return sum(recurse("", c1, c2) for c1, c2 in deals) / len(deals)
 
 
+def best_response_value(
+    strategy: Dict[str, List[float]], br_player: int, trainer: KuhnTrainer
+) -> float:
+    # Exact value when one player chooses the best action and the opponent stays fixed.
+    if br_player not in (0, 1):
+        raise ValueError(f"Unsupported best-response player: {br_player}")
+
+    br_histories = ("", "pb") if br_player == 0 else ("p", "b")
+    br_infosets = [
+        trainer.infoset_key(br_player, card, history)
+        for card in CARDS
+        for history in br_histories
+    ]
+
+    def recurse(
+        history: str, p1_card: str, p2_card: str, br_policy: Dict[str, str]
+    ) -> float:
+        if trainer.is_terminal(history):
+            utility_p1 = trainer.terminal_utility_p1(history, p1_card, p2_card)
+            return utility_p1 if br_player == 0 else -utility_p1
+
+        player = trainer.current_player(history)
+        card = p1_card if player == 0 else p2_card
+        infoset = trainer.infoset_key(player, card, history)
+
+        if player == br_player:
+            return recurse(history + br_policy[infoset], p1_card, p2_card, br_policy)
+
+        fixed_strategy = strategy.get(infoset, [0.5, 0.5])
+        return sum(
+            fixed_strategy[i] * recurse(history + action, p1_card, p2_card, br_policy)
+            for i, action in enumerate(ACTIONS)
+        )
+
+    deals = [(c1, c2) for c1 in CARDS for c2 in CARDS if c1 != c2]
+    best_value = float("-inf")
+    for policy_bits in range(2 ** len(br_infosets)):
+        br_policy = {
+            infoset: ACTIONS[(policy_bits >> i) & 1]
+            for i, infoset in enumerate(br_infosets)
+        }
+        value = sum(
+            recurse("", p1_card, p2_card, br_policy) for p1_card, p2_card in deals
+        ) / len(deals)
+        best_value = max(best_value, value)
+    return best_value
+
+
+def exploitability(strategy: Dict[str, List[float]], trainer: KuhnTrainer) -> float:
+    # Average gain available to both players by best responding to the fixed profile.
+    br_value_p1 = best_response_value(strategy, 0, trainer)
+    br_value_p2 = best_response_value(strategy, 1, trainer)
+    return (br_value_p1 + br_value_p2) / 2.0
+
+
 def main() -> None:
     # Training + optional human-vs-bot gameplay loop.
     configure_logging()
@@ -369,6 +424,15 @@ def main() -> None:
     exact_ev = expected_value_from_avg_strategy(avg_strategy)
     logger.info("Computed exact EV for average strategy profile: {:.6f}", exact_ev)
     print(f"Expected value of average strategy profile for P1: {exact_ev:.6f}")
+    avg_exploitability = exploitability(avg_strategy, trainer)
+    logger.info(
+        "Computed exploitability for average strategy: {:.6f}", avg_exploitability
+    )
+    if avg_exploitability > 0.01:
+        logger.warning(
+            "Exploitability is above 0.01; the strategy may not have converged."
+        )
+    print(f"Exploitability of average strategy: {avg_exploitability:.6f}")
     print("Known equilibrium target is about -0.055556 for P1.")
     display_strategy(avg_strategy)
 
