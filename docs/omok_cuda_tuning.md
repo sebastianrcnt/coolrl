@@ -186,6 +186,54 @@ MCTS. This explains why larger batches can help: batch 2048 is only about 1.6x
 slower than batch 512, while `leaves_per_batch=64` reduces eval rounds by 4x
 relative to 16 at 256 simulations.
 
+## PyTorch Evaluator Microbenchmark
+
+A one-off PyTorch eager benchmark using the same Omok network shape
+(`channels=64`, `blocks=6`) was run through `uv run --with torch`, without
+adding PyTorch as a project dependency. Environment:
+
+```text
+GPU: NVIDIA GeForce RTX 3090
+PyTorch: 2.11.0+cu130
+CUDA: available
+```
+
+The benchmark constructed an equivalent PyTorch module and measured CUDA
+forward, softmax, and numpy materialization with explicit synchronization.
+Weights were random; this was a latency comparison, not a parity test against a
+saved checkpoint.
+
+| Batch | tinygrad Total Avg | PyTorch Eager Total Avg | Speedup |
+|---:|---:|---:|---:|
+| 128 | ~0.0592s | ~0.0017s | ~35x |
+| 256 | ~0.0631s | ~0.0019s | ~33x |
+| 512 | ~0.0711s | ~0.0035s | ~20x |
+| 1024 | ~0.0998s | ~0.0060s | ~17x |
+| 2048 | ~0.1162s | ~0.0116s | ~10x |
+
+This is a much larger gap than the earlier 2-4x rough estimate. Because
+previous C MCTS timing showed `ModelEvaluator.evaluate_features(...)` was more
+than 98% of `search_batch(...)`, replacing only the evaluator can plausibly
+make self-play and arena eval costs almost disappear relative to training.
+
+Updated rough iteration estimates:
+
+| Scenario | Self-play | Training | Arena | Iteration | 200 Iterations |
+|---|---:|---:|---:|---:|---:|
+| current tinygrad | ~47s | ~48s | ~48s | ~135-143s | ~7.5-8.0h |
+| PyTorch evaluator only | ~3-5s | ~48s | ~3-5s | ~55-60s | ~3.0-3.4h |
+
+The exact numbers still need full-loop validation. The microbenchmark does not
+include checkpoint weight conversion, C MCTS feed/collect overhead after eval is
+reduced, Python loop overhead, or changes in game length. It is strong enough,
+however, to make a PyTorch evaluator backend the next highest-ROI change.
+
+Once PyTorch eval is integrated, `leaves_per_batch` should be swept again. The
+current `64` value was chosen mainly to reduce expensive tinygrad evaluator
+calls. If PyTorch eval makes calls cheap, lower values such as `8`, `16`, or
+`32` may recover search quality by feeding/backing up neural evaluations more
+often, without costing much wall time.
+
 ## 4-Iteration Phase Benchmark
 
 After adding phase timing fields to `metrics.jsonl`, a fresh run from an empty
@@ -290,13 +338,18 @@ backend. Normal training runs should rely on `metrics.jsonl` first.
 - `search_threads: auto` is useful as a ceiling, but high CPU utilization should
   not be expected because C collection is a tiny part of wall time.
 - `leaves_per_batch: 64` improved early CUDA throughput by reducing evaluator
-  calls; do not increase it further without checking arena quality.
+  calls in tinygrad. Re-sweep `8/16/32/64` after PyTorch eval is integrated;
+  `64` may no longer be the best quality/speed tradeoff.
 - The most promising next experiments are:
-  - compare tinygrad evaluator against a PyTorch evaluator microbenchmark;
-  - measure whether training updates are tinygrad-bound in the same way as
-    self-play eval;
-  - consider ONNX Runtime or TensorRT for self-play/arena inference if PyTorch
-    is much faster than tinygrad;
+  - add a PyTorch evaluator backend for self-play and arena;
+  - verify tinygrad-to-PyTorch checkpoint weight parity before using it for
+    training runs;
+  - run a full-loop CUDA benchmark with PyTorch eval and `leaves_per_batch: 64`;
+  - sweep `leaves_per_batch` after PyTorch eval;
+  - measure whether training updates are tinygrad-bound once eval is no longer
+    dominant;
+  - consider ONNX Runtime or TensorRT only after PyTorch eval lands, because
+    training is expected to become the dominant remaining bottleneck;
   - only revisit persistent C worker pools if `collect` becomes a meaningful
     share of `search_batch` time again.
 
