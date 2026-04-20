@@ -15,3 +15,6 @@ exports
 
 *.onnx
 .claude/
+
+# Rust-generated files
+**/target/
