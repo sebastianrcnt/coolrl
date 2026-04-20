@@ -1,15 +1,12 @@
 # Full-sized Omok profile for a discrete NVIDIA GPU, e.g. RTX 3090.
 #
-# This file intentionally differs from omok_full_metal.yaml in the self-play
-# strategy. With num_workers > 0, this trainer sends self-play to spawned worker
-# processes, and those workers currently force tinygrad to CPU in
-# selfplay_worker.py. On a CUDA box that means the expensive MCTS neural network
-# evaluations would bypass the GPU. For CUDA we therefore keep self-play in the
-# main process with num_workers: 0, so ModelEvaluator uses the CUDA device.
-#
-# batch_size stays large because MCTS search_batch evaluates many active games
-# together. On a 3090, larger batches and leaves_per_batch help amortize Python
-# and kernel launch overhead and give the GPU enough work per inference call.
+# Self-play runs single-process so NN inference stays on CUDA. num_workers > 0
+# would force workers to CPU inference (selfplay_worker.py pins Device.DEFAULT
+# = "CPU"), which is the Metal profile's strategy. Measured GPU utilization on
+# this profile sat around 15% because single-threaded Python MCTS could not
+# feed the GPU fast enough; the proper long-term fix is an inference-server
+# pattern, but until then single-process GPU self-play still tends to beat
+# CPU-hybrid for medium networks on a 3090.
 #
 # Keep this checkpoint directory separate from Metal/CPU runs. Replay buffers,
 # optimizer state, and timing assumptions should not be mixed across hardware
@@ -31,16 +28,14 @@ network:
   se_reduction: 8
 
 selfplay:
-  games_per_iteration: 64
+  games_per_iteration: 128
 
-  # CUDA profile: keep all 64 active games in one search batch. This makes the
-  # neural network evaluator see larger feature batches, which is what a
-  # discrete GPU needs to stay useful during self-play.
-  batch_size: 64
+  # All 128 active games are fed into MCTS.search_batch together so the CUDA
+  # evaluator sees one large inference batch per step.
+  batch_size: 128
 
-  # Critical CUDA choice: 0 disables ProcessPoolExecutor self-play. The
-  # multi-process worker path currently runs inference on CPU, so leaving this
-  # as auto would make the 3090 idle during self-play.
+  # Disables ProcessPoolExecutor self-play. The multi-process worker path
+  # pins inference to CPU, which would leave the 3090 idle during self-play.
   num_workers: 0
 
   # These fields are retained for compatibility with the reference profile.
@@ -57,9 +52,10 @@ selfplay:
   c_puct: 1.6
   virtual_loss: 1.0
 
-  # Evaluate multiple leaves per MCTS round to increase inference batch sizes.
-  # This is favorable on CUDA, where small frequent inference calls waste GPU
-  # throughput.
+  # Expand 8 leaves per MCTS step so each inference call sees up to
+  # 128*8=1024 positions. Larger values (tried 32) empirically hurt average
+  # GPU utilization because the longer CPU-only gap between calls outweighs
+  # the per-call batch gain.
   leaves_per_batch: 8
 
   simulation_ramp_iterations: 96
