@@ -9,13 +9,22 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "inquirer>=3.4.1",
     "loguru>=0.7.3",
+    "tqdm>=4.67.3",
+]
+
+[project.optional-dependencies]
+poker = [
+    "inquirer>=3.4.1",
+]
+omok = [
     "numpy>=2.4.4",
     "pygame>=2.6.1",
     "pyyaml>=6.0.3",
     "tinygrad>=0.12.0",
-    "tqdm>=4.67.3",
+]
+all = [
+    "coolrl[poker,omok]",
 ]
 
 [tool.setuptools.packages.find]
