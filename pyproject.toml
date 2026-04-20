@@ -32,6 +32,8 @@ all = [
 [project.scripts]
 omok-train = "coolrl.omok.train:main"
 omok-plot = "coolrl.omok.plot_metrics:main"
+omok15-train = "coolrl.omok15.train:main"
+omok15-plot = "coolrl.omok15.plot_metrics:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,0 +1,74 @@
+# Full-sized 15x15 Omok profile for CUDA GPUs.
+experiment_name: omok15_full_cuda
+seed: 31
+max_hours: null
+device: CUDA
+use_amp: true
+
+rules:
+  board_size: 15
+  exactly_five: true
+
+network:
+  channels: 96
+  blocks: 8
+  value_hidden: 256
+  se_reduction: 8
+
+selfplay:
+  mcts_backend: python
+  evaluator_backend: torch
+  games_per_iteration: 32
+  batch_size: 32
+  num_workers: 0
+  search_threads: auto
+  inference_batch_size: 512
+  inference_wait_ms: 2.0
+  temperature_moves: 18
+  temperature_end: 0.15
+  dirichlet_alpha: 0.12
+  dirichlet_epsilon: 0.25
+  c_puct: 1.8
+  virtual_loss: 1.0
+  leaves_per_batch: 8
+  simulation_ramp_iterations: 128
+  candidate_mix_fraction: 0.5
+  mixed_iterations_after_promotion: 8
+  simulation_schedule:
+    - fraction: 0.0
+      simulations: 64
+    - fraction: 0.5
+      simulations: 96
+    - fraction: 0.8
+      simulations: 128
+
+optimization:
+  batch_size: 256
+  updates_per_iteration: 96
+  learning_rate: 0.0004
+  min_learning_rate: 0.0002
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  replay_capacity: 120000
+  warmup_games: 128
+  policy_loss_weight: 1.0
+  value_loss_weight: 1.8
+  value_discount: 0.99
+  recency_temperature: 2.0e-5
+
+arena:
+  games: 32
+  simulations: 128
+  accept_win_rate: 0.55
+  min_white_win_rate: 0.1667
+  bootstrap_games: 16
+  bootstrap_simulations: 64
+  bootstrap_accept_win_rate: 0.5
+  bootstrap_min_white_win_rate: 0.1667
+
+checkpoint:
+  directory: checkpoints/omok15_full_cuda
+  save_every_iteration: true
+  save_iteration_interval: 1
+  progress_interval_batches: 2
+  progress_interval_seconds: 20.0
