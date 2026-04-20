@@ -43,7 +43,10 @@ uv run python -m coolrl.omok.train --config configs/omok_full_metal.yaml
 uv run python -m coolrl.omok.train --config configs/omok_full_cuda.yaml
 ```
 
-The full profiles use the C MCTS backend. If a source checkout cannot
+The full profiles use the C MCTS backend. An experimental Rust implementation
+also lives at `src/coolrl/omok/rmcts/`, and can be selected with
+`selfplay.mcts_backend: rust` (currently routed through a Python shim while native
+integration is being finalized). If a source checkout cannot
 find the compiled extension, build it in place:
 
 ```bash
