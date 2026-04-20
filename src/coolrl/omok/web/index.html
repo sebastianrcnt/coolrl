@@ -7,110 +7,331 @@
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 <style>
 :root {
-  --bg: #1a1a1a;
-  --panel: #242424;
-  --border: #333;
-  --text: #e8e8e8;
-  --muted: #888;
-  --accent: #4ad;
-  --green: #6e6;
-  --amber: #ec3;
-  --red: #f66;
-  --board-bg: #d9b271;
+  --bg: #0f1218;
+  --bg-grad: radial-gradient(ellipse at top, #1a1f2b 0%, #0f1218 60%);
+  --panel: #1a1f2a;
+  --panel-2: #242b38;
+  --border: #2a3140;
+  --border-strong: #3a4253;
+  --text: #e8ecf2;
+  --muted: #8a94a6;
+  --subtle: #5e6878;
+  --accent: #5aa7ff;
+  --accent-hover: #7bb8ff;
+  --accent-press: #3d92f0;
+  --green: #4ade80;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --board-bg: #dcb477;
   --board-line: #2a2118;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.45);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { min-height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: var(--bg); color: var(--text);
-  display: flex; justify-content: center; padding: 16px;
+  background: var(--bg); background-image: var(--bg-grad); background-attachment: fixed;
+  color: var(--text);
+  display: flex; justify-content: center; padding: 24px 16px 40px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-.app { max-width: 960px; width: 100%; }
-h1 { font-size: 1.2em; color: var(--accent); margin-bottom: 12px; }
+.app { max-width: 980px; width: 100%; }
+
+/* Header */
+.header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; padding: 0 2px;
+}
+.header h1 {
+  font-size: 1.15rem; font-weight: 700; color: var(--text);
+  letter-spacing: -0.01em;
+}
+.header h1 .accent { color: var(--accent); }
+.header .subtitle {
+  font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+/* Controls bar */
 .controls {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin-bottom: 12px; padding: 12px; background: var(--panel);
-  border-radius: 8px; border: 1px solid var(--border);
+  margin-bottom: 14px; padding: 10px; background: var(--panel);
+  border-radius: var(--radius); border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
-.controls label { color: var(--muted); font-size: 0.85em; }
-.controls select, .controls input[type=range] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; }
-.controls button {
-  background: var(--accent); color: #000; border: none; border-radius: 4px;
-  padding: 6px 14px; font-weight: 600; cursor: pointer; font-size: 0.85em;
+.control-group {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 2px 4px;
 }
-.controls button:hover { opacity: 0.85; }
-.controls button:disabled { opacity: 0.4; cursor: default; }
+.control-group + .control-group {
+  border-left: 1px solid var(--border);
+  padding-left: 12px; margin-left: 4px;
+}
+.controls label.field {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--muted); font-size: 0.8rem; font-weight: 500;
+}
+.controls select {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-xs);
+  padding: 5px 8px; font-size: 0.82rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.controls select:hover { border-color: var(--border-strong); }
+.controls select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(90,167,255,0.15);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid transparent; border-radius: var(--radius-xs);
+  padding: 6px 12px; font-weight: 600; font-size: 0.8rem;
+  cursor: pointer; line-height: 1.4;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+  font-family: inherit;
+}
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px rgba(90,167,255,0.25);
+}
+.btn-primary {
+  background: var(--accent); color: #0a1220; border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover); border-color: var(--accent-hover);
+}
+.btn-primary:active:not(:disabled) { background: var(--accent-press); }
+.btn-secondary {
+  background: transparent; color: var(--text);
+  border-color: var(--border-strong);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--panel-2); border-color: var(--border-strong);
+}
+
+/* File upload */
 .file-label {
   display: inline-flex; align-items: center; gap: 6px;
-  background: var(--accent); color: #000; border-radius: 4px;
-  padding: 6px 14px; font-weight: 600; cursor: pointer; font-size: 0.85em;
+  background: var(--accent); color: #0a1220;
+  border: 1px solid var(--accent); border-radius: var(--radius-xs);
+  padding: 6px 12px; font-weight: 600; cursor: pointer; font-size: 0.8rem;
+  transition: background 0.15s, border-color 0.15s;
 }
-.file-label:hover { opacity: 0.85; }
+.file-label:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .file-label input { display: none; }
-.game-area { display: flex; gap: 16px; align-items: flex-start; }
-canvas#board { border-radius: 4px; cursor: crosshair; max-width: 100%; height: auto; }
-.sidebar {
-  flex: 1; min-width: 200px; padding: 12px; background: var(--panel);
-  border-radius: 8px; border: 1px solid var(--border); font-size: 0.85em;
-  line-height: 1.8;
+.file-label svg { width: 14px; height: 14px; }
+
+/* Sims slider */
+.sim-group { display: flex; align-items: center; gap: 8px; }
+.sim-group input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  width: 110px; height: 4px; background: var(--border); border-radius: 2px;
+  cursor: pointer;
 }
-.sidebar .label { color: var(--muted); }
-.sidebar .val { color: var(--green); }
-.sidebar .val.thinking { color: var(--amber); }
-.sidebar .val.error { color: var(--red); }
-#status { color: var(--amber); font-weight: 600; }
-#model-name { color: var(--accent); }
-.sim-group { display: flex; align-items: center; gap: 6px; }
-.sim-group input { width: 100px; }
-.sim-group span { font-size: 0.85em; min-width: 28px; }
+.sim-group input[type=range]:focus { outline: none; }
+.sim-group input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--panel);
+  box-shadow: var(--shadow-sm); cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.sim-group input[type=range]::-webkit-slider-thumb:hover { background: var(--accent-hover); transform: scale(1.15); }
+.sim-group input[type=range]::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--panel);
+  box-shadow: var(--shadow-sm); cursor: pointer;
+}
+.sim-group .sims-val {
+  font-size: 0.8rem; min-width: 32px; text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text); font-weight: 600;
+}
+
+/* Game area */
+.game-area { display: flex; gap: 18px; align-items: flex-start; }
+canvas#board {
+  border-radius: var(--radius); cursor: crosshair;
+  max-width: 100%; height: auto;
+  box-shadow: var(--shadow-lg);
+  display: block;
+}
+
+/* Sidebar */
+.sidebar {
+  flex: 1; min-width: 220px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  font-size: 0.85rem;
+  overflow: hidden;
+}
+.sidebar .section { padding: 12px 14px; }
+.sidebar .section + .section { border-top: 1px solid var(--border); }
+.sidebar .row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; padding: 3px 0;
+}
+.sidebar .label {
+  color: var(--muted); font-size: 0.78rem;
+  text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500;
+}
+.sidebar .val {
+  color: var(--text); font-variant-numeric: tabular-nums;
+  font-weight: 500; text-align: right; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sidebar .val.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+.sidebar .val.accent { color: var(--accent); }
+
+/* Turn pill with stone dot */
+.turn-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px 2px 4px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 999px;
+  font-size: 0.78rem; font-weight: 600;
+}
+.turn-pill .dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #555, #000);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+}
+.turn-pill.white .dot {
+  background: radial-gradient(circle at 30% 30%, #fff, #cfc8b8);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15);
+}
+
+/* Status badge */
+.status-badge {
+  display: inline-block; padding: 4px 10px;
+  background: rgba(251,191,36,0.12); color: var(--amber);
+  border: 1px solid rgba(251,191,36,0.3);
+  border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.status-badge.thinking {
+  background: rgba(90,167,255,0.12); color: var(--accent);
+  border-color: rgba(90,167,255,0.3);
+}
+.status-badge.ok {
+  background: rgba(74,222,128,0.12); color: var(--green);
+  border-color: rgba(74,222,128,0.3);
+}
+.status-badge.error {
+  background: rgba(248,113,113,0.14); color: var(--red);
+  border-color: rgba(248,113,113,0.35);
+}
+
+/* Hint block */
+.hint {
+  color: var(--muted); font-size: 0.78rem; line-height: 1.6;
+}
+.hint kbd {
+  display: inline-block; padding: 1px 6px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-xs); font-family: ui-monospace, monospace;
+  font-size: 0.72rem; color: var(--text);
+}
+
 @media (max-width: 700px) {
+  body { padding: 14px 10px 28px; }
   .game-area { flex-direction: column; }
   canvas#board { width: 100% !important; }
+  .control-group + .control-group {
+    border-left: none; padding-left: 4px; margin-left: 0;
+  }
+  .sidebar { width: 100%; }
 }
 </style>
 </head>
 <body>
 <div class="app">
-  <h1>coolrl 9x9 Omok</h1>
+  <header class="header">
+    <h1><span class="accent">coolrl</span> &middot; 9&times;9 Omok</h1>
+    <span class="subtitle">AlphaZero-style MCTS in your browser</span>
+  </header>
   <div class="controls">
-    <label class="file-label">
-      Load .onnx
-      <input type="file" id="file-input" accept=".onnx">
-    </label>
-    <label>Color
-      <select id="color-select">
-        <option value="-1" selected>White</option>
-        <option value="1">Black</option>
-      </select>
-    </label>
-    <div class="sim-group">
-      <label>Sims</label>
-      <input type="range" id="sims" min="4" max="512" value="64" step="4">
-      <span id="sims-val">64</span>
+    <div class="control-group">
+      <label class="file-label" title="Load ONNX model">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>
+        Load .onnx
+        <input type="file" id="file-input" accept=".onnx">
+      </label>
     </div>
-    <button id="btn-reset">Reset</button>
-    <button id="btn-undo">Undo</button>
-    <button id="btn-swap">Swap</button>
-    <button id="btn-ai">AI Move</button>
+    <div class="control-group">
+      <label class="field">Play as
+        <select id="color-select">
+          <option value="-1" selected>White</option>
+          <option value="1">Black</option>
+        </select>
+      </label>
+      <div class="sim-group">
+        <label class="field">Sims</label>
+        <input type="range" id="sims" min="4" max="512" value="64" step="4">
+        <span class="sims-val" id="sims-val">64</span>
+      </div>
+    </div>
+    <div class="control-group">
+      <button id="btn-reset" class="btn btn-secondary">Reset</button>
+      <button id="btn-undo" class="btn btn-secondary">Undo</button>
+      <button id="btn-swap" class="btn btn-secondary">Swap</button>
+      <button id="btn-ai" class="btn btn-primary">AI Move</button>
+    </div>
   </div>
   <div class="game-area">
     <canvas id="board" width="540" height="540"></canvas>
-    <div class="sidebar">
-      <div><span class="label">Model:</span> <span id="model-name">none</span></div>
-      <div><span class="label">Status:</span> <span id="status">Upload an .onnx model to play</span></div>
-      <div><span class="label">Turn:</span> <span class="val" id="turn">Black</span></div>
-      <div><span class="label">Moves:</span> <span class="val" id="moves">0</span></div>
-      <div><span class="label">Human:</span> <span class="val" id="human-side">White</span></div>
-      <div><span class="label">AI value:</span> <span class="val" id="ai-value">-</span></div>
-      <div><span class="label">AI time:</span> <span class="val" id="ai-time">-</span></div>
-      <div><span class="label">Progress:</span> <span class="val" id="ai-progress">-</span></div>
-      <hr style="border-color:var(--border);margin:8px 0">
-      <div style="color:var(--muted);font-size:0.8em;line-height:1.6">
-        Click to place a stone.<br>
-        Upload an ONNX model for AI play.<br>
-        Without a model, both sides are manual.
+    <aside class="sidebar">
+      <div class="section">
+        <div class="row">
+          <span class="label">Status</span>
+          <span class="status-badge" id="status">Upload an .onnx model to play</span>
+        </div>
+        <div class="row">
+          <span class="label">Model</span>
+          <span class="val accent" id="model-name" title="none">none</span>
+        </div>
       </div>
-    </div>
+      <div class="section">
+        <div class="row">
+          <span class="label">Turn</span>
+          <span class="turn-pill" id="turn-pill"><span class="dot"></span><span id="turn">Black</span></span>
+        </div>
+        <div class="row">
+          <span class="label">Human</span>
+          <span class="val" id="human-side">White</span>
+        </div>
+        <div class="row">
+          <span class="label">Moves</span>
+          <span class="val mono" id="moves">0</span>
+        </div>
+      </div>
+      <div class="section">
+        <div class="row">
+          <span class="label">AI value</span>
+          <span class="val mono" id="ai-value">&mdash;</span>
+        </div>
+        <div class="row">
+          <span class="label">AI time</span>
+          <span class="val mono" id="ai-time">&mdash;</span>
+        </div>
+        <div class="row">
+          <span class="label">Progress</span>
+          <span class="val mono" id="ai-progress">&mdash;</span>
+        </div>
+      </div>
+      <div class="section">
+        <div class="hint">
+          Click any intersection to place a stone. Load an ONNX model to play against the AI; without a model, both sides are manual.
+        </div>
+      </div>
+    </aside>
   </div>
 </div>
 
@@ -399,12 +620,14 @@ const els = {
   modelName: document.getElementById("model-name"),
   status: document.getElementById("status"),
   turn: document.getElementById("turn"),
+  turnPill: document.getElementById("turn-pill"),
   moves: document.getElementById("moves"),
   humanSide: document.getElementById("human-side"),
   aiValue: document.getElementById("ai-value"),
   aiTime: document.getElementById("ai-time"),
   aiProgress: document.getElementById("ai-progress"),
 };
+const EM_DASH = "\u2014";
 
 const app = {
   game: new GameState(BOARD_SIZE),
@@ -426,16 +649,19 @@ function setBusy(b) {
 
 function setStatus(msg, cls = "") {
   els.status.textContent = msg;
-  els.status.className = "val " + cls;
+  els.status.className = "status-badge" + (cls ? " " + cls : "");
+  els.status.title = msg;
 }
 
 function updateInfo() {
-  els.turn.textContent = app.game.toPlay === 1 ? "Black" : "White";
+  const black = app.game.toPlay === 1;
+  els.turn.textContent = black ? "Black" : "White";
+  els.turnPill.classList.toggle("white", !black);
   els.moves.textContent = app.game.moveCount;
   els.humanSide.textContent = app.humanPlayer === 1 ? "Black" : "White";
   if (app.game.terminal) {
-    if (app.game.winner === 0) setStatus("Draw");
-    else setStatus((app.game.winner === 1 ? "Black" : "White") + " wins!");
+    if (app.game.winner === 0) setStatus("Draw", "ok");
+    else setStatus((app.game.winner === 1 ? "Black" : "White") + " wins!", "ok");
   }
 }
 
@@ -450,7 +676,8 @@ els.fileInput.addEventListener("change", async (e) => {
     app.evaluator = await OnnxEvaluator.fromArrayBuffer(buf, BOARD_SIZE);
     app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
     els.modelName.textContent = file.name;
-    setStatus("Model loaded. Your turn.");
+    els.modelName.title = file.name;
+    setStatus("Model loaded. Your turn.", "ok");
     app.aiSubtree = null;
     setBusy(false);
     maybeAiMove();
@@ -481,10 +708,10 @@ function resetGame() {
   app.game = new GameState(BOARD_SIZE);
   app.history = [];
   app.aiSubtree = null;
-  els.aiValue.textContent = "-";
-  els.aiTime.textContent = "-";
-  els.aiProgress.textContent = "-";
-  setStatus(app.evaluator ? "Your turn." : "Upload an .onnx model to play");
+  els.aiValue.textContent = EM_DASH;
+  els.aiTime.textContent = EM_DASH;
+  els.aiProgress.textContent = EM_DASH;
+  setStatus(app.evaluator ? "Your turn" : "Upload an .onnx model to play", app.evaluator ? "ok" : "");
   updateInfo();
   redraw();
   maybeAiMove();
@@ -500,7 +727,7 @@ function undo() {
   for (const a of app.history) app.game.applyAction(a);
   updateInfo();
   redraw();
-  if (!app.game.terminal) setStatus("Your turn.");
+  if (!app.game.terminal) setStatus("Your turn", "ok");
 }
 
 // ---- Board click ----
@@ -563,7 +790,7 @@ async function aiMove() {
     app.aiSubtree = result.nextRoot;
     updateInfo();
     redraw();
-    if (!app.game.terminal) setStatus("Your turn.");
+    if (!app.game.terminal) setStatus("Your turn", "ok");
   } catch (err) {
     setStatus("AI error: " + err.message, "error");
     console.error(err);
