@@ -18,7 +18,7 @@ use_amp: true
 
 rules:
   board_size: 9
-  exactly_five: false
+  exactly_five: true
 
 network:
   channels: 64
