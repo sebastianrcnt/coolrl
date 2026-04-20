@@ -18,7 +18,7 @@ def make_progress() -> Progress:
         TimeElapsedColumn(),
         TimeRemainingColumn(),
         console=RICH_CONSOLE,
-        transient=True,
+        transient=False,
     )
 
 
