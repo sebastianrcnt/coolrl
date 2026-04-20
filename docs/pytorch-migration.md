@@ -102,34 +102,53 @@ Work:
 
 Validation:
 
-```bash
-uv run --extra omok python -m py_compile \
-  src/coolrl/omok/torch_network.py \
-  src/coolrl/omok/torch_evaluator.py \
-  src/coolrl/omok/export_onnx.py
-```
-
-Run parity checks:
+Run parity checks (the parity script does not exist yet; create it rather than
+relying on ad hoc one-liners):
 
 ```bash
 uv run --extra omok python scripts/check_omok_torch_parity.py \
   --config configs/omok_full_cuda.yaml \
   --device CUDA \
-  --batches 7,64,93,2048
+  --batches 7,64,93
 ```
 
-The parity script does not exist yet; create it rather than relying on ad hoc
-one-liners.
+Larger batch sizes (e.g. 2048) should only be added after a padding strategy is
+decided and memory headroom is confirmed on the target GPU; don't list them as
+required until then.
+
+The parity script must cover, at minimum:
+
+- forward parity in `eval()` mode across the batches above (existing scope)
+- BatchNorm `running_mean` / `running_var` shape and dtype match after loading a
+  tinygrad checkpoint into the torch model
+- forward parity in `train()` mode on one fixed batch (BN uses batch stats, so
+  train-mode drift is the real migration risk, not eval-mode drift)
 
 Acceptance criteria:
 
-- PyTorch evaluator parity remains within the current tolerance.
+- PyTorch evaluator eval-mode parity within current tolerance across listed batches.
+- Train-mode parity within a documented tolerance on one fixed batch.
+- BN running stats load without shape/dtype coercion warnings.
 - ONNX export still works.
 - No behavior change in training.
 
 ## Phase 2: Add PyTorch Training Backend Side-by-Side
 
 Goal: make torch training possible without deleting tinygrad training.
+
+Decisions required before starting Phase 2 (see Open Questions):
+
+- checkpoint format (`.pt` vs `.safetensors` vs both) — affects save/load code
+  shape, not just file extension.
+- `training.backend` config location — top-level vs nested — must be fixed
+  before the config is read in code.
+- Metal/CPU profile policy — default assumption for this plan is "Metal stays
+  on tinygrad until separately benchmarked"; flip only if decided otherwise.
+
+Phase 2 must ship the minimum checkpoint save/load needed for its own smoke and
+quick runs. Full checkpoint compatibility (tinygrad→torch weight import, torch
+optimizer resume, format metadata) is Phase 3; Phase 2 only needs enough to run
+and resume a torch iteration end-to-end.
 
 Work:
 
@@ -173,9 +192,25 @@ Important semantic details:
 - Use `model.train()` during optimizer updates.
 - Use `model.eval()` for evaluator and arena.
 - Preserve BatchNorm running statistics in checkpoints.
-- Preserve `recency_temperature` sampling behavior exactly.
+- Preserve `recency_temperature` sampling behavior exactly (this path is pure
+  numpy/python today; keep it that way rather than routing through a backend).
 - Keep `value_discount`, symmetry augmentation, policy target shape, and value
   target shape unchanged.
+- Match tinygrad `AdamW` hyperparameters exactly: learning rate, betas, eps,
+  weight decay, and any gradient clipping currently applied. Don't rely on
+  PyTorch defaults — read the tinygrad call site and port the values.
+
+Explicitly out of scope for Phase 2 (deferred to Phase 2.5 / Phase 5):
+
+- `torch.compile(model)` — enable only after baseline torch training is stable,
+  because compile errors can masquerade as training divergence.
+- `torch.cuda.amp.autocast` + `GradScaler` (bf16/fp16 mixed precision).
+- `channels_last` memory format for conv tower.
+- `torch.backends.cudnn.benchmark = True`.
+
+These are the real reasons to migrate to torch on CUDA; skipping them in the
+first landing keeps Phase 2 ↔ Phase 4 comparisons honest (torch-fp32 vs
+tinygrad-fp32), then Phase 5 measures each optimization incrementally.
 
 Acceptance criteria:
 
@@ -272,9 +307,15 @@ Compare:
 | `arena_seconds` | already low from torch eval |
 | `train_seconds` | should drop substantially |
 | `train_optimizer_seconds` | should no longer dominate |
+| `train_samples_per_second` | new; report separately from wall time so AMP/compile gains in Phase 5 are visible |
+| `peak_gpu_memory_mb` | new; track to catch regressions when enabling AMP or larger batches later |
 | `duration_seconds` | should approach self-play + train + arena lower bound |
 | `train_loss`, `policy_loss`, `value_loss` | should be numerically plausible |
 | arena win rates | noisy, but no obvious collapse |
+
+Report fp32 torch numbers first. Do not enable AMP, `torch.compile`, or
+`channels_last` during the Phase 4 baseline — compare apples to apples with
+tinygrad fp32, then measure each optimization's delta in Phase 5.
 
 Current known baselines:
 
@@ -297,12 +338,26 @@ After torch eval, training is expected to become the dominant phase. After torch
 training, re-evaluate `leaves_per_batch` and arena settings because the cost
 model changes again.
 
-## Phase 5: Re-Tune Search After Torch Training
+## Phase 5: Re-Tune Search and Enable Torch-Specific Optimizations
 
-Goal: choose quality/speed settings for the torch stack, not for the old
-tinygrad stack.
+Goal: choose quality/speed settings for the torch stack, and enable the torch
+optimizations that were deliberately skipped in Phase 2/4.
 
-Sweep:
+Trigger condition: only run this phase if Phase 4 shows the train/selfplay time
+ratio shifted by more than ~20% from the tinygrad baseline, or if
+`train_seconds` is no longer the dominant phase. If the ratio is roughly
+unchanged, the old tuning still holds and re-tuning is churn.
+
+Torch optimizations to layer in, measuring each independently:
+
+1. `torch.backends.cudnn.benchmark = True` + `channels_last` memory format.
+2. `torch.compile(model)` for training and evaluator (separate compiles; the
+   evaluator hot path has different batch shapes).
+3. `torch.cuda.amp.autocast(dtype=torch.bfloat16)` with `GradScaler` if fp16.
+   Validate arena win rate does not collapse — AMP loss curves can look fine
+   while policy quality silently degrades.
+
+Only after those land, sweep search settings:
 
 ```text
 leaves_per_batch: 8, 16, 32, 64
@@ -355,7 +410,8 @@ Removal work:
 
 | Risk | Mitigation |
 |---|---|
-| BatchNorm behavior differs | run parity in eval mode; track train-mode loss and running stats |
+| BatchNorm behavior differs | run parity in both eval and train mode; verify running stats shape/dtype on load |
+| AdamW hyperparameter drift | read tinygrad call site, port values explicitly; do not rely on torch defaults |
 | optimizer state is not portable | do not promise optimizer portability across backends |
 | checkpoint format confusion | explicit `checkpoint_format` and `training_backend` metadata |
 | duplicated torch model definitions drift | consolidate in `torch_network.py` first |
@@ -363,6 +419,8 @@ Removal work:
 | Metal profile regression | do not flip Metal to torch until tested separately |
 | speedup smaller than expected | rely on full-loop metrics, not microbenchmarks only |
 | learning behavior changes | compare arena gates, losses, and fixed-checkpoint matches |
+| AMP silently hurts policy quality | enable AMP only in Phase 5 with arena gate and fixed-checkpoint match checks |
+| `torch.compile` masks training bugs | land baseline torch training without compile; add compile after curves look sane |
 
 ## Recommended Next Commit Sequence
 
@@ -399,12 +457,18 @@ Removal work:
 
 ## Open Questions
 
+Must decide before Phase 2 starts (blocks config and IO code shape):
+
 - Should torch checkpoints use `.pt`, `.safetensors`, or both?
+- Should `training.backend` live at top level or under `optimization`?
+- Metal profile policy: move to torch MPS, torch CPU workers, or stay on
+  tinygrad? The plan's default assumption is "stay on tinygrad until separately
+  benchmarked"; confirm or override.
+
+Can be deferred until Phase 3 or later:
+
 - Do we care about preserving optimizer state when converting tinygrad runs to
   torch, or is fresh optimizer acceptable?
-- Should `training.backend` live at top level or under `optimization`?
-- Should the Metal profile move to torch MPS, torch CPU workers, or remain
-  tinygrad until separately benchmarked?
 - Should the GUI/ONNX path depend on torch network directly, or remain
   checkpoint-format based?
 - How much saved time should be reinvested in higher MCTS simulations versus
