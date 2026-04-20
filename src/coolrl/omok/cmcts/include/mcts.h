@@ -14,6 +14,13 @@ extern "C" {
 
 typedef struct MctsTree MctsTree;
 
+// Threading contract: each MctsTree must be owned by one thread at a time.
+// Batch APIs mutate per-tree pending evaluation queues and are not safe to call
+// concurrently on the same tree.
+//
+// Rule contract: when exactly_five is enabled, overlines (6+ in a row) are not
+// wins; play continues unless an exact five is made or the board fills.
+
 // ---- lifecycle ----
 
 MctsTree *mcts_tree_new(float c_puct, int exactly_five);
@@ -32,7 +39,8 @@ void mcts_tree_set_initial(MctsTree *tree,
 
 // Apply `action` to the internal state and re-root the tree to the matching child.
 // If the chosen child does not exist (unusual), the tree resets under the new state.
-void mcts_tree_advance(MctsTree *tree, int action);
+// Returns 1 on success and 0 if `action` is illegal for the current state.
+int mcts_tree_advance(MctsTree *tree, int action);
 
 // ---- batch ops ----
 

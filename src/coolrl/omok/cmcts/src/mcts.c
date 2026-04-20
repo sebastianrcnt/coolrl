@@ -11,7 +11,7 @@ static void collect_one_leaf(MctsTree *tree, float *out_features, int *written, 
     int action = -1;
     node = node_select_child(node, tree->c_puct, &action);
     if (!node || action < 0) return;
-    state_apply_action(&state, action);
+    if (!state_apply_action(&state, action)) return;
     path[path_len++] = node;
   }
 
@@ -54,7 +54,7 @@ void mcts_batch_feed_leaves(MctsTree *const *trees,
     MctsTree *tree = trees[i];
     if (!tree) continue;
     for (int j = 0; j < tree->pending_leaf_count; j++) {
-      PendingLeaf *pending = &tree->pending_leaves[j];
+      PendingEval *pending = &tree->pending_leaves[j];
       node_expand(pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
       backup(pending->path, pending->path_len, values[offset]);
       offset += 1;

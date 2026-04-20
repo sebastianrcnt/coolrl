@@ -43,9 +43,9 @@ void state_init(CmctsState *state, const int8_t *board, int to_play, int last_ac
   state->exactly_five = exactly_five;
 }
 
-void state_apply_action(CmctsState *state, int action) {
-  if (state->terminal || action < 0 || action >= CMCTS_ACTION_SIZE) return;
-  if (state->board[action] != 0) return;
+int state_apply_action(CmctsState *state, int action) {
+  if (state->terminal || action < 0 || action >= CMCTS_ACTION_SIZE) return 0;
+  if (state->board[action] != 0) return 0;
   int player = state->to_play;
   int row = action / CMCTS_BOARD_SIZE;
   int col = action % CMCTS_BOARD_SIZE;
@@ -60,6 +60,7 @@ void state_apply_action(CmctsState *state, int action) {
     state->winner = 0;
     state->terminal = 1;
   }
+  return 1;
 }
 
 int state_legal_count(const CmctsState *state) {

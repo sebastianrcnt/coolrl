@@ -96,11 +96,11 @@ void backup(Node **path, int path_len, float value) {
   }
 }
 
-static int ensure_pending_capacity(PendingLeaf **items, int *capacity, int required) {
+static int ensure_pending_capacity(PendingEval **items, int *capacity, int required) {
   if (*capacity >= required) return 1;
   int next = *capacity > 0 ? *capacity : 16;
   while (next < required) next *= 2;
-  PendingLeaf *resized = (PendingLeaf *)realloc(*items, (size_t)next * sizeof(PendingLeaf));
+  PendingEval *resized = (PendingEval *)realloc(*items, (size_t)next * sizeof(PendingEval));
   if (!resized) return 0;
   *items = resized;
   *capacity = next;
@@ -120,7 +120,7 @@ int tree_push_pending_root(MctsTree *tree, const CmctsState *state, Node *node) 
                                tree->pending_root_count + 1)) {
     return 0;
   }
-  PendingLeaf *pending = &tree->pending_roots[tree->pending_root_count++];
+  PendingEval *pending = &tree->pending_roots[tree->pending_root_count++];
   pending->state = *state;
   pending->node = node;
   pending->path[0] = node;
@@ -134,7 +134,7 @@ int tree_push_pending_leaf(MctsTree *tree, const CmctsState *state, Node *node,
                                tree->pending_leaf_count + 1)) {
     return 0;
   }
-  PendingLeaf *pending = &tree->pending_leaves[tree->pending_leaf_count++];
+  PendingEval *pending = &tree->pending_leaves[tree->pending_leaf_count++];
   pending->state = *state;
   pending->node = node;
   memcpy(pending->path, path, (size_t)path_len * sizeof(Node *));

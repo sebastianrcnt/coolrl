@@ -35,21 +35,24 @@ void mcts_tree_set_initial(MctsTree *tree,
   tree_clear_pending_leaves(tree);
 }
 
-void mcts_tree_advance(MctsTree *tree, int action) {
-  if (!tree || tree->state.terminal) return;
+int mcts_tree_advance(MctsTree *tree, int action) {
+  if (!tree || tree->state.terminal || !tree->root) return 0;
+  if (action < 0 || action >= CMCTS_ACTION_SIZE || tree->state.board[action] != 0) return 0;
   Node *next = NULL;
-  if (action >= 0 && action < CMCTS_ACTION_SIZE) {
-    next = tree->root->children[action];
-    tree->root->children[action] = NULL;
-  }
+  next = tree->root->children[action];
+  tree->root->children[action] = NULL;
   node_free(tree->root);
-  state_apply_action(&tree->state, action);
+  if (!state_apply_action(&tree->state, action)) {
+    tree->root = next ? next : node_new(tree->state.to_play, 0.0f);
+    return 0;
+  }
   tree->root = next ? next : node_new(tree->state.to_play, 0.0f);
   tree->root_value = tree->root && tree->root->visit_count > 0
                          ? tree->root->value_sum / (float)tree->root->visit_count
                          : 0.0f;
   tree_clear_pending_roots(tree);
   tree_clear_pending_leaves(tree);
+  return 1;
 }
 
 int mcts_batch_prepare_roots(MctsTree *const *trees,
@@ -62,7 +65,7 @@ int mcts_batch_prepare_roots(MctsTree *const *trees,
   }
   for (int i = 0; i < num_trees && written < max_entries; i++) {
     MctsTree *tree = trees[i];
-    if (!tree || tree->state.terminal || tree->root->expanded) continue;
+    if (!tree || tree->state.terminal || !tree->root || tree->root->expanded) continue;
     if (!tree_push_pending_root(tree, &tree->state, tree->root)) continue;
     state_write_features(&tree->state, out_features + (size_t)written * CMCTS_FEATURE_STRIDE);
     written += 1;
@@ -79,7 +82,7 @@ void mcts_batch_feed_roots(MctsTree *const *trees,
     MctsTree *tree = trees[i];
     if (!tree) continue;
     for (int j = 0; j < tree->pending_root_count; j++) {
-      PendingLeaf *pending = &tree->pending_roots[j];
+      PendingEval *pending = &tree->pending_roots[j];
       node_expand(pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
       tree->root_value = values[offset];
       offset += 1;
@@ -110,7 +113,7 @@ void mcts_batch_apply_root_noise(MctsTree *const *trees,
 void mcts_batch_root_num_legal(MctsTree *const *trees, int num_trees, int32_t *out_counts) {
   for (int i = 0; i < num_trees; i++) {
     MctsTree *tree = trees[i];
-    out_counts[i] = (!tree || tree->state.terminal) ? 0 : node_child_count(tree->root);
+    out_counts[i] = (!tree || tree->state.terminal || !tree->root) ? 0 : node_child_count(tree->root);
   }
 }
 

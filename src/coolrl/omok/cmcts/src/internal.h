@@ -29,7 +29,7 @@ typedef struct {
   Node *node;
   Node *path[CMCTS_ACTION_SIZE + 1];
   int path_len;
-} PendingLeaf;
+} PendingEval;
 
 struct MctsTree {
   float c_puct;
@@ -37,17 +37,17 @@ struct MctsTree {
   CmctsState state;
   Node *root;
   float root_value;
-  PendingLeaf *pending_roots;
+  PendingEval *pending_roots;
   int pending_root_count;
   int pending_root_capacity;
-  PendingLeaf *pending_leaves;
+  PendingEval *pending_leaves;
   int pending_leaf_count;
   int pending_leaf_capacity;
 };
 
 void state_init(CmctsState *state, const int8_t *board, int to_play, int last_action,
                 int move_count, int winner, int terminal, int exactly_five);
-void state_apply_action(CmctsState *state, int action);
+int state_apply_action(CmctsState *state, int action);
 int state_legal_count(const CmctsState *state);
 void state_write_features(const CmctsState *state, float *out);
 float state_outcome_for_player(const CmctsState *state, int player);

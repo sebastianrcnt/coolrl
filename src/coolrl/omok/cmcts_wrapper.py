@@ -52,7 +52,7 @@ _LIB.mcts_tree_set_initial.argtypes = [
 ]
 _LIB.mcts_tree_set_initial.restype = None
 _LIB.mcts_tree_advance.argtypes = [_TREE_P, ctypes.c_int]
-_LIB.mcts_tree_advance.restype = None
+_LIB.mcts_tree_advance.restype = ctypes.c_int
 _LIB.mcts_batch_prepare_roots.argtypes = [_TREE_ARRAY, ctypes.c_int, _FLOAT_ARRAY, ctypes.c_int]
 _LIB.mcts_batch_prepare_roots.restype = ctypes.c_int
 _LIB.mcts_batch_feed_roots.argtypes = [_TREE_ARRAY, ctypes.c_int, _FLOAT_ARRAY, _FLOAT_ARRAY]
@@ -127,7 +127,8 @@ class TreeNode:
         )
 
     def advance(self, action: int) -> None:
-        _LIB.mcts_tree_advance(self.ptr, int(action))
+        if not _LIB.mcts_tree_advance(self.ptr, int(action)):
+            raise ValueError(f"illegal C MCTS action: {action}")
 
     def close(self) -> None:
         if self._owns_ptr and self.ptr:
