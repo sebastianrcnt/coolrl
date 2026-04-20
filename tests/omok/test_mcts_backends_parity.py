@@ -200,9 +200,14 @@ class DeterministicEvaluator:
         self.value = float(value)
 
     def evaluate(self, states: list[GameState]) -> tuple[np.ndarray, np.ndarray]:
-        priors = np.zeros((len(states), 81), dtype=np.float32)
+        if not states:
+            raise ValueError("states must not be empty")
+        action_size = states[0].action_size
+        priors = np.zeros((len(states), action_size), dtype=np.float32)
         values = np.full((len(states),), self.value, dtype=np.float32)
         for idx, state in enumerate(states):
+            if state.action_size != action_size:
+                raise ValueError("mixed action sizes are not supported")
             legal = state.legal_moves()
             priors[idx, legal] = 1.0e-3
             if 0 <= self.preferred_action < legal.size and legal[self.preferred_action]:
@@ -211,13 +216,14 @@ class DeterministicEvaluator:
         return priors, values
 
     def evaluate_features(self, features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        if features.ndim != 4 or features.shape[1:] != (4, 9, 9):
+        if features.ndim != 4 or features.shape[1] != 4 or features.shape[2] != features.shape[3]:
             raise ValueError(f"unexpected feature shape: {features.shape}")
 
+        action_size = features.shape[2] * features.shape[3]
         occupied = (features[:, 0] + features[:, 1]) > 0.5
         legal = (~occupied).reshape(features.shape[0], -1)
 
-        priors = np.zeros((features.shape[0], 81), dtype=np.float32)
+        priors = np.zeros((features.shape[0], action_size), dtype=np.float32)
         priors[legal] = 1.0e-3
         for idx in range(features.shape[0]):
             if 0 <= self.preferred_action < legal.shape[1] and legal[idx, self.preferred_action]:

@@ -13,6 +13,16 @@ from .mcts_types import SearchResult
 
 ACTION_SIZE = 81
 FEATURE_STRIDE = 4 * ACTION_SIZE
+SUPPORTED_BOARD_SIZE = 9
+
+
+def _require_supported_states(states: list[GameState]) -> None:
+    for state in states:
+        if state.board_size != SUPPORTED_BOARD_SIZE:
+            raise ValueError(
+                "C MCTS backend currently supports only 9x9 positions; "
+                f"got {state.board_size}x{state.board_size}"
+            )
 
 
 def _load_library() -> ctypes.CDLL:
@@ -174,6 +184,7 @@ class MCTS:
         roots: list[TreeNode | None] | None = None,
         leaves_per_batch: int = 1,
     ) -> list[SearchResult]:
+        _require_supported_states(states)
         if roots is None:
             roots = [None] * len(states)
         if len(roots) != len(states):

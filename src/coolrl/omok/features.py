@@ -9,6 +9,9 @@ def states_to_feature_planes(states: list[GameState]) -> np.ndarray:
     if not states:
         raise ValueError("states must not be empty")
     board_size = states[0].board_size
+    for state in states:
+        if state.board_size != board_size:
+            raise ValueError("all states in a feature batch must use the same board_size")
     boards = np.stack([state.board for state in states], axis=0).astype(np.int8, copy=False)
     to_play = np.fromiter((state.to_play for state in states), dtype=np.int8, count=len(states))
     last_actions = np.fromiter(
@@ -29,6 +32,10 @@ def encode_feature_planes_batch(
         raise ValueError("boards must have shape [batch, board_size, board_size]")
     if board_size is None:
         board_size = int(boards.shape[-1])
+    if boards.shape[-2:] != (board_size, board_size):
+        raise ValueError(
+            f"boards must have square shape [batch, {board_size}, {board_size}], got {boards.shape}"
+        )
 
     own = (boards == to_play[:, None, None]).astype(np.float32, copy=False)
     opp = (boards == -to_play[:, None, None]).astype(np.float32, copy=False)
@@ -80,4 +87,3 @@ def apply_symmetry_batch(planes: np.ndarray, policy: np.ndarray) -> tuple[np.nda
         transformed_policy[mask] = np.ascontiguousarray(policy_slice)
 
     return transformed_planes, transformed_policy.reshape(batch_size, -1)
-

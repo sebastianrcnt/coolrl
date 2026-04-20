@@ -189,7 +189,9 @@ class Trainer:
 
     def run(self) -> None:
         logger.info(
-            "Starting 9x9 Omok RL: experiment={} device={} checkpoint_dir={}",
+            "Starting {}x{} Omok RL: experiment={} device={} checkpoint_dir={}",
+            self.config.rules.board_size,
+            self.config.rules.board_size,
             self.config.experiment_name,
             self.device,
             self.checkpoint_dir,
@@ -253,6 +255,7 @@ class Trainer:
                 "iteration": self.iteration,
                 "elapsed_hours": round(self.elapsed_hours, 4),
                 "status": status,
+                "board_size": self.config.rules.board_size,
                 "simulations": simulations,
                 "evaluator_backend": self.config.selfplay.evaluator_backend,
                 "best_iteration": self.best_iteration,
@@ -1091,7 +1094,7 @@ class Trainer:
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train a 9x9 Omok policy/value agent with PyTorch.")
+    parser = argparse.ArgumentParser(description="Train an Omok policy/value agent with PyTorch.")
     parser.add_argument("--config", type=str, default="configs/omok_quick.yaml")
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--max-hours", type=float, default=None)

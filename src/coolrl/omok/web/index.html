@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>coolrl 9x9 Omok</title>
+<title>coolrl Omok</title>
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 <style>
 :root {
@@ -254,7 +254,7 @@ canvas#board {
 <body>
 <div class="app">
   <header class="header">
-    <h1><span class="accent">coolrl</span> &middot; 9&times;9 Omok</h1>
+    <h1><span class="accent">coolrl</span> &middot; <span id="header-board-size">9&times;9</span> Omok</h1>
     <span class="subtitle">AlphaZero-style MCTS in your browser</span>
   </header>
   <div class="controls">
@@ -266,6 +266,13 @@ canvas#board {
       </label>
     </div>
     <div class="control-group">
+      <label class="field">Board
+        <select id="board-size-select">
+          <option value="9" selected>9&times;9</option>
+          <option value="13">13&times;13</option>
+          <option value="15">15&times;15</option>
+        </select>
+      </label>
       <label class="field">Play as
         <select id="color-select">
           <option value="-1" selected>White</option>
@@ -459,7 +466,9 @@ class OnnxEvaluator {
       executionProviders: ["wasm"],
       graphOptimizationLevel: "all",
     });
-    return new OnnxEvaluator(session, boardSize);
+    const evaluator = new OnnxEvaluator(session, boardSize);
+    await evaluator.evaluate([new GameState(boardSize)]);
+    return evaluator;
   }
 
   async evaluate(states) {
@@ -469,6 +478,9 @@ class OnnxEvaluator {
     const out = await this.session.run({ input: tensor });
     const logits = out.policy_logits.data;
     const values = out.value.data;
+    if (logits.length !== batch * this.actionSize) {
+      throw new Error(`model policy size ${logits.length / batch} does not match board action size ${this.actionSize}`);
+    }
     const policy = new Float32Array(logits.length);
     policy.set(logits);
     for (let b = 0; b < batch; b++) this._softmax(policy, b * this.actionSize, this.actionSize);
@@ -603,13 +615,32 @@ class MCTS {
 // =========================================================================
 // App
 // =========================================================================
-const BOARD_SIZE = 9;
+const DEFAULT_BOARD_SIZE = 9;
 const COLS = "ABCDEFGHJKLMNOP";
-const STAR_POINTS = [[2,2],[2,6],[6,2],[6,6],[4,4]];
+
+function coordinateLabel(index) {
+  if (index < COLS.length) return COLS[index];
+  return String(index + 1);
+}
+
+function starPoints(boardSize) {
+  if (boardSize < 9) return [[Math.floor(boardSize / 2), Math.floor(boardSize / 2)]];
+  const edge = boardSize >= 13 ? 3 : 2;
+  const center = Math.floor(boardSize / 2);
+  return [
+    [edge, edge],
+    [edge, boardSize - 1 - edge],
+    [center, center],
+    [boardSize - 1 - edge, edge],
+    [boardSize - 1 - edge, boardSize - 1 - edge],
+  ];
+}
 
 const els = {
   canvas: document.getElementById("board"),
+  headerBoardSize: document.getElementById("header-board-size"),
   fileInput: document.getElementById("file-input"),
+  boardSizeSelect: document.getElementById("board-size-select"),
   colorSelect: document.getElementById("color-select"),
   sims: document.getElementById("sims"),
   simsVal: document.getElementById("sims-val"),
@@ -630,7 +661,8 @@ const els = {
 const EM_DASH = "\u2014";
 
 const app = {
-  game: new GameState(BOARD_SIZE),
+  boardSize: DEFAULT_BOARD_SIZE,
+  game: new GameState(DEFAULT_BOARD_SIZE),
   history: [],
   evaluator: null,
   mcts: null,
@@ -671,9 +703,11 @@ els.fileInput.addEventListener("change", async (e) => {
   if (!file) return;
   setBusy(true);
   setStatus("Loading model...", "thinking");
+  app.evaluator = null;
+  app.mcts = null;
   try {
     const buf = await file.arrayBuffer();
-    app.evaluator = await OnnxEvaluator.fromArrayBuffer(buf, BOARD_SIZE);
+    app.evaluator = await OnnxEvaluator.fromArrayBuffer(buf, app.boardSize);
     app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
     els.modelName.textContent = file.name;
     els.modelName.title = file.name;
@@ -691,6 +725,9 @@ els.fileInput.addEventListener("change", async (e) => {
 
 // ---- Controls ----
 els.sims.addEventListener("input", () => { els.simsVal.textContent = els.sims.value; });
+els.boardSizeSelect.addEventListener("change", () => {
+  setBoardSize(parseInt(els.boardSizeSelect.value));
+});
 els.colorSelect.addEventListener("change", () => {
   app.humanPlayer = parseInt(els.colorSelect.value);
   resetGame();
@@ -704,8 +741,20 @@ els.btnSwap.addEventListener("click", () => {
 });
 els.btnAi.addEventListener("click", () => { if (app.evaluator && !app.busy) forceAiMove(); });
 
+function setBoardSize(boardSize) {
+  if (app.busy || boardSize === app.boardSize) return;
+  app.boardSize = boardSize;
+  app.evaluator = null;
+  app.mcts = null;
+  els.btnAi.disabled = true;
+  els.modelName.textContent = "none";
+  els.modelName.title = "none";
+  els.headerBoardSize.textContent = `${boardSize}\u00d7${boardSize}`;
+  resetGame();
+}
+
 function resetGame() {
-  app.game = new GameState(BOARD_SIZE);
+  app.game = new GameState(app.boardSize);
   app.history = [];
   app.aiSubtree = null;
   els.aiValue.textContent = EM_DASH;
@@ -722,7 +771,7 @@ function undo() {
   // Undo two moves (human + AI) when possible
   const count = app.history.length >= 2 ? 2 : 1;
   app.history.splice(-count, count);
-  app.game = new GameState(BOARD_SIZE);
+  app.game = new GameState(app.boardSize);
   app.aiSubtree = null;
   for (const a of app.history) app.game.applyAction(a);
   updateInfo();
@@ -739,7 +788,7 @@ els.canvas.addEventListener("click", (e) => {
   const y = (e.clientY - rect.top) * (els.canvas.height / rect.height);
   const cell = pixelToCell(x, y);
   if (!cell) return;
-  const action = cell.row * BOARD_SIZE + cell.col;
+  const action = cell.row * app.boardSize + cell.col;
   if (app.game.board[action] !== 0) return;
   playMove(action);
 });
@@ -802,7 +851,7 @@ async function aiMove() {
 function cellMetrics() {
   const W = els.canvas.width;
   const margin = W * 0.07;
-  const step = (W - 2 * margin) / (BOARD_SIZE - 1);
+  const step = (W - 2 * margin) / (app.boardSize - 1);
   return { W, margin, step };
 }
 
@@ -810,7 +859,7 @@ function pixelToCell(x, y) {
   const { margin, step } = cellMetrics();
   const col = Math.round((x - margin) / step);
   const row = Math.round((y - margin) / step);
-  if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return null;
+  if (row < 0 || row >= app.boardSize || col < 0 || col >= app.boardSize) return null;
   const dx = Math.abs(x - (margin + col * step));
   const dy = Math.abs(y - (margin + row * step));
   if (dx > step * 0.45 || dy > step * 0.45) return null;
@@ -829,7 +878,7 @@ function redraw() {
   // Grid
   ctx.strokeStyle = "#2a2118";
   ctx.lineWidth = 1;
-  for (let i = 0; i < BOARD_SIZE; i++) {
+  for (let i = 0; i < app.boardSize; i++) {
     const p = margin + i * step;
     ctx.beginPath(); ctx.moveTo(margin, p); ctx.lineTo(W - margin, p); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(p, margin); ctx.lineTo(p, W - margin); ctx.stroke();
@@ -837,7 +886,7 @@ function redraw() {
 
   // Star points
   ctx.fillStyle = "#2a2118";
-  for (const [r, c] of STAR_POINTS) {
+  for (const [r, c] of starPoints(app.boardSize)) {
     ctx.beginPath();
     ctx.arc(margin + c * step, margin + r * step, Math.max(2.5, step * 0.07), 0, Math.PI * 2);
     ctx.fill();
@@ -848,9 +897,9 @@ function redraw() {
   ctx.font = `${Math.max(10, step * 0.26)}px ui-monospace, monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  for (let i = 0; i < BOARD_SIZE; i++) {
-    ctx.fillText(COLS[i], margin + i * step, margin * 0.4);
-    ctx.fillText(String(BOARD_SIZE - i), margin * 0.4, margin + i * step);
+  for (let i = 0; i < app.boardSize; i++) {
+    ctx.fillText(coordinateLabel(i), margin + i * step, margin * 0.4);
+    ctx.fillText(String(app.boardSize - i), margin * 0.4, margin + i * step);
   }
 
   // Stones
@@ -858,8 +907,8 @@ function redraw() {
   for (let i = 0; i < app.game.actionSize; i++) {
     const v = app.game.board[i];
     if (v === 0) continue;
-    const r = Math.floor(i / BOARD_SIZE);
-    const c = i % BOARD_SIZE;
+    const r = Math.floor(i / app.boardSize);
+    const c = i % app.boardSize;
     const cx = margin + c * step;
     const cy = margin + r * step;
     const grad = ctx.createRadialGradient(cx - stoneR * 0.3, cy - stoneR * 0.3, stoneR * 0.1, cx, cy, stoneR);
@@ -879,8 +928,8 @@ function redraw() {
 
   // Last move marker
   if (app.game.lastAction !== null) {
-    const r = Math.floor(app.game.lastAction / BOARD_SIZE);
-    const c = app.game.lastAction % BOARD_SIZE;
+    const r = Math.floor(app.game.lastAction / app.boardSize);
+    const c = app.game.lastAction % app.boardSize;
     const cx = margin + c * step;
     const cy = margin + r * step;
     ctx.strokeStyle = "#e74c3c";
