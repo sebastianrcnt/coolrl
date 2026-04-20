@@ -59,7 +59,7 @@ selfplay:
 
   # C MCTS can collect leaves faster than the Python tree walk, so use larger
   # inference batches to keep CUDA busier during self-play.
-  leaves_per_batch: 64
+  leaves_per_batch: 8
 
   simulation_ramp_iterations: 96
   candidate_mix_fraction: 0.5
