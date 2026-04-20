@@ -4,7 +4,9 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::os::raw::c_int;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::ptr;
 use std::slice;
+use std::thread;
 
 pub const BOARD_SIZE: usize = 9;
 pub const ACTION_SIZE: usize = BOARD_SIZE * BOARD_SIZE;
@@ -530,6 +532,653 @@ pub unsafe extern "C" fn omok_rmcts_search(
         0
     }));
     result.unwrap_or(-3)
+}
+
+#[derive(Clone)]
+struct PendingEval {
+    state: GameState,
+    node: *mut TreeNode,
+    path: Vec<*mut TreeNode>,
+}
+
+pub struct MctsTree {
+    c_puct: f32,
+    virtual_loss: f32,
+    exactly_five: bool,
+    state: GameState,
+    root: Box<TreeNode>,
+    root_value: f32,
+    pending_roots: Vec<PendingEval>,
+    pending_leaves: Vec<PendingEval>,
+}
+
+impl MctsTree {
+    fn new(c_puct: f32, virtual_loss: f32, exactly_five: bool) -> Self {
+        Self {
+            c_puct,
+            virtual_loss,
+            exactly_five,
+            state: GameState::with_exactly_five(exactly_five),
+            root: Box::new(TreeNode::new(1, 0.0)),
+            root_value: 0.0,
+            pending_roots: Vec::new(),
+            pending_leaves: Vec::new(),
+        }
+    }
+
+    fn root_ptr(&mut self) -> *mut TreeNode {
+        self.root.as_mut() as *mut TreeNode
+    }
+
+    fn set_initial(
+        &mut self,
+        board: [i8; ACTION_SIZE],
+        to_play: i8,
+        last_action: c_int,
+        move_count: usize,
+        winner: i8,
+        terminal: bool,
+    ) {
+        self.state = GameState {
+            board,
+            to_play,
+            terminal,
+            winner,
+            last_action: if last_action < 0 {
+                None
+            } else {
+                Some(last_action as usize)
+            },
+            move_count,
+            exactly_five: self.exactly_five,
+        };
+        self.root = Box::new(TreeNode::new(to_play, 0.0));
+        self.root_value = 0.0;
+        self.pending_roots.clear();
+        self.pending_leaves.clear();
+    }
+
+    fn advance(&mut self, action: usize) -> bool {
+        if self.state.terminal || action >= ACTION_SIZE || self.state.board[action] != 0 {
+            return false;
+        }
+        let next = self.root.children[action].take();
+        if !self.state.apply_action(action) {
+            return false;
+        }
+        self.root = next.unwrap_or_else(|| Box::new(TreeNode::new(self.state.to_play, 0.0)));
+        self.root_value = if self.root.visit_count > 0 {
+            self.root.value()
+        } else {
+            0.0
+        };
+        self.pending_roots.clear();
+        self.pending_leaves.clear();
+        true
+    }
+
+    fn write_root_features_if_needed(&mut self, out: &mut [f32]) -> bool {
+        self.pending_roots.clear();
+        if self.state.terminal || self.root.expanded || out.len() < FEATURE_STRIDE {
+            return false;
+        }
+        let node = self.root_ptr();
+        let mut features = [0.0_f32; FEATURE_STRIDE];
+        self.state.write_features(&mut features);
+        out[..FEATURE_STRIDE].copy_from_slice(&features);
+        self.pending_roots.push(PendingEval {
+            state: self.state.clone(),
+            node,
+            path: vec![node],
+        });
+        true
+    }
+
+    fn feed_pending_roots(&mut self, priors: &[f32], value: f32) {
+        let pending = std::mem::take(&mut self.pending_roots);
+        for item in pending {
+            let mut prior_array = [0.0_f32; ACTION_SIZE];
+            prior_array.copy_from_slice(&priors[..ACTION_SIZE]);
+            let node = unsafe { &mut *item.node };
+            Mcts::<CallbackEvaluator>::expand(node, &item.state, &prior_array);
+            self.root_value = value;
+        }
+    }
+
+    fn collect_one_leaf(&mut self, out: &mut [f32]) -> bool {
+        if self.state.terminal || out.len() < FEATURE_STRIDE {
+            return false;
+        }
+
+        let mut state = self.state.clone();
+        let mut node_ptr = self.root_ptr();
+        let mut path = vec![node_ptr];
+
+        loop {
+            let node = unsafe { &mut *node_ptr };
+            if !(node.expanded && node.has_children() && !state.terminal) {
+                break;
+            }
+            let Some(action) = Mcts::<CallbackEvaluator>::select_child_action(node, self.c_puct)
+            else {
+                break;
+            };
+            if !state.apply_action(action) {
+                return false;
+            }
+            let child = node.children[action]
+                .as_mut()
+                .expect("selected child must exist");
+            node_ptr = child.as_mut() as *mut TreeNode;
+            path.push(node_ptr);
+        }
+
+        if state.terminal {
+            Mcts::<CallbackEvaluator>::backup(&path, state.outcome_for_player(state.to_play));
+            return false;
+        }
+
+        apply_virtual_loss(&path, self.virtual_loss);
+        let mut features = [0.0_f32; FEATURE_STRIDE];
+        state.write_features(&mut features);
+        out[..FEATURE_STRIDE].copy_from_slice(&features);
+        self.pending_leaves.push(PendingEval {
+            state,
+            node: node_ptr,
+            path,
+        });
+        true
+    }
+
+    fn feed_pending_leaves(&mut self, priors: &[f32], values: &[f32], offset: &mut usize) {
+        let pending = std::mem::take(&mut self.pending_leaves);
+        for item in pending {
+            revert_virtual_loss(&item.path, self.virtual_loss);
+            let start = *offset * ACTION_SIZE;
+            let stop = start + ACTION_SIZE;
+            let mut prior_array = [0.0_f32; ACTION_SIZE];
+            prior_array.copy_from_slice(&priors[start..stop]);
+            let node = unsafe { &mut *item.node };
+            Mcts::<CallbackEvaluator>::expand(node, &item.state, &prior_array);
+            Mcts::<CallbackEvaluator>::backup(&item.path, values[*offset]);
+            *offset += 1;
+        }
+    }
+}
+
+fn apply_virtual_loss(path: &[*mut TreeNode], virtual_loss: f32) {
+    for node_ptr in path {
+        let node = unsafe { &mut **node_ptr };
+        node.visit_count += 1;
+        node.value_sum += virtual_loss;
+    }
+}
+
+fn revert_virtual_loss(path: &[*mut TreeNode], virtual_loss: f32) {
+    for node_ptr in path {
+        let node = unsafe { &mut **node_ptr };
+        node.visit_count -= 1;
+        node.value_sum -= virtual_loss;
+    }
+}
+
+unsafe fn tree_from_ptr<'a>(tree: *mut MctsTree) -> Option<&'a mut MctsTree> {
+    tree.as_mut()
+}
+
+unsafe fn tree_slice_from_ptr<'a>(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+) -> Option<&'a [*mut MctsTree]> {
+    if trees.is_null() || num_trees < 0 {
+        return None;
+    }
+    Some(slice::from_raw_parts(trees, num_trees as usize))
+}
+
+#[no_mangle]
+pub extern "C" fn omok_rmcts_tree_new(
+    c_puct: f32,
+    virtual_loss: f32,
+    exactly_five: c_int,
+) -> *mut MctsTree {
+    Box::into_raw(Box::new(MctsTree::new(
+        c_puct,
+        virtual_loss,
+        exactly_five != 0,
+    )))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_tree_free(tree: *mut MctsTree) {
+    if !tree.is_null() {
+        drop(Box::from_raw(tree));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_tree_set_initial(
+    tree: *mut MctsTree,
+    board: *const i8,
+    to_play: i8,
+    last_action: c_int,
+    move_count: usize,
+    winner: i8,
+    terminal: u8,
+) {
+    if tree.is_null() || board.is_null() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let board_slice = slice::from_raw_parts(board, ACTION_SIZE);
+        let mut board_array = [0_i8; ACTION_SIZE];
+        board_array.copy_from_slice(board_slice);
+        if let Some(tree) = tree_from_ptr(tree) {
+            tree.set_initial(
+                board_array,
+                to_play,
+                last_action,
+                move_count,
+                winner,
+                terminal != 0,
+            );
+        }
+    }));
+    let _ = result;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_tree_advance(tree: *mut MctsTree, action: c_int) -> c_int {
+    if action < 0 {
+        return 0;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        tree_from_ptr(tree)
+            .map(|tree| tree.advance(action as usize))
+            .unwrap_or(false)
+    }));
+    result.map(|ok| if ok { 1 } else { 0 }).unwrap_or(0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_prepare_roots(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    out_features: *mut f32,
+    max_entries: c_int,
+) -> c_int {
+    if out_features.is_null() || max_entries <= 0 {
+        return 0;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return 0;
+        };
+        let features =
+            slice::from_raw_parts_mut(out_features, max_entries as usize * FEATURE_STRIDE);
+        let mut written = 0usize;
+        for tree_ptr in trees {
+            if written >= max_entries as usize {
+                break;
+            }
+            if let Some(tree) = tree_from_ptr(*tree_ptr) {
+                let start = written * FEATURE_STRIDE;
+                let stop = start + FEATURE_STRIDE;
+                if tree.write_root_features_if_needed(&mut features[start..stop]) {
+                    written += 1;
+                }
+            }
+        }
+        written as c_int
+    }));
+    result.unwrap_or(0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_feed_roots(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    priors: *const f32,
+    values: *const f32,
+) {
+    if priors.is_null() || values.is_null() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return;
+        };
+        let mut offset = 0usize;
+        for tree_ptr in trees {
+            if let Some(tree) = tree_from_ptr(*tree_ptr) {
+                if !tree.pending_roots.is_empty() {
+                    let priors =
+                        slice::from_raw_parts(priors.add(offset * ACTION_SIZE), ACTION_SIZE);
+                    let value = *values.add(offset);
+                    tree.feed_pending_roots(priors, value);
+                    offset += 1;
+                }
+            }
+        }
+    }));
+    let _ = result;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_apply_root_noise(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    noise: *const f32,
+    offsets: *const i32,
+    epsilon: f32,
+) {
+    if noise.is_null() || offsets.is_null() || epsilon <= 0.0 {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return;
+        };
+        let offsets = slice::from_raw_parts(offsets, trees.len() + 1);
+        let total = offsets.last().copied().unwrap_or(0).max(0) as usize;
+        let noise = slice::from_raw_parts(noise, total);
+        for (idx, tree_ptr) in trees.iter().enumerate() {
+            let Some(tree) = tree_from_ptr(*tree_ptr) else {
+                continue;
+            };
+            if tree.state.terminal {
+                continue;
+            }
+            let mut local = offsets[idx].max(0) as usize;
+            for child in &mut tree.root.children {
+                if let Some(child) = child {
+                    if local < noise.len() {
+                        child.prior = (1.0 - epsilon) * child.prior + epsilon * noise[local];
+                    }
+                    local += 1;
+                }
+            }
+        }
+    }));
+    let _ = result;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_root_num_legal(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    out_counts: *mut i32,
+) {
+    if out_counts.is_null() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return;
+        };
+        let out_counts = slice::from_raw_parts_mut(out_counts, trees.len());
+        for (idx, tree_ptr) in trees.iter().enumerate() {
+            out_counts[idx] = tree_from_ptr(*tree_ptr)
+                .filter(|tree| !tree.state.terminal)
+                .map(|tree| {
+                    tree.root
+                        .children
+                        .iter()
+                        .filter(|child| child.is_some())
+                        .count() as i32
+                })
+                .unwrap_or(0);
+        }
+    }));
+    let _ = result;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_get_root_values(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    out_values: *mut f32,
+) {
+    if out_values.is_null() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return;
+        };
+        let out_values = slice::from_raw_parts_mut(out_values, trees.len());
+        for (idx, tree_ptr) in trees.iter().enumerate() {
+            out_values[idx] = tree_from_ptr(*tree_ptr)
+                .filter(|tree| !tree.state.terminal)
+                .map(|tree| {
+                    if tree.root.visit_count > 0 {
+                        tree.root.value()
+                    } else {
+                        tree.root_value
+                    }
+                })
+                .unwrap_or(0.0);
+        }
+    }));
+    let _ = result;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    leaves_per_tree: c_int,
+    out_features: *mut f32,
+    max_entries: c_int,
+) -> c_int {
+    if out_features.is_null() || max_entries <= 0 {
+        return 0;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return 0;
+        };
+        for tree_ptr in trees {
+            if let Some(tree) = tree_from_ptr(*tree_ptr) {
+                tree.pending_leaves.clear();
+            }
+        }
+        let leaves_per_tree = leaves_per_tree.max(1) as usize;
+        let features =
+            slice::from_raw_parts_mut(out_features, max_entries as usize * FEATURE_STRIDE);
+        let mut written = 0usize;
+        for tree_ptr in trees {
+            let Some(tree) = tree_from_ptr(*tree_ptr) else {
+                continue;
+            };
+            for _ in 0..leaves_per_tree {
+                if written >= max_entries as usize {
+                    return written as c_int;
+                }
+                let start = written * FEATURE_STRIDE;
+                let stop = start + FEATURE_STRIDE;
+                if tree.collect_one_leaf(&mut features[start..stop]) {
+                    written += 1;
+                }
+            }
+        }
+        written as c_int
+    }));
+    result.unwrap_or(0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves_threaded(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    leaves_per_tree: c_int,
+    out_features: *mut f32,
+    max_entries: c_int,
+    num_threads: c_int,
+) -> c_int {
+    if out_features.is_null() || max_entries <= 0 {
+        return 0;
+    }
+    if num_threads <= 1 || num_trees <= 1 {
+        return omok_rmcts_batch_collect_leaves(
+            trees,
+            num_trees,
+            leaves_per_tree,
+            out_features,
+            max_entries,
+        );
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return 0;
+        };
+        let leaves_per_tree = leaves_per_tree.max(1) as usize;
+        let max_entries = max_entries as usize;
+        let num_threads = (num_threads as usize).min(trees.len()).max(1);
+
+        for tree_ptr in trees {
+            if let Some(tree) = tree_from_ptr(*tree_ptr) {
+                tree.pending_leaves.clear();
+            }
+        }
+
+        let tree_addrs = trees
+            .iter()
+            .map(|tree_ptr| *tree_ptr as usize)
+            .collect::<Vec<_>>();
+        let out_addr = out_features as usize;
+        let mut counts = vec![0usize; trees.len()];
+
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for thread_idx in 0..num_threads {
+                let tree_addrs = &tree_addrs;
+                let start = (trees.len() * thread_idx) / num_threads;
+                let end = (trees.len() * (thread_idx + 1)) / num_threads;
+                handles.push(scope.spawn(move || {
+                    let mut local_counts = Vec::new();
+                    for tree_idx in start..end {
+                        let segment_start = tree_idx * leaves_per_tree;
+                        if segment_start >= max_entries {
+                            continue;
+                        }
+                        let segment_capacity = leaves_per_tree.min(max_entries - segment_start);
+                        let tree_ptr = tree_addrs[tree_idx] as *mut MctsTree;
+                        let Some(tree) = tree_from_ptr(tree_ptr) else {
+                            continue;
+                        };
+                        let segment_ptr =
+                            (out_addr as *mut f32).add(segment_start * FEATURE_STRIDE);
+                        let segment = slice::from_raw_parts_mut(
+                            segment_ptr,
+                            segment_capacity * FEATURE_STRIDE,
+                        );
+                        let mut written = 0usize;
+                        for _ in 0..leaves_per_tree {
+                            if written >= segment_capacity {
+                                break;
+                            }
+                            let start = written * FEATURE_STRIDE;
+                            let stop = start + FEATURE_STRIDE;
+                            if tree.collect_one_leaf(&mut segment[start..stop]) {
+                                written += 1;
+                            }
+                        }
+                        local_counts.push((tree_idx, written));
+                    }
+                    local_counts
+                }));
+            }
+
+            for handle in handles {
+                for (tree_idx, count) in handle.join().expect("Rust MCTS collect worker panicked") {
+                    counts[tree_idx] = count;
+                }
+            }
+        });
+
+        let mut compact_offset = 0usize;
+        for (tree_idx, count) in counts.into_iter().enumerate() {
+            if count == 0 {
+                continue;
+            }
+            let segment_start = tree_idx * leaves_per_tree;
+            if segment_start != compact_offset {
+                ptr::copy(
+                    out_features.add(segment_start * FEATURE_STRIDE),
+                    out_features.add(compact_offset * FEATURE_STRIDE),
+                    count * FEATURE_STRIDE,
+                );
+            }
+            compact_offset += count;
+        }
+        compact_offset as c_int
+    }));
+    result.unwrap_or(0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_feed_leaves(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    priors: *const f32,
+    values: *const f32,
+) {
+    if priors.is_null() || values.is_null() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return;
+        };
+        let pending_count = trees
+            .iter()
+            .filter_map(|tree_ptr| tree_from_ptr(*tree_ptr))
+            .map(|tree| tree.pending_leaves.len())
+            .sum::<usize>();
+        let priors = slice::from_raw_parts(priors, pending_count * ACTION_SIZE);
+        let values = slice::from_raw_parts(values, pending_count);
+        let mut offset = 0usize;
+        for tree_ptr in trees {
+            if let Some(tree) = tree_from_ptr(*tree_ptr) {
+                tree.feed_pending_leaves(priors, values, &mut offset);
+            }
+        }
+    }));
+    let _ = result;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_batch_extract_visit_counts(
+    trees: *const *mut MctsTree,
+    num_trees: c_int,
+    out_counts: *mut f32,
+) {
+    if out_counts.is_null() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return;
+        };
+        let out_counts = slice::from_raw_parts_mut(out_counts, trees.len() * ACTION_SIZE);
+        for (idx, tree_ptr) in trees.iter().enumerate() {
+            let row = &mut out_counts[idx * ACTION_SIZE..(idx + 1) * ACTION_SIZE];
+            row.fill(0.0);
+            let Some(tree) = tree_from_ptr(*tree_ptr) else {
+                continue;
+            };
+            if tree.state.terminal {
+                continue;
+            }
+            for (action, child) in tree.root.children.iter().enumerate() {
+                if let Some(child) = child {
+                    row[action] = child.visit_count as f32;
+                }
+            }
+        }
+    }));
+    let _ = result;
 }
 
 #[cfg(test)]

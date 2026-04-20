@@ -126,7 +126,13 @@ def _ensure_native_rust_backend_built() -> None:
         )
 
 
-def _run_backend(name: str, case: ParityCase, *, leaves_per_batch: int) -> NativeSearchResult:
+def _run_backend(
+    name: str,
+    case: ParityCase,
+    *,
+    leaves_per_batch: int,
+    search_threads: int = 1,
+) -> NativeSearchResult:
     if name == "rust":
         _ensure_native_rust_backend_built()
 
@@ -141,7 +147,7 @@ def _run_backend(name: str, case: ParityCase, *, leaves_per_batch: int) -> Nativ
                 preferred_action=case.preferred_action,
                 value=case.value,
             ),
-            search_threads=1,
+            search_threads=search_threads,
             virtual_loss=1.0,
         )
 
@@ -159,6 +165,95 @@ def _run_backend(name: str, case: ParityCase, *, leaves_per_batch: int) -> Nativ
         visit_policy=result.visit_policy,
         root_value=result.root_value,
     )
+
+
+def _run_backend_two_step(
+    name: str,
+    case: ParityCase,
+    *,
+    leaves_per_batch: int,
+    search_threads: int = 1,
+) -> NativeSearchResult:
+    if name == "rust":
+        _ensure_native_rust_backend_built()
+
+    backend = resolve_mcts_backend(name)
+    mcts = backend.MCTS(
+        c_puct=1.25,
+        dirichlet_alpha=0.0,
+        dirichlet_epsilon=0.0,
+        evaluator=DeterministicEvaluator(
+            preferred_action=case.preferred_action,
+            value=case.value,
+        ),
+        search_threads=search_threads,
+        virtual_loss=1.0,
+    )
+    state = _state_from_moves(case.moves)
+    first = mcts.search_batch(
+        [state],
+        num_simulations=case.simulations,
+        temperature=[0.0],
+        add_noise=False,
+        roots=[None],
+        leaves_per_batch=leaves_per_batch,
+    )[0]
+    assert first.next_root is not None
+    state.apply_action(first.action)
+
+    second = mcts.search_batch(
+        [state],
+        num_simulations=case.simulations,
+        temperature=[0.0],
+        add_noise=False,
+        roots=[first.next_root],
+        leaves_per_batch=leaves_per_batch,
+    )[0]
+    assert second.next_root is not None
+    return NativeSearchResult(
+        action=second.action,
+        visit_policy=second.visit_policy,
+        root_value=second.root_value,
+    )
+
+
+def _run_backend_many(
+    name: str,
+    moves_by_state: tuple[tuple[int, ...], ...],
+    *,
+    preferred_action: int,
+    simulations: int,
+    leaves_per_batch: int,
+    search_threads: int = 1,
+) -> list[NativeSearchResult]:
+    if name == "rust":
+        _ensure_native_rust_backend_built()
+
+    backend = resolve_mcts_backend(name)
+    mcts = backend.MCTS(
+        c_puct=1.25,
+        dirichlet_alpha=0.0,
+        dirichlet_epsilon=0.0,
+        evaluator=DeterministicEvaluator(preferred_action=preferred_action),
+        search_threads=search_threads,
+        virtual_loss=1.0,
+    )
+    results = mcts.search_batch(
+        [_state_from_moves(moves) for moves in moves_by_state],
+        num_simulations=simulations,
+        temperature=[0.0] * len(moves_by_state),
+        add_noise=False,
+        roots=[None] * len(moves_by_state),
+        leaves_per_batch=leaves_per_batch,
+    )
+    return [
+        NativeSearchResult(
+            action=result.action,
+            visit_policy=result.visit_policy,
+            root_value=result.root_value,
+        )
+        for result in results
+    ]
 
 
 def _assert_search_results_match(
@@ -188,11 +283,47 @@ def test_configured_rust_backend_is_native_wrapper() -> None:
 
 
 @pytest.mark.parametrize("case", PARITY_CASES, ids=lambda case: case.name)
-def test_native_rust_mcts_matches_python_for_sequential_search(case: ParityCase) -> None:
-    py = _run_backend("python", case, leaves_per_batch=1)
-    rust = _run_backend("rust", case, leaves_per_batch=1)
+@pytest.mark.parametrize("leaves_per_batch", (1, 4), ids=("sequential", "batched"))
+def test_native_rust_mcts_matches_python(case: ParityCase, leaves_per_batch: int) -> None:
+    py = _run_backend("python", case, leaves_per_batch=leaves_per_batch)
+    rust = _run_backend("rust", case, leaves_per_batch=leaves_per_batch)
 
     _assert_search_results_match(py, rust, policy_atol=1.0e-6, value_atol=1.0e-6)
+
+
+@pytest.mark.parametrize("leaves_per_batch", (1, 4), ids=("sequential", "batched"))
+def test_native_rust_reused_root_matches_python(leaves_per_batch: int) -> None:
+    case = PARITY_CASES[1]
+    py = _run_backend_two_step("python", case, leaves_per_batch=leaves_per_batch)
+    rust = _run_backend_two_step("rust", case, leaves_per_batch=leaves_per_batch)
+
+    _assert_search_results_match(py, rust, policy_atol=1.0e-6, value_atol=1.0e-6)
+
+
+def test_native_rust_threaded_collect_matches_python() -> None:
+    moves_by_state = (
+        (),
+        (0, 1, 10, 11),
+        (2, 3, 12, 13, 22, 23),
+    )
+    py_results = _run_backend_many(
+        "python",
+        moves_by_state,
+        preferred_action=40,
+        simulations=48,
+        leaves_per_batch=4,
+    )
+    rust_results = _run_backend_many(
+        "rust",
+        moves_by_state,
+        preferred_action=40,
+        simulations=48,
+        leaves_per_batch=4,
+        search_threads=2,
+    )
+
+    for py, rust in zip(py_results, rust_results, strict=True):
+        _assert_search_results_match(py, rust, policy_atol=1.0e-6, value_atol=1.0e-6)
 
 
 @pytest.mark.parametrize("case", PARITY_CASES, ids=lambda case: case.name)
