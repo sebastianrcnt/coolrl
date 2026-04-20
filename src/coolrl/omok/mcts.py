@@ -124,7 +124,8 @@ class MCTS:
                 counts[action] = float(child.visit_count)
             if counts.sum() == 0:
                 legal = state.legal_moves().astype(np.float32)
-                counts = legal / legal.sum()
+                legal_total = float(legal.sum())
+                counts = legal / legal_total if legal_total > 0.0 else legal
             else:
                 counts /= counts.sum()
             action = sample_action_from_policy(counts, temp)

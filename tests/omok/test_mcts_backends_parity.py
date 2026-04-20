@@ -336,6 +336,8 @@ def _run_backend_two_step(
     )[0]
     assert first.next_root is not None
     state.apply_action(first.action)
+    if state.terminal:
+        pytest.skip("two-step reuse is not meaningful after an immediate terminal move")
 
     second = mcts.search_batch(
         [state],
