@@ -90,10 +90,10 @@ GUI CLI options:
 
 For actual full runs, prefer the hardware-specific presets:
 
-- `configs/omok_full_cuda.yaml`: NVIDIA/discrete GPU profile. It uses `device: CUDA`, C MCTS, `num_workers: 0`, `batch_size: 64`, and `leaves_per_batch: 16` so self-play neural network inference stays on the GPU in large batches.
+- `configs/omok_full_cuda.yaml`: NVIDIA/discrete GPU profile. It uses `device: CUDA`, C MCTS, `evaluator_backend: torch`, `num_workers: 0`, `batch_size: 64`, and `leaves_per_batch: 64` so self-play and arena inference stay on the GPU in large batches.
 - `configs/omok_full_metal.yaml`: Apple Silicon profile. It uses `device: METAL`, C MCTS, smaller self-play chunks, `num_workers: auto`, and CPU worker parallelism so several games can be generated concurrently while avoiding shared Metal contexts across spawned processes.
 
-Compatibility note: the full profiles keep reference fields such as `use_amp`, `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and `grad_clip` so the profile stays easy to compare with `rocm_unlimited.yaml`. The C backend uses `search_threads` for tree-level parallel collection across active games, but it does not implement same-tree virtual-loss search or async inference queues. The active self-play throughput knobs are `selfplay.batch_size`, `selfplay.num_workers`, `selfplay.leaves_per_batch`, and `selfplay.search_threads`.
+Compatibility note: the full profiles keep reference fields such as `use_amp`, `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and `grad_clip` so the profile stays easy to compare with `rocm_unlimited.yaml`. The C backend uses `search_threads` for tree-level parallel collection across active games, but it does not implement same-tree virtual-loss search or async inference queues. The active self-play throughput knobs are `selfplay.batch_size`, `selfplay.num_workers`, `selfplay.leaves_per_batch`, `selfplay.search_threads`, and `selfplay.evaluator_backend`.
 
 For a longer run, copy `configs/omok_quick.yaml` and increase:
 
@@ -144,9 +144,10 @@ Together they set the approximate inference batch size:
 active games * leaves_per_batch
 ```
 
-For CUDA full self-play, `64 * 16 = 1024` positions per large evaluator call is
-the current measured sweet spot. See `docs/omok_cuda_tuning.md` for the RTX 3090
-measurements.
+For CUDA full self-play, `64 * 64 = 4096` positions per large evaluator call is
+the current high-throughput tinygrad setting. The CUDA profile now uses a
+PyTorch evaluator for self-play and arena, so this value should be swept again.
+See `docs/omok_cuda_tuning.md` for the RTX 3090 measurements.
 
 Multi-process self-play is controlled by:
 

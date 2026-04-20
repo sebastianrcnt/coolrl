@@ -13,6 +13,9 @@ class Evaluator:
     def evaluate(self, states: list[GameState]) -> tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError
 
+    def effective_batch_size(self, batch_size: int) -> int:
+        return batch_size
+
     def close(self) -> None:
         return None
 
@@ -22,6 +25,9 @@ class ModelEvaluator(Evaluator):
         self.model = model
         self.device = device
         self._seen_buckets: set[int] = set()
+
+    def effective_batch_size(self, batch_size: int) -> int:
+        return 1 << (max(batch_size, 1) - 1).bit_length()
 
     def evaluate(self, states: list[GameState]) -> tuple[np.ndarray, np.ndarray]:
         features = states_to_feature_planes(states)
@@ -59,4 +65,3 @@ class ModelEvaluator(Evaluator):
             priors = priors[:n]
             value_np = value_np[:n]
         return priors.astype(np.float32, copy=False), value_np.astype(np.float32, copy=False)
-

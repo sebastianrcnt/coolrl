@@ -25,9 +25,9 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
     from tinygrad.nn.state import load_state_dict
 
     from .config import config_from_dict
-    from .evaluator import ModelEvaluator
     from .mcts_backend import resolve_mcts_backend
     from .network import PolicyValueNet
+    from .torch_evaluator import build_evaluator
 
     Device.DEFAULT = "CPU"
     config = config_from_dict(config_payload)
@@ -35,7 +35,7 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
     model = PolicyValueNet(config.rules.board_size, config.network)
     tensor_state = {key: Tensor(np.asarray(value)) for key, value in state_numpy.items()}
     load_state_dict(model, tensor_state, strict=True, verbose=False)
-    evaluator = ModelEvaluator(model, device="CPU")
+    evaluator = build_evaluator(model, backend=config.selfplay.evaluator_backend, device="CPU")
     search = mcts_module.MCTS(
         c_puct=config.selfplay.c_puct,
         dirichlet_alpha=config.selfplay.dirichlet_alpha,

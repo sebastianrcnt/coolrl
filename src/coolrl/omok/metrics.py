@@ -17,10 +17,6 @@ def _round_seconds(value: float) -> float:
     return round(value, 6)
 
 
-def _bucket_size(batch_size: int) -> int:
-    return 1 << (max(batch_size, 1) - 1).bit_length()
-
-
 @dataclass(slots=True)
 class EvaluatorMetrics:
     calls: int = 0
@@ -31,8 +27,8 @@ class EvaluatorMetrics:
     max_bucket: int = 0
     bucket_counts: dict[int, int] = field(default_factory=dict)
 
-    def record(self, batch_size: int, seconds: float) -> None:
-        bucket = _bucket_size(batch_size)
+    def record(self, batch_size: int, effective_batch_size: int, seconds: float) -> None:
+        bucket = max(1, effective_batch_size)
         self.calls += 1
         self.positions += batch_size
         self.padded_positions += bucket
@@ -136,8 +132,8 @@ class IterationMetrics:
     def timed_evaluator(self, phase: str, evaluator: Evaluator) -> "TimedEvaluator":
         return TimedEvaluator(evaluator=evaluator, metrics=self, phase=phase)
 
-    def record_evaluator(self, phase: str, batch_size: int, seconds: float) -> None:
-        self.evaluator.setdefault(phase, EvaluatorMetrics()).record(batch_size, seconds)
+    def record_evaluator(self, phase: str, batch_size: int, effective_batch_size: int, seconds: float) -> None:
+        self.evaluator.setdefault(phase, EvaluatorMetrics()).record(batch_size, effective_batch_size, seconds)
 
     def record_search(self, phase: str, states: int, simulations: int, leaves_per_batch: int, seconds: float) -> None:
         self.search.setdefault(phase, SearchMetrics()).record(states, simulations, leaves_per_batch, seconds)
@@ -211,14 +207,26 @@ class TimedEvaluator(Evaluator):
         try:
             return self.evaluator.evaluate(states)
         finally:
-            self.metrics.record_evaluator(self.phase, len(states), time.perf_counter() - started)
+            batch_size = len(states)
+            self.metrics.record_evaluator(
+                self.phase,
+                batch_size,
+                self.evaluator.effective_batch_size(batch_size),
+                time.perf_counter() - started,
+            )
 
     def evaluate_features(self, features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         started = time.perf_counter()
         try:
             return self.evaluator.evaluate_features(features)  # type: ignore[attr-defined]
         finally:
-            self.metrics.record_evaluator(self.phase, int(features.shape[0]), time.perf_counter() - started)
+            batch_size = int(features.shape[0])
+            self.metrics.record_evaluator(
+                self.phase,
+                batch_size,
+                self.evaluator.effective_batch_size(batch_size),
+                time.perf_counter() - started,
+            )
 
     def close(self) -> None:
         self.evaluator.close()

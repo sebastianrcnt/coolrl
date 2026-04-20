@@ -29,6 +29,7 @@ network:
 
 selfplay:
   mcts_backend: c
+  evaluator_backend: torch
   games_per_iteration: 64
 
   # Match the original ROCm recipe: 64 games per iteration, all active in one

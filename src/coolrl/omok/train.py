@@ -32,13 +32,14 @@ from .checkpoint import (
 )
 from .config import RunConfig, load_config
 from .device import configure_device
-from .evaluator import ModelEvaluator
+from .evaluator import Evaluator
 from .mcts_backend import resolve_mcts_backend
 from .metrics import IterationMetrics
 from .network import PolicyValueNet, clone_model
 from .openings import sample_balanced_openings
 from .replay import PendingSample, ReplayBuffer
 from .selfplay_worker import model_state_to_numpy, run_selfplay_chunk, worker_init
+from .torch_evaluator import build_evaluator
 
 
 def configure_logging() -> None:
@@ -69,8 +70,8 @@ class Trainer:
         self.mcts_module = resolve_mcts_backend(config.selfplay.mcts_backend)
         self.model = PolicyValueNet(config.rules.board_size, config.network)
         self.best_model = clone_model(self.model)
-        self.model_evaluator: ModelEvaluator | None = None
-        self.best_model_evaluator: ModelEvaluator | None = None
+        self.model_evaluator: Evaluator | None = None
+        self.best_model_evaluator: Evaluator | None = None
         self.iteration_metrics: IterationMetrics | None = None
         self.optimizer = self._build_optimizer()
         self.selfplay_rng = random.Random(config.seed + 1_048_583)
@@ -107,6 +108,7 @@ class Trainer:
             )
         else:
             logger.info("Self-play search_threads={}", self.search_threads)
+        logger.info("Self-play evaluator_backend={}", self.config.selfplay.evaluator_backend)
         signal.signal(signal.SIGINT, self._handle_stop_signal)
         signal.signal(signal.SIGTERM, self._handle_stop_signal)
         if resume_path:
@@ -121,19 +123,26 @@ class Trainer:
         )
 
     def _refresh_model_evaluators(self) -> None:
-        self.model_evaluator = ModelEvaluator(self.model, device=self.device)
-        self.best_model_evaluator = ModelEvaluator(self.best_model, device=self.device)
+        self.model_evaluator = self._build_evaluator(self.model)
+        self.best_model_evaluator = self._build_evaluator(self.best_model)
 
-    def _evaluator_for_model(self, model: PolicyValueNet) -> ModelEvaluator:
+    def _build_evaluator(self, model: PolicyValueNet) -> Evaluator:
+        return build_evaluator(
+            model,
+            backend=self.config.selfplay.evaluator_backend,
+            device=self.device,
+        )
+
+    def _evaluator_for_model(self, model: PolicyValueNet) -> Evaluator:
         if model is self.model:
             if self.model_evaluator is None:
-                self.model_evaluator = ModelEvaluator(self.model, device=self.device)
+                self.model_evaluator = self._build_evaluator(self.model)
             return self.model_evaluator
         if model is self.best_model:
             if self.best_model_evaluator is None:
-                self.best_model_evaluator = ModelEvaluator(self.best_model, device=self.device)
+                self.best_model_evaluator = self._build_evaluator(self.best_model)
             return self.best_model_evaluator
-        return ModelEvaluator(model, device=self.device)
+        return self._build_evaluator(model)
 
     @property
     def elapsed_hours(self) -> float:
@@ -177,13 +186,14 @@ class Trainer:
             else:
                 train_started = time.monotonic()
                 training_stats = self.train_model()
+                self.model_evaluator = self._build_evaluator(self.model)
                 train_seconds = time.monotonic() - train_started
                 arena_started = time.monotonic()
                 arena_stats = self.evaluate_candidate(simulations)
                 arena_seconds = time.monotonic() - arena_started
                 if bool(arena_stats.get("accepted", False)):
                     self.best_model = clone_model(self.model)
-                    self.best_model_evaluator = ModelEvaluator(self.best_model, device=self.device)
+                    self.best_model_evaluator = self._build_evaluator(self.best_model)
                     self.best_iteration = self.iteration
                     self.best_arena_win_rate = float(arena_stats.get("arena_win_rate", 0.0))
                     self.best_checkpoint_metadata = {
@@ -205,6 +215,7 @@ class Trainer:
                 "elapsed_hours": round(self.elapsed_hours, 4),
                 "status": status,
                 "simulations": simulations,
+                "evaluator_backend": self.config.selfplay.evaluator_backend,
                 "best_iteration": self.best_iteration,
                 "best_arena_win_rate": round(self.best_arena_win_rate, 4),
                 "total_updates": self.total_updates,

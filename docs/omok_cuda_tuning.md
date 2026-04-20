@@ -10,6 +10,7 @@ For CUDA self-play on a discrete NVIDIA GPU:
 ```yaml
 selfplay:
   mcts_backend: c
+  evaluator_backend: torch
   num_workers: 0
   batch_size: 64
   leaves_per_batch: 64
@@ -23,6 +24,12 @@ self-play neural network inference off the GPU.
 On the Ryzen 5 5600X test machine, `search_threads: auto` resolves to 12
 logical CPUs. This is a maximum for the C leaf-collection phase, not a promise
 that the whole training process will keep 12 CPU cores busy.
+
+`evaluator_backend: torch` affects only self-play and arena inference. Training,
+optimizer state, and checkpoints still use the tinygrad `PolicyValueNet`. The
+PyTorch evaluator is rebuilt from the current tinygrad weights after optimizer
+updates and after best-model promotion, so it remains a drop-in inference
+backend rather than a full training migration.
 
 ## Why `leaves_per_batch: 64`
 
@@ -164,6 +171,7 @@ Use `scripts/bench_omok_evaluator.py` to isolate tinygrad evaluator latency:
 uv run python scripts/bench_omok_evaluator.py \
   --config configs/omok_full_cuda.yaml \
   --device CUDA \
+  --backend tinygrad \
   --batches 128,256,512,1024,2048 \
   --warmup 2 \
   --iters 5
@@ -203,6 +211,18 @@ forward, softmax, and numpy materialization with explicit synchronization.
 Weights were random; this was a latency comparison, not a parity test against a
 saved checkpoint.
 
+The integrated benchmark script can now exercise the torch evaluator directly:
+
+```bash
+uv run --extra omok python scripts/bench_omok_evaluator.py \
+  --config configs/omok_full_cuda.yaml \
+  --device CUDA \
+  --backend torch \
+  --batches 128,256,512,1024,2048 \
+  --warmup 5 \
+  --iters 20
+```
+
 | Batch | tinygrad Total Avg | PyTorch Eager Total Avg | Speedup |
 |---:|---:|---:|---:|
 | 128 | ~0.0592s | ~0.0017s | ~35x |
@@ -228,11 +248,52 @@ include checkpoint weight conversion, C MCTS feed/collect overhead after eval is
 reduced, Python loop overhead, or changes in game length. It is strong enough,
 however, to make a PyTorch evaluator backend the next highest-ROI change.
 
+The integrated PyTorch evaluator still pads to power-of-two batch buckets. An
+unpadded smoke run produced many unique CUDA shapes and spent `13.3s` in
+self-play eval for iteration 1. Power-of-two padding collapsed the shape set and
+reduced the same run to `3.29s` of eval time.
+
 Once PyTorch eval is integrated, `leaves_per_batch` should be swept again. The
 current `64` value was chosen mainly to reduce expensive tinygrad evaluator
 calls. If PyTorch eval makes calls cheap, lower values such as `8`, `16`, or
 `32` may recover search quality by feeding/backing up neural evaluations more
 often, without costing much wall time.
+
+Implementation status: the CUDA profile now uses `selfplay.evaluator_backend:
+torch`. CPU and CUDA parity checks against the tinygrad evaluator were within
+normal floating-point tolerance:
+
+| Device | Policy Max Abs Diff | Value Max Abs Diff |
+|---|---:|---:|
+| CPU, batch 7 | ~2.8e-9 | ~1.0e-7 |
+| CUDA, batch 64 | ~4.0e-7 | ~1.1e-5 |
+
+A small C MCTS + CUDA smoke run with 8 games and 8 simulations completed with
+the torch evaluator:
+
+```text
+selfplay_seconds=1.184s
+eval_selfplay_candidate_seconds=1.141s
+eval_selfplay_candidate_calls=68
+eval_selfplay_candidate_avg_seconds=0.0168s
+```
+
+The full CUDA iteration-1 warmup run, using 64 games and 96 simulations but no
+training/arena, dropped from the previous tinygrad baseline of `25.42s`
+self-play time to:
+
+```text
+selfplay_seconds=3.591s
+eval_selfplay_candidate_seconds=3.290s
+eval_selfplay_candidate_calls=158
+eval_selfplay_candidate_avg_seconds=0.0208s
+eval_selfplay_candidate_max_bucket=4096
+eval_selfplay_candidate_pad_ratio=1.1685
+```
+
+Use `uv run --extra omok ...` or otherwise install PyTorch before running the
+CUDA profile. Without PyTorch installed, `evaluator_backend: torch` fails fast
+with an installation hint.
 
 ## 4-Iteration Phase Benchmark
 
