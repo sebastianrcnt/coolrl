@@ -110,6 +110,16 @@ def run_selfplay_chunk(
         roots.append(None)
 
     while states:
+        if progress_queue is not None:
+            progress_queue.put(
+                {
+                    "type": "game_moves",
+                    "chunk_id": chunk_id,
+                    "pid": os.getpid(),
+                    "moves": len(states),
+                    "active_games": len(states),
+                }
+            )
         temperatures = [
             _selfplay_temperature(
                 state.move_count,

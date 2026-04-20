@@ -445,6 +445,10 @@ class Trainer:
         total_moves = 0
         completed_games = 0
 
+        self._selfplay_total_moves = 0
+        self._selfplay_completed_games = 0
+        self._selfplay_chunk_moves = {}
+
         ctx = mp.get_context("spawn")
         effective_workers = max(1, min(num_workers, len(chunks)))
         logger.info(
@@ -565,8 +569,25 @@ class Trainer:
                 chunk_task = None if chunk_tasks is None else chunk_tasks.get(chunk_id)
                 pid = event.get("pid", "?")
                 if event_type == "chunk_started":
+                    self._selfplay_chunk_moves[chunk_id] = 0
                     if chunk_task is not None:
                         progress.update(chunk_task, status=f"pid={pid} running")
+                    self._refresh_selfplay_status(progress, progress_task, source)
+                    continue
+                if event_type == "game_moves":
+                    moves_delta = int(event.get("moves", 0))
+                    active = int(event.get("active_games", 0))
+                    self._selfplay_total_moves += moves_delta
+                    self._selfplay_chunk_moves[chunk_id] = (
+                        self._selfplay_chunk_moves.get(chunk_id, 0) + moves_delta
+                    )
+                    if chunk_task is not None:
+                        chunk_moves = self._selfplay_chunk_moves[chunk_id]
+                        progress.update(
+                            chunk_task,
+                            status=f"pid={pid} active={active} moves={chunk_moves}",
+                        )
+                    self._refresh_selfplay_status(progress, progress_task, source)
                     continue
                 if event_type == "game_done":
                     drained += 1
@@ -574,21 +595,37 @@ class Trainer:
                     winner = event.get("winner", "?")
                     chunk_done = int(event.get("chunk_done", 0))
                     chunk_size = int(event.get("chunk_size", 0))
-                    progress.update(progress_task, advance=1, status=f"{source} games")
                     if chunk_task is not None:
                         status = "done" if chunk_size > 0 and chunk_done >= chunk_size else (
-                            f"pid={pid} moves={moves} winner={winner}"
+                            f"pid={pid} last_moves={moves} winner={winner}"
                         )
                         progress.update(
                             chunk_task,
                             advance=1,
                             status=status,
                         )
+                    self._selfplay_completed_games += 1
+                    progress.update(progress_task, advance=1)
+                    self._refresh_selfplay_status(progress, progress_task, source)
                     continue
             else:
                 drained += 1
                 progress.update(progress_task, advance=1, status=f"{source} games")
         return drained
+
+    def _refresh_selfplay_status(
+        self,
+        progress: Progress,
+        progress_task: TaskID,
+        source: str,
+    ) -> None:
+        progress.update(
+            progress_task,
+            status=(
+                f"{source} | moves={self._selfplay_total_moves:,} "
+                f"games_done={self._selfplay_completed_games}"
+            ),
+        )
 
     def train_model(self) -> dict[str, float | int]:
         if len(self.replay) == 0:
