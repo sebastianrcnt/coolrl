@@ -1,0 +1,46 @@
+experiment_name: omok15_smoke
+seed: 3
+max_iterations: 1
+device: auto
+
+rules:
+  board_size: 15
+  exactly_five: false
+
+network:
+  channels: 16
+  blocks: 1
+  value_hidden: 32
+  se_reduction: 8
+
+selfplay:
+  games_per_iteration: 1
+  batch_size: 1
+  num_workers: auto
+  temperature_moves: 4
+  dirichlet_alpha: 0.15
+  dirichlet_epsilon: 0.15
+  c_puct: 1.5
+  leaves_per_batch: 1
+  simulation_schedule:
+    - fraction: 0.0
+      simulations: 2
+
+optimization:
+  batch_size: 4
+  updates_per_iteration: 1
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  replay_capacity: 256
+  warmup_games: 1
+
+arena:
+  games: 0
+  simulations: 0
+  bootstrap_games: 0
+  bootstrap_simulations: 0
+  bootstrap_accept_win_rate: 0.0
+
+checkpoint:
+  directory: checkpoints/omok15_smoke
+  save_every_iteration: true

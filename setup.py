@@ -28,6 +28,18 @@ setup(
             include_dirs=["src/coolrl/omok/cmcts/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
-        )
+        ),
+        Extension(
+            "coolrl.omok15._cmcts_c",
+            sources=[
+                "src/coolrl/omok15/cmcts/src/api.c",
+                "src/coolrl/omok15/cmcts/src/board.c",
+                "src/coolrl/omok15/cmcts/src/mcts.c",
+                "src/coolrl/omok15/cmcts/src/tree.c",
+            ],
+            include_dirs=["src/coolrl/omok15/cmcts/include"],
+            extra_compile_args=compile_args,
+            extra_link_args=link_args,
+        ),
     ]
 )

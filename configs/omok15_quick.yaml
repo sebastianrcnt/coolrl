@@ -1,0 +1,51 @@
+experiment_name: omok15_quick
+seed: 7
+max_iterations: 20
+device: auto
+
+rules:
+  board_size: 15
+  exactly_five: false
+
+network:
+  channels: 48
+  blocks: 3
+  value_hidden: 96
+  se_reduction: 8
+
+selfplay:
+  evaluator_backend: torch
+  games_per_iteration: 6
+  batch_size: 6
+  num_workers: auto
+  temperature_moves: 10
+  dirichlet_alpha: 0.15
+  dirichlet_epsilon: 0.20
+  c_puct: 1.6
+  leaves_per_batch: 4
+  simulation_schedule:
+    - fraction: 0.0
+      simulations: 24
+    - fraction: 0.5
+      simulations: 48
+
+optimization:
+  batch_size: 64
+  updates_per_iteration: 16
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  replay_capacity: 20000
+  warmup_games: 4
+
+arena:
+  games: 2
+  simulations: 24
+  accept_win_rate: 0.55
+  bootstrap_games: 2
+  bootstrap_simulations: 24
+  bootstrap_accept_win_rate: 0.0
+
+checkpoint:
+  directory: checkpoints/omok15_quick
+  save_every_iteration: true
+  save_iteration_interval: 1
