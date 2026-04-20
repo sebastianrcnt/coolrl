@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coolrl 9x9 Omok</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<style>
+:root {
+  --bg: #1a1a1a;
+  --panel: #242424;
+  --border: #333;
+  --text: #e8e8e8;
+  --muted: #888;
+  --accent: #4ad;
+  --green: #6e6;
+  --amber: #ec3;
+  --red: #f66;
+  --board-bg: #d9b271;
+  --board-line: #2a2118;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  display: flex; justify-content: center; padding: 16px;
+}
+.app { max-width: 960px; width: 100%; }
+h1 { font-size: 1.2em; color: var(--accent); margin-bottom: 12px; }
+.controls {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-bottom: 12px; padding: 12px; background: var(--panel);
+  border-radius: 8px; border: 1px solid var(--border);
+}
+.controls label { color: var(--muted); font-size: 0.85em; }
+.controls select, .controls input[type=range] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; }
+.controls button {
+  background: var(--accent); color: #000; border: none; border-radius: 4px;
+  padding: 6px 14px; font-weight: 600; cursor: pointer; font-size: 0.85em;
+}
+.controls button:hover { opacity: 0.85; }
+.controls button:disabled { opacity: 0.4; cursor: default; }
+.file-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--accent); color: #000; border-radius: 4px;
+  padding: 6px 14px; font-weight: 600; cursor: pointer; font-size: 0.85em;
+}
+.file-label:hover { opacity: 0.85; }
+.file-label input { display: none; }
+.game-area { display: flex; gap: 16px; align-items: flex-start; }
+canvas#board { border-radius: 4px; cursor: crosshair; max-width: 100%; height: auto; }
+.sidebar {
+  flex: 1; min-width: 200px; padding: 12px; background: var(--panel);
+  border-radius: 8px; border: 1px solid var(--border); font-size: 0.85em;
+  line-height: 1.8;
+}
+.sidebar .label { color: var(--muted); }
+.sidebar .val { color: var(--green); }
+.sidebar .val.thinking { color: var(--amber); }
+.sidebar .val.error { color: var(--red); }
+#status { color: var(--amber); font-weight: 600; }
+#model-name { color: var(--accent); }
+.sim-group { display: flex; align-items: center; gap: 6px; }
+.sim-group input { width: 100px; }
+.sim-group span { font-size: 0.85em; min-width: 28px; }
+@media (max-width: 700px) {
+  .game-area { flex-direction: column; }
+  canvas#board { width: 100% !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>coolrl 9x9 Omok</h1>
+  <div class="controls">
+    <label class="file-label">
+      Load .onnx
+      <input type="file" id="file-input" accept=".onnx">
+    </label>
+    <label>Color
+      <select id="color-select">
+        <option value="-1" selected>White</option>
+        <option value="1">Black</option>
+      </select>
+    </label>
+    <div class="sim-group">
+      <label>Sims</label>
+      <input type="range" id="sims" min="4" max="512" value="64" step="4">
+      <span id="sims-val">64</span>
+    </div>
+    <button id="btn-reset">Reset</button>
+    <button id="btn-undo">Undo</button>
+    <button id="btn-swap">Swap</button>
+    <button id="btn-ai">AI Move</button>
+  </div>
+  <div class="game-area">
+    <canvas id="board" width="540" height="540"></canvas>
+    <div class="sidebar">
+      <div><span class="label">Model:</span> <span id="model-name">none</span></div>
+      <div><span class="label">Status:</span> <span id="status">Upload an .onnx model to play</span></div>
+      <div><span class="label">Turn:</span> <span class="val" id="turn">Black</span></div>
+      <div><span class="label">Moves:</span> <span class="val" id="moves">0</span></div>
+      <div><span class="label">Human:</span> <span class="val" id="human-side">White</span></div>
+      <div><span class="label">AI value:</span> <span class="val" id="ai-value">-</span></div>
+      <div><span class="label">AI time:</span> <span class="val" id="ai-time">-</span></div>
+      <div><span class="label">Progress:</span> <span class="val" id="ai-progress">-</span></div>
+      <hr style="border-color:var(--border);margin:8px 0">
+      <div style="color:var(--muted);font-size:0.8em;line-height:1.6">
+        Click to place a stone.<br>
+        Upload an ONNX model for AI play.<br>
+        Without a model, both sides are manual.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// =========================================================================
+// GameState
+// =========================================================================
+class GameState {
+  constructor(boardSize = 9) {
+    this.boardSize = boardSize;
+    this.actionSize = boardSize * boardSize;
+    this.board = new Int8Array(this.actionSize);
+    this.toPlay = 1;
+    this.moveCount = 0;
+    this.lastAction = null;
+    this.winner = 0;
+    this.terminal = false;
+  }
+
+  clone() {
+    const s = new GameState(this.boardSize);
+    s.board.set(this.board);
+    s.toPlay = this.toPlay;
+    s.moveCount = this.moveCount;
+    s.lastAction = this.lastAction;
+    s.winner = this.winner;
+    s.terminal = this.terminal;
+    return s;
+  }
+
+  legalMoves() {
+    const m = new Uint8Array(this.actionSize);
+    if (this.terminal) return m;
+    for (let i = 0; i < this.actionSize; i++) m[i] = this.board[i] === 0 ? 1 : 0;
+    return m;
+  }
+
+  legalIndices() {
+    const out = [];
+    if (this.terminal) return out;
+    for (let i = 0; i < this.actionSize; i++) if (this.board[i] === 0) out.push(i);
+    return out;
+  }
+
+  applyAction(action) {
+    const player = this.toPlay;
+    this.board[action] = player;
+    this.lastAction = action;
+    this.moveCount++;
+    const row = Math.floor(action / this.boardSize);
+    const col = action % this.boardSize;
+    if (this._isWin(row, col, player)) {
+      this.winner = player;
+      this.terminal = true;
+    } else if (this.moveCount >= this.actionSize) {
+      this.terminal = true;
+    }
+    this.toPlay = -this.toPlay;
+  }
+
+  outcomeForPlayer(player) {
+    if (!this.terminal) return 0;
+    if (this.winner === 0) return 0;
+    return this.winner === player ? 1.0 : -1.0;
+  }
+
+  _isWin(row, col, player) {
+    const dirs = [[1,0],[0,1],[1,1],[1,-1]];
+    for (const [dr,dc] of dirs) {
+      const count = 1 + this._countDir(row,col,dr,dc,player) + this._countDir(row,col,-dr,-dc,player);
+      if (count >= 5) return true;
+    }
+    return false;
+  }
+
+  _countDir(row, col, dr, dc, player) {
+    let c = 0;
+    let r = row + dr, cc = col + dc;
+    while (r >= 0 && r < this.boardSize && cc >= 0 && cc < this.boardSize && this.board[r * this.boardSize + cc] === player) {
+      c++; r += dr; cc += dc;
+    }
+    return c;
+  }
+}
+
+// =========================================================================
+// Feature encoding
+// =========================================================================
+function encodeFeatures(states) {
+  const N = states[0].boardSize;
+  const planeSize = N * N;
+  const out = new Float32Array(states.length * 4 * planeSize);
+  for (let b = 0; b < states.length; b++) {
+    const s = states[b];
+    const base = b * 4 * planeSize;
+    const toPlay = s.toPlay;
+    const colorVal = toPlay === 1 ? 1.0 : 0.0;
+    for (let i = 0; i < planeSize; i++) {
+      const v = s.board[i];
+      out[base + i] = v === toPlay ? 1.0 : 0.0;
+      out[base + planeSize + i] = v === -toPlay ? 1.0 : 0.0;
+      out[base + 3 * planeSize + i] = colorVal;
+    }
+    if (s.lastAction !== null && s.lastAction >= 0) {
+      out[base + 2 * planeSize + s.lastAction] = 1.0;
+    }
+  }
+  return out;
+}
+
+// =========================================================================
+// ONNX Evaluator
+// =========================================================================
+class OnnxEvaluator {
+  constructor(session, boardSize) {
+    this.session = session;
+    this.boardSize = boardSize;
+    this.actionSize = boardSize * boardSize;
+  }
+
+  static async fromArrayBuffer(buf, boardSize) {
+    const session = await ort.InferenceSession.create(buf, {
+      executionProviders: ["wasm"],
+      graphOptimizationLevel: "all",
+    });
+    return new OnnxEvaluator(session, boardSize);
+  }
+
+  async evaluate(states) {
+    const batch = states.length;
+    const features = encodeFeatures(states);
+    const tensor = new ort.Tensor("float32", features, [batch, 4, this.boardSize, this.boardSize]);
+    const out = await this.session.run({ input: tensor });
+    const logits = out.policy_logits.data;
+    const values = out.value.data;
+    const policy = new Float32Array(logits.length);
+    policy.set(logits);
+    for (let b = 0; b < batch; b++) this._softmax(policy, b * this.actionSize, this.actionSize);
+    const policyOut = [], valueOut = [];
+    for (let b = 0; b < batch; b++) {
+      policyOut.push(policy.subarray(b * this.actionSize, (b + 1) * this.actionSize));
+      valueOut.push(values[b]);
+    }
+    return { policy: policyOut, value: valueOut };
+  }
+
+  _softmax(arr, offset, len) {
+    let max = -Infinity;
+    for (let i = 0; i < len; i++) if (arr[offset + i] > max) max = arr[offset + i];
+    let sum = 0;
+    for (let i = 0; i < len; i++) { arr[offset + i] = Math.exp(arr[offset + i] - max); sum += arr[offset + i]; }
+    if (sum > 0) for (let i = 0; i < len; i++) arr[offset + i] /= sum;
+  }
+}
+
+// =========================================================================
+// MCTS
+// =========================================================================
+class TreeNode {
+  constructor(toPlay, prior = 0) {
+    this.toPlay = toPlay;
+    this.prior = prior;
+    this.visitCount = 0;
+    this.valueSum = 0;
+    this.children = new Map();
+    this.expanded = false;
+  }
+  value() { return this.visitCount === 0 ? 0 : this.valueSum / this.visitCount; }
+}
+
+class MCTS {
+  constructor({ cPuct = 1.6, evaluator }) {
+    this.cPuct = cPuct;
+    this.evaluator = evaluator;
+  }
+
+  async run(state, numSims, { reuseRoot = null, onProgress = null } = {}) {
+    const root = reuseRoot && reuseRoot.toPlay === state.toPlay ? reuseRoot : new TreeNode(state.toPlay);
+    if (!root.expanded && !state.terminal) {
+      const { policy, value } = await this.evaluator.evaluate([state]);
+      this._expand(root, state, policy[0]);
+      root.rootValue = value[0];
+    }
+
+    for (let sim = 0; sim < numSims; sim++) {
+      let node = root;
+      const path = [node];
+      const simState = state.clone();
+
+      while (node.expanded && node.children.size > 0 && !simState.terminal) {
+        const [action, child] = this._selectChild(node);
+        simState.applyAction(action);
+        node = child;
+        path.push(node);
+      }
+
+      let leafValue;
+      if (simState.terminal) {
+        leafValue = simState.outcomeForPlayer(simState.toPlay);
+      } else {
+        const { policy, value } = await this.evaluator.evaluate([simState]);
+        this._expand(node, simState, policy[0]);
+        leafValue = value[0];
+      }
+      this._backup(path, leafValue);
+
+      if (onProgress && (sim + 1) % 8 === 0) onProgress(sim + 1, numSims);
+    }
+    return this._chooseAction(root, state);
+  }
+
+  _selectChild(node) {
+    const sqrtN = Math.sqrt(Math.max(1, node.visitCount));
+    let bestAction = -1, bestScore = -Infinity, bestChild = null;
+    for (const [action, child] of node.children) {
+      const q = -child.value();
+      const u = (this.cPuct * child.prior * sqrtN) / (1 + child.visitCount);
+      const score = q + u;
+      if (score > bestScore) { bestScore = score; bestAction = action; bestChild = child; }
+    }
+    return [bestAction, bestChild];
+  }
+
+  _expand(node, state, priors) {
+    const legal = state.legalIndices();
+    let total = 0;
+    for (const a of legal) total += priors[a];
+    node.children.clear();
+    if (total <= 0 || !isFinite(total)) {
+      const u = 1.0 / legal.length;
+      for (const a of legal) node.children.set(a, new TreeNode(-state.toPlay, u));
+    } else {
+      for (const a of legal) node.children.set(a, new TreeNode(-state.toPlay, priors[a] / total));
+    }
+    node.expanded = true;
+  }
+
+  _backup(path, value) {
+    let v = value;
+    for (let i = path.length - 1; i >= 0; i--) {
+      path[i].visitCount++;
+      path[i].valueSum += v;
+      v = -v;
+    }
+  }
+
+  _chooseAction(root, state) {
+    const counts = new Float32Array(state.actionSize);
+    let total = 0, best = -1, bestCount = -1;
+    for (const [action, child] of root.children) {
+      counts[action] = child.visitCount;
+      total += child.visitCount;
+      if (child.visitCount > bestCount) { bestCount = child.visitCount; best = action; }
+    }
+    if (total === 0) {
+      const legal = state.legalIndices();
+      best = legal[Math.floor(Math.random() * legal.length)];
+    }
+    return {
+      action: best,
+      rootValue: root.value(),
+      nextRoot: state.terminal ? null : root.children.get(best) || null,
+    };
+  }
+}
+
+// =========================================================================
+// App
+// =========================================================================
+const BOARD_SIZE = 9;
+const COLS = "ABCDEFGHJKLMNOP";
+const STAR_POINTS = [[2,2],[2,6],[6,2],[6,6],[4,4]];
+
+const els = {
+  canvas: document.getElementById("board"),
+  fileInput: document.getElementById("file-input"),
+  colorSelect: document.getElementById("color-select"),
+  sims: document.getElementById("sims"),
+  simsVal: document.getElementById("sims-val"),
+  btnReset: document.getElementById("btn-reset"),
+  btnUndo: document.getElementById("btn-undo"),
+  btnSwap: document.getElementById("btn-swap"),
+  btnAi: document.getElementById("btn-ai"),
+  modelName: document.getElementById("model-name"),
+  status: document.getElementById("status"),
+  turn: document.getElementById("turn"),
+  moves: document.getElementById("moves"),
+  humanSide: document.getElementById("human-side"),
+  aiValue: document.getElementById("ai-value"),
+  aiTime: document.getElementById("ai-time"),
+  aiProgress: document.getElementById("ai-progress"),
+};
+
+const app = {
+  game: new GameState(BOARD_SIZE),
+  history: [],
+  evaluator: null,
+  mcts: null,
+  humanPlayer: -1,
+  busy: false,
+  aiSubtree: null,
+};
+
+function setBusy(b) {
+  app.busy = b;
+  els.btnReset.disabled = b;
+  els.btnUndo.disabled = b;
+  els.btnSwap.disabled = b;
+  els.btnAi.disabled = b || !app.evaluator;
+}
+
+function setStatus(msg, cls = "") {
+  els.status.textContent = msg;
+  els.status.className = "val " + cls;
+}
+
+function updateInfo() {
+  els.turn.textContent = app.game.toPlay === 1 ? "Black" : "White";
+  els.moves.textContent = app.game.moveCount;
+  els.humanSide.textContent = app.humanPlayer === 1 ? "Black" : "White";
+  if (app.game.terminal) {
+    if (app.game.winner === 0) setStatus("Draw");
+    else setStatus((app.game.winner === 1 ? "Black" : "White") + " wins!");
+  }
+}
+
+// ---- File loading ----
+els.fileInput.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  setBusy(true);
+  setStatus("Loading model...", "thinking");
+  try {
+    const buf = await file.arrayBuffer();
+    app.evaluator = await OnnxEvaluator.fromArrayBuffer(buf, BOARD_SIZE);
+    app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
+    els.modelName.textContent = file.name;
+    setStatus("Model loaded. Your turn.");
+    app.aiSubtree = null;
+    setBusy(false);
+    maybeAiMove();
+    return;
+  } catch (err) {
+    setStatus("Load failed: " + err.message, "error");
+    console.error(err);
+  }
+  setBusy(false);
+});
+
+// ---- Controls ----
+els.sims.addEventListener("input", () => { els.simsVal.textContent = els.sims.value; });
+els.colorSelect.addEventListener("change", () => {
+  app.humanPlayer = parseInt(els.colorSelect.value);
+  resetGame();
+});
+els.btnReset.addEventListener("click", resetGame);
+els.btnUndo.addEventListener("click", undo);
+els.btnSwap.addEventListener("click", () => {
+  app.humanPlayer = -app.humanPlayer;
+  els.colorSelect.value = String(app.humanPlayer);
+  resetGame();
+});
+els.btnAi.addEventListener("click", () => { if (app.evaluator && !app.busy) forceAiMove(); });
+
+function resetGame() {
+  app.game = new GameState(BOARD_SIZE);
+  app.history = [];
+  app.aiSubtree = null;
+  els.aiValue.textContent = "-";
+  els.aiTime.textContent = "-";
+  els.aiProgress.textContent = "-";
+  setStatus(app.evaluator ? "Your turn." : "Upload an .onnx model to play");
+  updateInfo();
+  redraw();
+  maybeAiMove();
+}
+
+function undo() {
+  if (app.busy || app.history.length === 0) return;
+  // Undo two moves (human + AI) when possible
+  const count = app.history.length >= 2 ? 2 : 1;
+  app.history.splice(-count, count);
+  app.game = new GameState(BOARD_SIZE);
+  app.aiSubtree = null;
+  for (const a of app.history) app.game.applyAction(a);
+  updateInfo();
+  redraw();
+  if (!app.game.terminal) setStatus("Your turn.");
+}
+
+// ---- Board click ----
+els.canvas.addEventListener("click", (e) => {
+  if (app.busy || app.game.terminal) return;
+  if (app.evaluator && app.game.toPlay !== app.humanPlayer) return;
+  const rect = els.canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (els.canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (els.canvas.height / rect.height);
+  const cell = pixelToCell(x, y);
+  if (!cell) return;
+  const action = cell.row * BOARD_SIZE + cell.col;
+  if (app.game.board[action] !== 0) return;
+  playMove(action);
+});
+
+function playMove(action) {
+  app.game.applyAction(action);
+  app.history.push(action);
+  if (app.aiSubtree && app.aiSubtree.children.has(action)) {
+    app.aiSubtree = app.aiSubtree.children.get(action);
+  } else {
+    app.aiSubtree = null;
+  }
+  updateInfo();
+  redraw();
+  if (!app.game.terminal) maybeAiMove();
+}
+
+function maybeAiMove() {
+  if (!app.evaluator || app.busy || app.game.terminal) return;
+  if (app.game.toPlay !== app.humanPlayer) aiMove();
+}
+
+async function forceAiMove() {
+  if (!app.evaluator || app.busy || app.game.terminal) return;
+  await aiMove();
+}
+
+async function aiMove() {
+  if (!app.mcts || app.game.terminal) return;
+  setBusy(true);
+  setStatus("AI thinking...", "thinking");
+  const sims = parseInt(els.sims.value);
+  els.aiProgress.textContent = `0 / ${sims}`;
+  const t0 = performance.now();
+
+  try {
+    const result = await app.mcts.run(app.game, sims, {
+      reuseRoot: app.aiSubtree,
+      onProgress: (done, total) => { els.aiProgress.textContent = `${done} / ${total}`; },
+    });
+    const dt = performance.now() - t0;
+    els.aiValue.textContent = result.rootValue.toFixed(3);
+    els.aiTime.textContent = `${dt.toFixed(0)} ms`;
+    els.aiProgress.textContent = `${sims} / ${sims}`;
+
+    app.game.applyAction(result.action);
+    app.history.push(result.action);
+    app.aiSubtree = result.nextRoot;
+    updateInfo();
+    redraw();
+    if (!app.game.terminal) setStatus("Your turn.");
+  } catch (err) {
+    setStatus("AI error: " + err.message, "error");
+    console.error(err);
+  }
+  setBusy(false);
+}
+
+// ---- Canvas rendering ----
+function cellMetrics() {
+  const W = els.canvas.width;
+  const margin = W * 0.07;
+  const step = (W - 2 * margin) / (BOARD_SIZE - 1);
+  return { W, margin, step };
+}
+
+function pixelToCell(x, y) {
+  const { margin, step } = cellMetrics();
+  const col = Math.round((x - margin) / step);
+  const row = Math.round((y - margin) / step);
+  if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return null;
+  const dx = Math.abs(x - (margin + col * step));
+  const dy = Math.abs(y - (margin + row * step));
+  if (dx > step * 0.45 || dy > step * 0.45) return null;
+  return { row, col };
+}
+
+function redraw() {
+  const ctx = els.canvas.getContext("2d");
+  const { W, margin, step } = cellMetrics();
+  const stoneR = step * 0.42;
+
+  // Background
+  ctx.fillStyle = "#d9b271";
+  ctx.fillRect(0, 0, W, W);
+
+  // Grid
+  ctx.strokeStyle = "#2a2118";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < BOARD_SIZE; i++) {
+    const p = margin + i * step;
+    ctx.beginPath(); ctx.moveTo(margin, p); ctx.lineTo(W - margin, p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p, margin); ctx.lineTo(p, W - margin); ctx.stroke();
+  }
+
+  // Star points
+  ctx.fillStyle = "#2a2118";
+  for (const [r, c] of STAR_POINTS) {
+    ctx.beginPath();
+    ctx.arc(margin + c * step, margin + r * step, Math.max(2.5, step * 0.07), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Coordinate labels
+  ctx.fillStyle = "#3a2f22";
+  ctx.font = `${Math.max(10, step * 0.26)}px ui-monospace, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < BOARD_SIZE; i++) {
+    ctx.fillText(COLS[i], margin + i * step, margin * 0.4);
+    ctx.fillText(String(BOARD_SIZE - i), margin * 0.4, margin + i * step);
+  }
+
+  // Stones
+  if (!app.game) return;
+  for (let i = 0; i < app.game.actionSize; i++) {
+    const v = app.game.board[i];
+    if (v === 0) continue;
+    const r = Math.floor(i / BOARD_SIZE);
+    const c = i % BOARD_SIZE;
+    const cx = margin + c * step;
+    const cy = margin + r * step;
+    const grad = ctx.createRadialGradient(cx - stoneR * 0.3, cy - stoneR * 0.3, stoneR * 0.1, cx, cy, stoneR);
+    if (v === 1) {
+      grad.addColorStop(0, "#555");
+      grad.addColorStop(1, "#000");
+    } else {
+      grad.addColorStop(0, "#fff");
+      grad.addColorStop(1, "#cfc8b8");
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx, cy, stoneR, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = v === 1 ? "#000" : "#999";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+
+  // Last move marker
+  if (app.game.lastAction !== null) {
+    const r = Math.floor(app.game.lastAction / BOARD_SIZE);
+    const c = app.game.lastAction % BOARD_SIZE;
+    const cx = margin + c * step;
+    const cy = margin + r * step;
+    ctx.strokeStyle = "#e74c3c";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.arc(cx, cy, stoneR * 0.35, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+
+// ---- Init ----
+updateInfo();
+redraw();
+</script>
+</body>
+</html>

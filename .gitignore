@@ -9,3 +9,7 @@ checkpoints/
 
 # Virtual environments
 .venv
+
+exports
+
+*.onnx
