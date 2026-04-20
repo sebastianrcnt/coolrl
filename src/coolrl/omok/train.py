@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
+import os
 import random
 import signal
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +35,7 @@ from .mcts import MCTS
 from .network import PolicyValueNet, clone_model
 from .openings import sample_balanced_openings
 from .replay import PendingSample, ReplayBuffer
+from .selfplay_worker import model_state_to_numpy, run_selfplay_chunk, worker_init
 
 
 class TqdmLogSink:
@@ -86,6 +90,15 @@ class Trainer:
         self.start_time = time.monotonic()
         self.elapsed_seconds_offset = 0.0
         self.stop_requested = False
+        self.num_workers, num_workers_auto = config.selfplay.resolved_num_workers()
+        if num_workers_auto:
+            logger.info(
+                "Self-play num_workers=auto resolved to {} (os.cpu_count={})",
+                self.num_workers,
+                os.cpu_count(),
+            )
+        else:
+            logger.info("Self-play num_workers={}", self.num_workers)
         signal.signal(signal.SIGINT, self._handle_stop_signal)
         signal.signal(signal.SIGTERM, self._handle_stop_signal)
         if resume_path:
@@ -287,6 +300,32 @@ class Trainer:
         simulations: int,
         progress: tqdm,
     ) -> dict[str, int]:
+        num_workers = self.num_workers
+        if num_workers > 0:
+            return self._run_selfplay_source_parallel(
+                source=source,
+                model=model,
+                openings=openings,
+                simulations=simulations,
+                progress=progress,
+                num_workers=num_workers,
+            )
+        return self._run_selfplay_source_sequential(
+            source=source,
+            model=model,
+            openings=openings,
+            simulations=simulations,
+            progress=progress,
+        )
+
+    def _run_selfplay_source_sequential(
+        self,
+        source: str,
+        model: PolicyValueNet,
+        openings: list[list[int]],
+        simulations: int,
+        progress: tqdm,
+    ) -> dict[str, int]:
         evaluator = ModelEvaluator(model, device=self.device)
         batch_size = max(1, self.config.selfplay.batch_size)
         black_wins = 0
@@ -373,6 +412,98 @@ class Trainer:
             source,
             completed_games,
             batch_size,
+        )
+        return {
+            "games": completed_games,
+            "black_wins": black_wins,
+            "white_wins": white_wins,
+            "draws": draws,
+            "total_moves": total_moves,
+        }
+
+    def _run_selfplay_source_parallel(
+        self,
+        source: str,
+        model: PolicyValueNet,
+        openings: list[list[int]],
+        simulations: int,
+        progress: tqdm,
+        num_workers: int,
+    ) -> dict[str, int]:
+        batch_size = max(1, self.config.selfplay.batch_size)
+        chunks = [openings[i : i + batch_size] for i in range(0, len(openings), batch_size)]
+        if not chunks:
+            return {"games": 0, "black_wins": 0, "white_wins": 0, "draws": 0, "total_moves": 0}
+
+        state_numpy = model_state_to_numpy(model)
+        config_payload = self.config.to_dict()
+        seed_base = (self.config.seed * 1_000_003) ^ (self.iteration * 2_654_435_761) ^ hash(source)
+
+        black_wins = 0
+        white_wins = 0
+        draws = 0
+        total_moves = 0
+        completed_games = 0
+
+        ctx = mp.get_context("spawn")
+        effective_workers = max(1, min(num_workers, len(chunks)))
+        logger.info(
+            "Self-play parallel: source={} workers={} chunks={} batch_size={}",
+            source,
+            effective_workers,
+            len(chunks),
+            batch_size,
+        )
+        with ProcessPoolExecutor(
+            max_workers=effective_workers,
+            mp_context=ctx,
+            initializer=worker_init,
+            initargs=(config_payload, state_numpy),
+        ) as pool:
+            futures = {
+                pool.submit(
+                    run_selfplay_chunk,
+                    chunk,
+                    simulations,
+                    (seed_base ^ (idx * 0x9E3779B1)) & 0x7FFFFFFF,
+                ): idx
+                for idx, chunk in enumerate(chunks)
+            }
+            for future in as_completed(futures):
+                if self._should_stop():
+                    for pending in futures:
+                        if not pending.done():
+                            pending.cancel()
+                    break
+                try:
+                    finished = future.result()
+                except Exception:
+                    logger.exception("Self-play worker failed: source={}", source)
+                    raise
+                for history_dicts, winner in finished:
+                    history = [
+                        PendingSample(
+                            board=item["board"],
+                            to_play=item["to_play"],
+                            last_action=item["last_action"],
+                            policy=item["policy"],
+                        )
+                        for item in history_dicts
+                    ]
+                    self.replay.add_game(history, int(winner), self.config.optimization.value_discount)
+                    total_moves += len(history)
+                    black_wins += int(winner == 1)
+                    white_wins += int(winner == -1)
+                    draws += int(winner == 0)
+                    completed_games += 1
+                    progress.update(1)
+
+        logger.debug(
+            "Self-play source finished (parallel): source={} games={} batch_size={} workers={}",
+            source,
+            completed_games,
+            batch_size,
+            effective_workers,
         )
         return {
             "games": completed_games,

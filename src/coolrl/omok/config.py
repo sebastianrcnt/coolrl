@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ class NetworkConfig:
 class SelfPlayConfig:
     games_per_iteration: int = 4
     batch_size: int = 2
+    num_workers: int | str = 0
     search_threads: int = 1
     inference_batch_size: int = 256
     inference_wait_ms: float = 1.0
@@ -46,6 +48,18 @@ class SelfPlayConfig:
     simulation_schedule: list[dict[str, float | int]] = field(
         default_factory=lambda: [{"fraction": 0.0, "simulations": 16}]
     )
+
+    def resolved_num_workers(self) -> tuple[int, bool]:
+        value = self.num_workers
+        if isinstance(value, str):
+            token = value.strip().lower()
+            if token == "auto":
+                return max(1, os.cpu_count() or 1), True
+            try:
+                return max(0, int(token)), False
+            except ValueError as exc:
+                raise ValueError(f"unsupported selfplay.num_workers: {value!r}") from exc
+        return max(0, int(value)), False
 
 
 @dataclass(slots=True)

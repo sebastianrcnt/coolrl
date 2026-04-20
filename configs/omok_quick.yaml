@@ -16,6 +16,7 @@ network:
 selfplay:
   games_per_iteration: 8
   batch_size: 8
+  num_workers: auto
   temperature_moves: 6
   dirichlet_alpha: 0.25
   dirichlet_epsilon: 0.20

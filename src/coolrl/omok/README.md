@@ -91,7 +91,7 @@ For a longer run, copy `configs/omok_quick.yaml` and increase:
 
 ## Parallelization On MacBook
 
-There are three different kinds of parallelism here.
+There are four different kinds of parallelism here.
 
 `METAL` kernel parallelism is already active when `device: auto` resolves to `METAL`, or when you pass `--device METAL`. This is the most important layer for neural network inference and training.
 
@@ -117,10 +117,38 @@ selfplay:
 
 `selfplay.batch_size` is now active: `generate_selfplay()` keeps up to that many games alive together and sends their positions through `MCTS.search_batch(...)`. This increases model inference batch size and gives METAL more work per pass.
 
+Multi-process self-play is controlled by:
+
+```yaml
+selfplay:
+  num_workers: auto  # or an integer like 4
+```
+
+Accepted values:
+
+- `auto` (used by all shipped `configs/omok_*.yaml`): resolves to `os.cpu_count()` at startup and logs the resolved value, e.g. `Self-play num_workers=auto resolved to 8 (os.cpu_count=8)`. Portable across machines without editing the config.
+- `0`: disables multi-process and keeps the legacy single-process path.
+- any positive integer: fixed number of worker processes.
+
+When the resolved value is `>= 1`, self-play generation is dispatched to a `ProcessPoolExecutor` of CPU workers. Each worker receives a copy of the current model weights (as numpy arrays), reconstructs a tinygrad `PolicyValueNet` pinned to `Device.DEFAULT = "CPU"`, and runs MCTS + games independently. The main process keeps `METAL` for training so GPU context is never shared across processes. Results are collected back through the pool and appended to the shared replay buffer in the main process.
+
+Why CPU workers: for the 9x9 Omok network (~10k–500k params depending on config), GPU inference is latency-bound and underutilized per MCTS step. Running N concurrent CPU self-play workers, each batching their own leaves through a CPU evaluator, is much cheaper than fighting for one GPU context and it scales close to linearly with physical cores.
+
+Defaults and trade-offs:
+
+- `num_workers: 0` (default): single-process self-play, unchanged legacy behavior. Pick this for debugging, smoke runs, and anything where profiling needs to be deterministic.
+- `num_workers: 1`: one worker process. Rarely useful — use `0` instead unless you specifically want process isolation.
+- `num_workers: 2` to `os.cpu_count() - 1`: recommended for overnight runs. More workers = more games in flight, but diminishing returns once you exceed physical cores.
+
+Startup cost: each worker does a fresh `spawn` + tinygrad import (~1–2s on macOS). For tiny configs (smoke, quick) this startup can dominate a single iteration. For medium and full configs the pool cost is amortized across many MCTS calls per iteration. A new pool is created per self-play source per iteration (candidate and best each get their own), and workers are initialized once via `ProcessPoolExecutor(initializer=...)` so model weights are not re-shipped per chunk.
+
+Work chunking: openings are split into chunks of `selfplay.batch_size` and each chunk is one task submitted to the pool. Inside a chunk, `MCTS.search_batch` still batches leaves together, so both per-chunk and per-leaf batching are active.
+
 The knobs that matter most are:
 
 - Increase `games_per_iteration` for more data per iteration.
 - Increase `selfplay.batch_size` until METAL is busier, but reduce it if the UI becomes sluggish.
+- Increase `selfplay.num_workers` to saturate CPU cores with self-play games in parallel. Start with 2 and scale toward your physical core count.
 - Increase `simulations` for stronger MCTS targets.
 - Increase `optimization.batch_size` and `updates_per_iteration` for more network learning.
 - Keep `arena.games` small during tuning, because arena games are also MCTS-heavy.
@@ -175,6 +203,7 @@ network:
 selfplay:
   games_per_iteration: 16
   batch_size: 4
+  num_workers: 4      # CPU self-play workers; tune to physical cores
   simulation_schedule:
     - fraction: 0.0
       simulations: 16
@@ -221,6 +250,42 @@ Enable profiling:
 ```bash
 PROFILE=1 DEBUG=2 uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device METAL
 ```
+
+## Web GUI
+
+A browser-based GUI runs ONNX models entirely client-side via ONNX Runtime Web (WASM).
+
+Export safetensors checkpoints to ONNX:
+
+```bash
+uv run --with torch --with onnx python -m coolrl.omok.export_onnx \
+    --checkpoint checkpoints/omokai_converted/best \
+    --output exports/best.onnx
+```
+
+Export an entire directory:
+
+```bash
+uv run --with torch --with onnx python -m coolrl.omok.export_onnx \
+    --checkpoint checkpoints/omokai_converted \
+    --output exports/omokai
+```
+
+Import existing ONNX checkpoints from omokai into safetensors:
+
+```bash
+uv run --with onnx python -m coolrl.omok.convert_onnx \
+    --source /path/to/omokai/web/models \
+    --output checkpoints/omokai_converted
+```
+
+Serve the web GUI and open it in a browser:
+
+```bash
+cd src/coolrl/omok/web && python -m http.server 8080
+```
+
+Then open `http://localhost:8080`, click **Load .onnx**, and upload an exported model. Controls: click to place a stone, Reset, Undo, Swap side, force AI Move, and a simulations slider (4–512).
 
 ## Outputs
 

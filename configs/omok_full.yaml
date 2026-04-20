@@ -17,6 +17,7 @@ network:
 selfplay:
   games_per_iteration: 64
   batch_size: 64
+  num_workers: auto
   search_threads: 4
   inference_batch_size: 512
   inference_wait_ms: 2.0
