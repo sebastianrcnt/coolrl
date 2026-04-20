@@ -173,12 +173,12 @@ class MCTS:
     def _apply_virtual_loss(self, path: list[TreeNode]) -> None:
         for node in path:
             node.visit_count += 1
-            node.value_sum -= self.virtual_loss
+            node.value_sum += self.virtual_loss
 
     def _revert_virtual_loss(self, path: list[TreeNode]) -> None:
         for node in path:
             node.visit_count -= 1
-            node.value_sum += self.virtual_loss
+            node.value_sum -= self.virtual_loss
 
     def _apply_root_noise(self, root: TreeNode) -> None:
         if not root.children or self.dirichlet_alpha <= 0.0 or self.dirichlet_epsilon <= 0.0:

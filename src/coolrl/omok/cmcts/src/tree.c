@@ -143,14 +143,14 @@ void backup(Node **path, int path_len, float value) {
 void apply_virtual_loss(Node **path, int path_len, float virtual_loss) {
   for (int i = 0; i < path_len; i++) {
     path[i]->visit_count += 1;
-    path[i]->value_sum -= virtual_loss;
+    path[i]->value_sum += virtual_loss;
   }
 }
 
 void revert_virtual_loss(Node **path, int path_len, float virtual_loss) {
   for (int i = 0; i < path_len; i++) {
     path[i]->visit_count -= 1;
-    path[i]->value_sum += virtual_loss;
+    path[i]->value_sum -= virtual_loss;
   }
 }
 
