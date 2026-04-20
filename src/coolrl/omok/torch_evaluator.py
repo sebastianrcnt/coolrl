@@ -67,22 +67,13 @@ class TorchModelEvaluator(Evaluator):
         logger.info("Torch evaluator initialized: device={}", self.device)
 
     def effective_batch_size(self, batch_size: int) -> int:
-        return 1 << (max(batch_size, 1) - 1).bit_length()
+        return batch_size
 
     def evaluate(self, states: list[GameState]) -> tuple[np.ndarray, np.ndarray]:
         features = states_to_feature_planes(states)
         return self.evaluate_features(features)
 
     def evaluate_features(self, features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        n = int(features.shape[0])
-        bucket = self.effective_batch_size(n)
-        if bucket > n:
-            pad_shape = (bucket - n, *features.shape[1:])
-            features = np.concatenate(
-                [features, np.zeros(pad_shape, dtype=features.dtype)],
-                axis=0,
-            )
-
         array = np.ascontiguousarray(features)
         with torch.inference_mode():
             tensor = torch.as_tensor(array, device=self.device)
@@ -90,9 +81,6 @@ class TorchModelEvaluator(Evaluator):
             priors = torch.softmax(logits, dim=1).detach().cpu().numpy()
             value_np = values.detach().cpu().numpy()
 
-        if bucket > n:
-            priors = priors[:n]
-            value_np = value_np[:n]
         return priors.astype(np.float32, copy=False), value_np.astype(np.float32, copy=False)
 
 
