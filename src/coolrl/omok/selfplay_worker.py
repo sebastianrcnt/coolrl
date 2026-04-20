@@ -21,21 +21,28 @@ _WORKER_STATE: dict[str, Any] = {}
 
 def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> None:
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-    from tinygrad import Device, Tensor
-    from tinygrad.nn.state import load_state_dict
+
+    import torch
 
     from .config import config_from_dict
     from .mcts_backend import resolve_mcts_backend
-    from .network import PolicyValueNet
     from .torch_evaluator import build_evaluator
+    from .torch_network import PolicyValueNet
 
-    Device.DEFAULT = "CPU"
     config = config_from_dict(config_payload)
     mcts_module = resolve_mcts_backend(config.selfplay.mcts_backend)
+    backend = config.selfplay.evaluator_backend.lower()
+    if backend == "auto":
+        backend = "torch"
+    if backend != "torch":
+        raise RuntimeError("unsupported evaluator backend; use 'torch'")
+
     model = PolicyValueNet(config.rules.board_size, config.network)
-    tensor_state = {key: Tensor(np.asarray(value)) for key, value in state_numpy.items()}
-    load_state_dict(model, tensor_state, strict=True, verbose=False)
-    evaluator = build_evaluator(model, backend=config.selfplay.evaluator_backend, device="CPU")
+    model.load_state_dict({key: torch.as_tensor(np.asarray(value)) for key, value in state_numpy.items()})
+    model.to("cpu")
+    model.eval()
+
+    evaluator = build_evaluator(model, backend=backend, device="CPU")
     search = mcts_module.MCTS(
         c_puct=config.selfplay.c_puct,
         dirichlet_alpha=config.selfplay.dirichlet_alpha,
@@ -43,12 +50,14 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
         evaluator=evaluator,
         search_threads=config.selfplay.search_threads,
     )
+
     _WORKER_STATE.clear()
     _WORKER_STATE["config"] = config
     _WORKER_STATE["model"] = model
     _WORKER_STATE["evaluator"] = evaluator
     _WORKER_STATE["search"] = search
-    _WORKER_STATE["Tensor"] = Tensor
+    _WORKER_STATE["torch"] = torch
+
 
 
 def run_selfplay_chunk(
@@ -63,11 +72,12 @@ def run_selfplay_chunk(
 
     config = _WORKER_STATE["config"]
     search = _WORKER_STATE["search"]
-    Tensor = _WORKER_STATE["Tensor"]
-
+    torch = _WORKER_STATE.get("torch")
     random.seed(seed)
     np.random.seed(seed & 0xFFFFFFFF)
-    Tensor.manual_seed(seed)
+    if torch is not None:
+        torch.manual_seed(seed)
+
     if progress_queue is not None:
         progress_queue.put(
             {
@@ -191,7 +201,13 @@ def run_selfplay_chunk(
 
 
 def model_state_to_numpy(model) -> dict[str, np.ndarray]:
-    return {
-        key: np.array(value.realize().numpy(), copy=True)
-        for key, value in model.state_dict().items()
-    }
+    state = model.state_dict()
+    output: dict[str, np.ndarray] = {}
+    for key, value in state.items():
+        if hasattr(value, "realize"):
+            output[key] = np.array(value.realize().numpy(), copy=True)
+        elif hasattr(value, "detach"):
+            output[key] = np.array(value.detach().cpu().numpy(), copy=True)
+        else:
+            output[key] = np.array(value, copy=True)
+    return output

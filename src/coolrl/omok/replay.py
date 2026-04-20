@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
-from tinygrad import Tensor
 
 from .features import apply_symmetry_batch, encode_feature_planes_batch
 
@@ -65,12 +64,12 @@ class ReplayBuffer:
             )
         self.games_seen += 1
 
-    def sample_batch(
+    def sample_batch_numpy(
         self,
         batch_size: int,
         device: str | None = None,
         recency_temperature: float = 0.0,
-    ) -> tuple[Tensor, Tensor, Tensor]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if len(self.samples) < batch_size:
             raise ValueError("not enough replay data to sample a batch")
         total = len(self.samples)
@@ -97,10 +96,48 @@ class ReplayBuffer:
         planes_batch = encode_feature_planes_batch(boards, to_play, last_actions, boards.shape[-1])
         planes_batch, policy_batch = apply_symmetry_batch(planes_batch, policy_batch)
 
-        states = Tensor(np.ascontiguousarray(planes_batch), device=device)
-        policy = Tensor(np.ascontiguousarray(policy_batch), device=device)
-        value = Tensor(value_batch, device=device)
-        return states, policy, value
+        return (
+            np.ascontiguousarray(planes_batch),
+            np.ascontiguousarray(policy_batch),
+            np.ascontiguousarray(value_batch),
+        )
+
+    def sample_batch_torch(
+        self,
+        batch_size: int,
+        device: str | None = None,
+        recency_temperature: float = 0.0,
+    ) -> tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
+        states_np, policy_np, value_np = self.sample_batch_numpy(
+            batch_size,
+            recency_temperature=recency_temperature,
+        )
+
+        import torch
+
+        if device is None:
+            return (
+                torch.as_tensor(states_np),
+                torch.as_tensor(policy_np),
+                torch.as_tensor(value_np),
+            )
+        return (
+            torch.as_tensor(states_np, device=device),
+            torch.as_tensor(policy_np, device=device),
+            torch.as_tensor(value_np, device=device),
+        )
+
+    def sample_batch(
+        self,
+        batch_size: int,
+        device: str | None = None,
+        recency_temperature: float = 0.0,
+    ) -> tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
+        return self.sample_batch_torch(
+            batch_size,
+            device=device,
+            recency_temperature=recency_temperature,
+        )
 
     def state_dict(self) -> dict[str, object]:
         return {
@@ -133,4 +170,3 @@ class ReplayBuffer:
                 )
             )
         self.games_seen = int(state.get("games_seen", 0))
-

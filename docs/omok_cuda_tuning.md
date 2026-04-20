@@ -1,3 +1,5 @@
+> Historical note: this document records CUDA tuning measurements from the earlier tinygrad-to-PyTorch transition. The current Omok runtime is PyTorch-only: training checkpoints are `.pt`, the normal evaluator is PyTorch, and tinygrad is no longer a runtime dependency. Treat tinygrad-specific sections below as historical baseline context, not current setup guidance.
+
 # Omok CUDA Self-Play Tuning Notes
 
 These notes capture measurements from the RTX 3090 CUDA profile
