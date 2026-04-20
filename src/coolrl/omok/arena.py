@@ -12,7 +12,6 @@ from .evaluator import Evaluator, ModelEvaluator
 from .metrics import IterationMetrics
 from .mcts_backend import resolve_mcts_backend
 from .mcts_types import MCTSBackend
-from .network import PolicyValueNet
 from .openings import build_opening_sequences
 
 
@@ -42,8 +41,8 @@ class ArenaGame:
 class Arena:
     def __init__(
         self,
-        candidate_model: PolicyValueNet,
-        best_model: PolicyValueNet,
+        candidate_model: object,
+        best_model: object,
         device: str | None,
         board_size: int,
         exactly_five: bool,

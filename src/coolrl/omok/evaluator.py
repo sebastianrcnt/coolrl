@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 from loguru import logger
-from tinygrad import Tensor
 
 from .board import GameState
 from .features import states_to_feature_planes
-from .network import PolicyValueNet
+
+if TYPE_CHECKING:
+    from .network import PolicyValueNet
+
+try:
+    from tinygrad import Tensor
+except ModuleNotFoundError:  # pragma: no cover
+    Tensor = None
 
 
 class Evaluator:
@@ -21,7 +29,9 @@ class Evaluator:
 
 
 class ModelEvaluator(Evaluator):
-    def __init__(self, model: PolicyValueNet, device: str | None = None) -> None:
+    def __init__(self, model: "PolicyValueNet", device: str | None = None) -> None:
+        if Tensor is None:
+            raise RuntimeError("tinygrad not installed. Install with `uv sync --extra omok`.")
         self.model = model
         self.device = device
         self._seen_buckets: set[int] = set()
@@ -56,6 +66,9 @@ class ModelEvaluator(Evaluator):
                 [features, np.zeros(pad_shape, dtype=features.dtype)],
                 axis=0,
             )
+
+        from .features import states_to_feature_planes  # circular-safe
+
         tensor = Tensor(np.ascontiguousarray(features), device=self.device)
         with Tensor.train(False):
             logits, values = self.model(tensor)

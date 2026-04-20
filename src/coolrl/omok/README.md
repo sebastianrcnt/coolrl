@@ -1,27 +1,29 @@
 # 9x9 Omok RL
 
-This package trains a 9x9 Omok agent with tinygrad, self-play MCTS, a policy/value network, replay, checkpointing, arena promotion, and a Pygame GUI.
+This package trains a 9x9 Omok agent with PyTorch, self-play MCTS, a
+policy/value network, replay, checkpointing, arena promotion, and a Pygame GUI.
 
-On a MacBook, tinygrad usually picks `METAL` automatically. You can always force it with `--device METAL`.
+On a MacBook, training/evaluation can run on Apple Silicon via PyTorch MPS when
+available, otherwise PyTorch CPU fallback is used.
 
 ## Quick Start
 
 Use the smoke config first. It is intentionally tiny and exists to verify that the full pipeline works.
 
 ```bash
-uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device METAL
+uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device CPU
 ```
 
 Run a short local training session:
 
 ```bash
-uv run python -m coolrl.omok.train --config configs/omok_quick.yaml --device METAL
+uv run python -m coolrl.omok.train --config configs/omok_quick.yaml --device CPU
 ```
 
 Resume from a checkpoint directory:
 
 ```bash
-uv run python -m coolrl.omok.train --config configs/omok_quick.yaml --resume checkpoints/omok_quick --device METAL
+uv run python -m coolrl.omok.train --config configs/omok_quick.yaml --resume checkpoints/omok_quick --device CPU
 ```
 
 Export a checkpoint to ONNX and open the GUI against it:
@@ -41,7 +43,7 @@ uv run python -m coolrl.omok.train --config configs/omok_full_metal.yaml
 uv run python -m coolrl.omok.train --config configs/omok_full_cuda.yaml
 ```
 
-The full CUDA/Metal profiles use the C MCTS backend. If a source checkout cannot
+The full profiles use the C MCTS backend. If a source checkout cannot
 find the compiled extension, build it in place:
 
 ```bash
@@ -93,7 +95,14 @@ For actual full runs, prefer the hardware-specific presets:
 - `configs/omok_full_cuda.yaml`: NVIDIA/discrete GPU profile. It uses `device: CUDA`, C MCTS, `evaluator_backend: torch`, `num_workers: 0`, `batch_size: 64`, and `leaves_per_batch: 64` so self-play and arena inference stay on the GPU in large batches.
 - `configs/omok_full_metal.yaml`: Apple Silicon profile. It uses `device: METAL`, C MCTS, smaller self-play chunks, `num_workers: auto`, and CPU worker parallelism so several games can be generated concurrently while avoiding shared Metal contexts across spawned processes.
 
-Compatibility note: the full profiles keep reference fields such as `use_amp`, `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and `grad_clip` so the profile stays easy to compare with `rocm_unlimited.yaml`. The C backend uses `search_threads` for tree-level parallel collection across active games, but it does not implement same-tree virtual-loss search or async inference queues. The active self-play throughput knobs are `selfplay.batch_size`, `selfplay.num_workers`, `selfplay.leaves_per_batch`, `selfplay.search_threads`, and `selfplay.evaluator_backend`.
+Compatibility note: the full profiles keep reference fields such as `use_amp`,
+`search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and
+`grad_clip` for config compatibility. The C backend uses `search_threads` for tree-level
+parallel collection across active games, but it does not implement same-tree
+virtual-loss search or async inference queues. The active self-play throughput
+knobs are `selfplay.batch_size`, `selfplay.num_workers`,
+`selfplay.leaves_per_batch`, `selfplay.search_threads`, and
+`selfplay.evaluator_backend`.
 
 For a longer run, copy `configs/omok_quick.yaml` and increase:
 
@@ -107,9 +116,8 @@ For a longer run, copy `configs/omok_quick.yaml` and increase:
 
 There are four different kinds of parallelism here.
 
-GPU kernel parallelism is already active when tinygrad runs on `CUDA` or
-`METAL`. This is the most important layer for neural network inference and
-training.
+GPU kernel parallelism is active on CUDA and MPS when available. This is the most
+important layer for neural network inference and training.
 
 Training batch parallelism is controlled by:
 
@@ -145,8 +153,8 @@ active games * leaves_per_batch
 ```
 
 For CUDA full self-play, `64 * 64 = 4096` positions per large evaluator call is
-the current high-throughput tinygrad setting. The CUDA profile now uses a
-PyTorch evaluator for self-play and arena, so this value should be swept again.
+the current high-throughput tuning target. This value is a good baseline to
+sweep again for your hardware.
 See `docs/omok_cuda_tuning.md` for the RTX 3090 measurements.
 
 Multi-process self-play is controlled by:
@@ -162,14 +170,18 @@ Accepted values:
 - `0`: disables multi-process and keeps the legacy single-process path.
 - any positive integer: fixed number of worker processes.
 
-When the resolved value is `>= 1`, self-play generation is dispatched to a `ProcessPoolExecutor` of CPU workers. Each worker receives a copy of the current model weights (as numpy arrays), reconstructs a tinygrad `PolicyValueNet` pinned to `Device.DEFAULT = "CPU"`, and runs MCTS + games independently. The main process keeps the configured accelerator for training so GPU context is never shared across processes. Results are collected back through the pool and appended to the shared replay buffer in the main process.
+When the resolved value is `>= 1`, self-play generation is dispatched to a
+`ProcessPoolExecutor` of CPU workers. Each worker receives a copy of the current
+model weights (as numpy arrays), reconstructs a torch `PolicyValueNet`, and runs
+MCTS + games independently. The main process keeps the configured training device
+so torch contexts are process-local. Results are collected back through the pool
+and appended to the shared replay buffer in the main process.
 
-Why CPU workers: this avoids sharing a GPU context across spawned processes. On
-Apple Silicon this can be a reasonable trade-off because the CPU and GPU share
-memory and multiple CPU workers can keep self-play moving while the main process
-uses Metal for training. On a discrete NVIDIA GPU, the trade-off is different:
-the worker path moves self-play inference from CUDA to CPU and was measured
-slower on the RTX 3090 profile. Use `num_workers: 0` for CUDA full runs.
+Why CPU workers: this keeps torch contexts process-local. On Apple Silicon this can
+be a reasonable trade-off because CPU workers can keep self-play moving while the
+main process runs updates. On a discrete NVIDIA GPU, the trade-off is different:
+the worker path moves self-play inference off CUDA and can be slower than full CUDA
+self-play. Use `num_workers: 0` for CUDA full runs.
 
 Defaults and trade-offs:
 
@@ -177,7 +189,12 @@ Defaults and trade-offs:
 - `num_workers: 1`: one worker process. Rarely useful — use `0` instead unless you specifically want process isolation.
 - `num_workers: 2` to `os.cpu_count() - 1`: useful for CPU/Metal-style self-play. More workers = more games in flight, but diminishing returns once you exceed physical cores.
 
-Startup cost: each worker does a fresh `spawn` + tinygrad import (~1–2s on macOS). For tiny configs (smoke, quick) this startup can dominate a single iteration. For medium and full configs the pool cost is amortized across many MCTS calls per iteration. A new pool is created per self-play source per iteration (candidate and best each get their own), and workers are initialized once via `ProcessPoolExecutor(initializer=...)` so model weights are not re-shipped per chunk.
+Startup cost: each worker incurs startup overhead. For tiny configs (smoke, quick)
+this can dominate a single iteration. For medium and full configs the pool cost is
+amortized across many MCTS calls per iteration. A new pool is created per self-play
+source per iteration (candidate and best each get their own), and workers are
+initialized once via `ProcessPoolExecutor(initializer=...)` so model weights are
+not re-shipped per chunk.
 
 Work chunking: openings are split into chunks of `selfplay.batch_size` and each chunk is one task submitted to the pool. Inside a chunk, `MCTS.search_batch` still batches leaves together, so both per-chunk and per-leaf batching are active.
 
@@ -263,36 +280,16 @@ arena:
 
 If the machine gets sluggish, reduce `simulations` first. If memory pressure rises, reduce `optimization.batch_size` or network `channels`.
 
-## Debugging tinygrad
+## Torch Debug Smoke
 
-See which device tinygrad picked:
-
-```bash
-uv run python - <<'PY'
-from tinygrad import Device
-print(Device.DEFAULT)
-PY
-```
-
-Run with tinygrad performance logs:
+Use this one-iteration smoke for a full pipeline check:
 
 ```bash
-DEBUG=2 uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device METAL
+uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --max-iterations 1 --device CPU
 ```
 
-Useful tinygrad debug levels:
-
-- `DEBUG=0`: normal quiet mode.
-- `DEBUG=1`: device and scheduling summaries.
-- `DEBUG=2`: per-kernel timing and throughput. Usually the best profiling starting point.
-- `DEBUG=4`: generated kernel source. Very noisy.
-- `DEBUG=7`: buffer allocation/free logs. Extremely noisy.
-
-Enable profiling:
-
-```bash
-PROFILE=1 DEBUG=2 uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device METAL
-```
+For a full GPU troubleshooting flow, use standard PyTorch tooling (`torch.profiler`,
+`nsys`, vendor profiler, etc.) after confirming the smoke command is stable.
 
 ## Web GUI
 
@@ -357,11 +354,13 @@ The report is a 2×3 grid: train loss, policy/value loss, arena win rate (with a
 
 Training writes under the configured checkpoint directory:
 
-- `latest.safetensors`: current candidate model.
-- `best.safetensors`: best promoted model.
-- `iter_XXXX.safetensors`: iteration snapshots when enabled.
+- `latest.pt`: current candidate model.
+- `best.pt`: best promoted model.
+- `iter_XXXX.pt`: iteration snapshots when enabled.
 - `trainer_state.json`: iteration counters and run metadata.
-- `optimizer.safetensors`: tinygrad optimizer state.
 - `replay.pkl`: replay buffer.
 - `metrics.jsonl`: one JSON metrics record per iteration.
 - `runtime_progress.json`: latest progress snapshot.
+
+Legacy tinygrad checkpoints can still be used as a model-weight-only seed path, but new
+training checkpoints are torch `.pt` only.

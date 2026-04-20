@@ -23,7 +23,8 @@ This installs the base dependencies from `[project.dependencies]`.
 This project defines extras in `[project.optional-dependencies]`:
 
 - `poker`: `inquirer`
-- `omok`: `numpy`, `pygame`, `pyyaml`, `tinygrad`
+- `omok`: `torch`, `numpy`, `pygame`, `pyyaml` (also includes `tinygrad` today for
+  legacy compatibility)
 - `all`: installs both `poker` and `omok`
 
 Install one or more extras as needed:
@@ -46,5 +47,5 @@ Use the project docs for each module:
 For Omok quick smoke test:
 
 ```bash
-uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device METAL
+uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device CPU
 ```

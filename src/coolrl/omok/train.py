@@ -13,10 +13,9 @@ from queue import Empty
 from typing import Any
 
 import numpy as np
+import torch
 from loguru import logger
 from rich.progress import Progress, TaskID
-from tinygrad import Tensor
-from tinygrad.nn.optim import AdamW
 
 from coolrl.progress import RichLogSink, make_progress
 
@@ -24,22 +23,47 @@ from .arena import Arena
 from .board import GameState
 from .checkpoint import (
     load_checkpoint,
-    load_optimizer_state,
     load_trainer_state,
     save_checkpoint,
-    save_optimizer_state,
     save_trainer_state,
 )
 from .config import RunConfig, load_config
-from .device import configure_device
 from .evaluator import Evaluator
 from .mcts_backend import resolve_mcts_backend
 from .metrics import IterationMetrics
-from .network import PolicyValueNet, clone_model
 from .openings import sample_balanced_openings
 from .replay import PendingSample, ReplayBuffer
 from .selfplay_worker import model_state_to_numpy, run_selfplay_chunk, worker_init
 from .torch_evaluator import build_evaluator
+from .torch_network import PolicyValueNet, clone_model
+
+
+def _preferred_device_name(name: str | None) -> str:
+    requested = (name or "auto").upper()
+    if requested == "CUDA":
+        return "CUDA"
+    if requested in {"CPU", "METAL", "GPU"}:
+        return requested
+    if torch.cuda.is_available():
+        return "CUDA"
+    return "CPU"
+
+
+def _torch_device(name: str | None) -> torch.device:
+    requested = (name or "auto").upper()
+    if requested == "CUDA":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested for training but torch.cuda is unavailable")
+        return torch.device("cuda")
+    if requested in {"METAL", "GPU"}:
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if requested == "CPU":
+        return torch.device("cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
 
 
 def configure_logging() -> None:
@@ -55,20 +79,23 @@ def configure_logging() -> None:
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
-    Tensor.manual_seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 class Trainer:
     def __init__(self, config: RunConfig, resume_path: str | None = None) -> None:
         self.config = config
-        self.device = configure_device(config.device)
+        self.device = _preferred_device_name(config.device)
+        self.torch_device = _torch_device(config.device)
         self.checkpoint_dir = config.checkpoint_dir
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = self.checkpoint_dir / "metrics.jsonl"
         self.progress_file = self.checkpoint_dir / "runtime_progress.json"
         self.replay = ReplayBuffer(config.optimization.replay_capacity)
         self.mcts_module = resolve_mcts_backend(config.selfplay.mcts_backend)
-        self.model = PolicyValueNet(config.rules.board_size, config.network)
+        self.model = PolicyValueNet(config.rules.board_size, config.network).to(self.torch_device)
         self.best_model = clone_model(self.model)
         self.model_evaluator: Evaluator | None = None
         self.best_model_evaluator: Evaluator | None = None
@@ -115,10 +142,12 @@ class Trainer:
             self._restore_from_checkpoint(resume_path)
         self._refresh_model_evaluators()
 
-    def _build_optimizer(self) -> AdamW:
-        return AdamW(
+    def _build_optimizer(self) -> torch.optim.AdamW:
+        return torch.optim.AdamW(
             self.model.parameters(),
             lr=self.config.optimization.learning_rate,
+            betas=(0.9, 0.999),
+            eps=1.0e-8,
             weight_decay=self.config.optimization.weight_decay,
         )
 
@@ -126,14 +155,10 @@ class Trainer:
         self.model_evaluator = self._build_evaluator(self.model)
         self.best_model_evaluator = self._build_evaluator(self.best_model)
 
-    def _build_evaluator(self, model: PolicyValueNet) -> Evaluator:
-        return build_evaluator(
-            model,
-            backend=self.config.selfplay.evaluator_backend,
-            device=self.device,
-        )
+    def _build_evaluator(self, model: object) -> Evaluator:
+        return build_evaluator(model, backend=self.config.selfplay.evaluator_backend, device=self.device)
 
-    def _evaluator_for_model(self, model: PolicyValueNet) -> Evaluator:
+    def _evaluator_for_model(self, model: object) -> Evaluator:
         if model is self.model:
             if self.model_evaluator is None:
                 self.model_evaluator = self._build_evaluator(self.model)
@@ -352,7 +377,7 @@ class Trainer:
     def _run_selfplay_source(
         self,
         source: str,
-        model: PolicyValueNet,
+        model: object,
         openings: list[list[int]],
         simulations: int,
         progress: Progress,
@@ -381,7 +406,7 @@ class Trainer:
     def _run_selfplay_source_sequential(
         self,
         source: str,
-        model: PolicyValueNet,
+        model: object,
         openings: list[list[int]],
         simulations: int,
         progress: Progress,
@@ -503,7 +528,7 @@ class Trainer:
     def _run_selfplay_source_parallel(
         self,
         source: str,
-        model: PolicyValueNet,
+        model: object,
         openings: list[list[int]],
         simulations: int,
         progress: Progress,
@@ -676,14 +701,12 @@ class Trainer:
                     chunk_done = int(event.get("chunk_done", 0))
                     chunk_size = int(event.get("chunk_size", 0))
                     if chunk_task is not None:
-                        status = "done" if chunk_size > 0 and chunk_done >= chunk_size else (
-                            f"pid={pid} last_moves={moves} winner={winner}"
+                        status = (
+                            "done"
+                            if chunk_size > 0 and chunk_done >= chunk_size
+                            else f"pid={pid} last_moves={moves} winner={winner}"
                         )
-                        progress.update(
-                            chunk_task,
-                            advance=1,
-                            status=status,
-                        )
+                        progress.update(chunk_task, advance=1, status=status)
                     self._selfplay_completed_games += 1
                     progress.update(progress_task, advance=1)
                     self._refresh_selfplay_status(progress, progress_task, source)
@@ -693,12 +716,7 @@ class Trainer:
                 progress.update(progress_task, advance=1, status=f"{source} games")
         return drained
 
-    def _refresh_selfplay_status(
-        self,
-        progress: Progress,
-        progress_task: TaskID,
-        source: str,
-    ) -> None:
+    def _refresh_selfplay_status(self, progress: Progress, progress_task: TaskID, source: str) -> None:
         progress.update(
             progress_task,
             status=(
@@ -723,57 +741,68 @@ class Trainer:
                 total=self.config.optimization.updates_per_iteration,
                 status="",
             )
-            with Tensor.train(True):
-                for _ in range(self.config.optimization.updates_per_iteration):
-                    if self._should_stop():
-                        break
-                    update_started = time.perf_counter()
-                    states, target_policy, target_value = self.replay.sample_batch(
-                        batch_size,
-                        device=self.device,
-                        recency_temperature=self.config.optimization.recency_temperature,
-                    )
-                    sample_seconds = time.perf_counter() - update_started
-                    step_started = time.perf_counter()
-                    self.optimizer.zero_grad()
-                    logits, value = self.model(states)
-                    forward_seconds = time.perf_counter() - step_started
-                    step_started = time.perf_counter()
-                    policy_loss = -(target_policy * logits.log_softmax(axis=1)).sum(axis=1).mean()
-                    value_loss = ((value - target_value) ** 2).mean()
-                    loss = (
-                        self.config.optimization.policy_loss_weight * policy_loss
-                        + self.config.optimization.value_loss_weight * value_loss
-                    )
-                    loss_seconds = time.perf_counter() - step_started
-                    step_started = time.perf_counter()
-                    loss.backward()
-                    backward_seconds = time.perf_counter() - step_started
-                    step_started = time.perf_counter()
-                    self.optimizer.step()
-                    optimizer_seconds = time.perf_counter() - step_started
+            self.model.train()
+            for _ in range(self.config.optimization.updates_per_iteration):
+                if self._should_stop():
+                    break
+                update_started = time.perf_counter()
+                states, target_policy, target_value = self.replay.sample_batch_torch(
+                    batch_size,
+                    device=self.torch_device,
+                    recency_temperature=self.config.optimization.recency_temperature,
+                )
+                sample_seconds = time.perf_counter() - update_started
 
-                    sync_started = time.perf_counter()
-                    loss_value = float(loss.realize().numpy())
-                    policy_loss_value = float(policy_loss.realize().numpy())
-                    value_loss_value = float(value_loss.realize().numpy())
-                    sync_seconds = time.perf_counter() - sync_started
-                    if self.iteration_metrics is not None:
-                        self.iteration_metrics.training.record(
-                            batch_size=batch_size,
-                            sample_seconds=sample_seconds,
-                            forward_seconds=forward_seconds,
-                            loss_seconds=loss_seconds,
-                            backward_seconds=backward_seconds,
-                            optimizer_seconds=optimizer_seconds,
-                            sync_seconds=sync_seconds,
-                        )
-                    total_loss += loss_value
-                    total_policy_loss += policy_loss_value
-                    total_value_loss += value_loss_value
-                    updates_done += 1
-                    self.total_updates += 1
-                    progress.update(progress_task, advance=1, status=f"loss={loss_value:.4f}")
+                step_started = time.perf_counter()
+                self.optimizer.zero_grad(set_to_none=True)
+                logits, value = self.model(states)
+                forward_seconds = time.perf_counter() - step_started
+
+                step_started = time.perf_counter()
+                policy_loss = -(target_policy * torch_f_log_softmax(logits, dim=1)).sum(dim=1).mean()
+                value_loss = ((value - target_value) ** 2).mean()
+                loss = (
+                    self.config.optimization.policy_loss_weight * policy_loss
+                    + self.config.optimization.value_loss_weight * value_loss
+                )
+                loss_seconds = time.perf_counter() - step_started
+
+                step_started = time.perf_counter()
+                loss.backward()
+                if self.config.optimization.grad_clip > 0.0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.optimization.grad_clip,
+                    )
+                backward_seconds = time.perf_counter() - step_started
+
+                step_started = time.perf_counter()
+                self.optimizer.step()
+                optimizer_seconds = time.perf_counter() - step_started
+
+                loss_value = float(loss.detach().cpu().item())
+                policy_loss_value = float(policy_loss.detach().cpu().item())
+                value_loss_value = float(value_loss.detach().cpu().item())
+
+                sync_started = time.perf_counter()
+                torch.cuda.synchronize() if self.torch_device.type == "cuda" else None
+                sync_seconds = time.perf_counter() - sync_started
+                if self.iteration_metrics is not None:
+                    self.iteration_metrics.training.record(
+                        batch_size=batch_size,
+                        sample_seconds=sample_seconds,
+                        forward_seconds=forward_seconds,
+                        loss_seconds=loss_seconds,
+                        backward_seconds=backward_seconds,
+                        optimizer_seconds=optimizer_seconds,
+                        sync_seconds=sync_seconds,
+                    )
+                total_loss += loss_value
+                total_policy_loss += policy_loss_value
+                total_value_loss += value_loss_value
+                updates_done += 1
+                self.total_updates += 1
+                progress.update(progress_task, advance=1, status=f"loss={loss_value:.4f}")
 
         updates = max(1, updates_done)
         stats = {
@@ -878,8 +907,7 @@ class Trainer:
             + int(metadata.get("eval_selfplay_best_calls", 0)),
             float(metadata.get("eval_arena_candidate_seconds", 0.0))
             + float(metadata.get("eval_arena_best_seconds", 0.0)),
-            int(metadata.get("eval_arena_candidate_calls", 0))
-            + int(metadata.get("eval_arena_best_calls", 0)),
+            int(metadata.get("eval_arena_candidate_calls", 0)) + int(metadata.get("eval_arena_best_calls", 0)),
             metadata.get("train_sync_seconds", 0.0),
         )
 
@@ -891,8 +919,20 @@ class Trainer:
             "best_iteration": self.best_iteration,
             "best_arena_win_rate": self.best_arena_win_rate,
         }
-        save_checkpoint(self.checkpoint_dir / "latest.safetensors", self.model, self.config, latest_metadata)
-        save_checkpoint(self.checkpoint_dir / "best.safetensors", self.best_model, self.config, best_metadata)
+        save_checkpoint(
+            self.checkpoint_dir / "latest.pt",
+            self.model,
+            self.config,
+            latest_metadata,
+            optimizer=self.optimizer,
+        )
+        save_checkpoint(
+            self.checkpoint_dir / "best.pt",
+            self.best_model,
+            self.config,
+            best_metadata,
+            optimizer=None,
+        )
         save_interval = (
             1
             if self.config.checkpoint.save_every_iteration
@@ -900,10 +940,11 @@ class Trainer:
         )
         if save_interval > 0 and self.iteration % save_interval == 0:
             save_checkpoint(
-                self.checkpoint_dir / f"iter_{self.iteration:04d}.safetensors",
+                self.checkpoint_dir / f"iter_{self.iteration:04d}.pt",
                 self.model,
                 self.config,
                 latest_metadata,
+                optimizer=self.optimizer,
             )
 
     def save_runtime_state(self, metadata: dict[str, Any]) -> None:
@@ -916,7 +957,6 @@ class Trainer:
             "elapsed_seconds": self.elapsed_seconds_offset + time.monotonic() - self.start_time,
         }
         save_trainer_state(self.checkpoint_dir, payload, self.replay.state_dict())
-        save_optimizer_state(self.checkpoint_dir, self.optimizer)
         self.progress_file.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
     def _restore_from_checkpoint(self, resume_path: str) -> None:
@@ -924,22 +964,28 @@ class Trainer:
         root = path.parent if path.name == "trainer_state.json" else path
         if path.is_dir() or path.name == "trainer_state.json":
             metadata, replay_state = load_trainer_state(root)
-            self.model, loaded_config, _ = load_checkpoint(root / "latest.safetensors")
-            if (root / "best.safetensors").exists():
-                self.best_model, _, best_metadata = load_checkpoint(root / "best.safetensors")
-                self.best_checkpoint_metadata = dict(best_metadata)
+            self.model, loaded_config, latest_metadata, latest_optimizer, _ = load_checkpoint(root / "latest")
+            self._validate_resume_config(loaded_config)
+            self._apply_loaded_state(self.model, loaded_config, latest_metadata, latest_optimizer, "latest checkpoint")
+            best_checkpoint = root / "best"
+            best_metadata = None
+            if best_checkpoint.with_suffix(".pt").exists() or best_checkpoint.with_suffix(".safetensors").exists():
+                self.best_model, _, best_metadata, _, _ = load_checkpoint(best_checkpoint)
             else:
                 self.best_model = clone_model(self.model)
-            self._validate_resume_config(loaded_config)
-            self.optimizer = self._build_optimizer()
-            load_optimizer_state(root, self.optimizer)
+            if best_metadata:
+                self.best_checkpoint_metadata = dict(best_metadata)
             if replay_state:
                 self.replay.load_state_dict(replay_state)
-            self.iteration = int(metadata.get("iteration", 0))
-            self.best_iteration = int(metadata.get("best_iteration", 0))
-            self.best_arena_win_rate = float(metadata.get("best_arena_win_rate", 0.0))
-            self.total_updates = int(metadata.get("total_updates", 0))
-            self.elapsed_seconds_offset = float(metadata.get("elapsed_seconds", 0.0))
+            self.iteration = int(latest_metadata.get("iteration", metadata.get("iteration", 0)))
+            self.best_iteration = int(metadata.get("best_iteration", latest_metadata.get("best_iteration", 0)))
+            self.best_arena_win_rate = float(
+                metadata.get("best_arena_win_rate", latest_metadata.get("best_arena_win_rate", 0.0))
+            )
+            self.total_updates = int(
+                metadata.get("total_updates", latest_metadata.get("total_updates", self.total_updates))
+            )
+            self.elapsed_seconds_offset = float(metadata.get("elapsed_seconds", self.elapsed_seconds_offset))
             self.start_time = time.monotonic()
             logger.info(
                 "Resumed trainer state: iteration={} best_iteration={} replay_games={}",
@@ -949,13 +995,48 @@ class Trainer:
             )
             return
 
-        self.model, loaded_config, metadata = load_checkpoint(path)
+        self.model, loaded_config, loaded_metadata, latest_optimizer, _ = load_checkpoint(path)
         self._validate_resume_config(loaded_config)
+        self._apply_loaded_state(self.model, loaded_config, loaded_metadata, latest_optimizer, "checkpoint file")
         self.best_model = clone_model(self.model)
+        self.iteration = int(loaded_metadata.get("iteration", 0))
+        self.best_iteration = int(loaded_metadata.get("best_iteration", 0))
+        self.best_arena_win_rate = float(loaded_metadata.get("best_arena_win_rate", self.best_arena_win_rate))
+        self.total_updates = int(loaded_metadata.get("total_updates", self.total_updates))
+        self.elapsed_seconds_offset = float(loaded_metadata.get("elapsed_seconds", self.elapsed_seconds_offset))
+        self.start_time = time.monotonic()
+        logger.info(
+            "Resumed model checkpoint: path={} iteration={}",
+            path,
+            self.iteration,
+        )
+
+    def _apply_loaded_state(
+        self,
+        model: object,
+        loaded_config: RunConfig,
+        metadata: dict[str, Any],
+        optimizer_state: dict[str, Any] | None,
+        checkpoint_label: str,
+    ) -> None:
+        max_iterations_override = self.config.max_iterations
+        max_hours_override = self.config.max_hours
+        self.config = loaded_config
+        if max_iterations_override is not None:
+            self.config.max_iterations = max_iterations_override
+        if max_hours_override is not None:
+            self.config.max_hours = max_hours_override
+        self.model = model.to(self.torch_device)
         self.optimizer = self._build_optimizer()
-        self.iteration = int(metadata.get("iteration", 0))
-        self.total_updates = int(metadata.get("total_updates", 0))
-        logger.info("Resumed model checkpoint: path={} iteration={}", path, self.iteration)
+        if optimizer_state is not None:
+            self.optimizer.load_state_dict(optimizer_state)
+        else:
+            logger.warning(
+                "Resuming {}: optimizer state not restored. Continuing with fresh torch optimizer.",
+                checkpoint_label,
+            )
+        if metadata.get("total_updates") is not None:
+            self.total_updates = int(metadata.get("total_updates", 0))
 
     def _validate_resume_config(self, loaded_config: RunConfig) -> None:
         if self.config.rules != loaded_config.rules:
@@ -994,13 +1075,17 @@ class Trainer:
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train a 9x9 Omok policy/value agent with tinygrad.")
+    parser = argparse.ArgumentParser(description="Train a 9x9 Omok policy/value agent with PyTorch.")
     parser.add_argument("--config", type=str, default="configs/omok_quick.yaml")
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--max-hours", type=float, default=None)
     parser.add_argument("--max-iterations", type=int, default=None)
     parser.add_argument("--device", type=str, default=None)
     return parser
+
+
+def torch_f_log_softmax(logits: torch.Tensor, dim: int) -> torch.Tensor:
+    return torch.nn.functional.log_softmax(logits, dim=dim)
 
 
 def main() -> None:
@@ -1016,10 +1101,10 @@ def main() -> None:
     set_seed(config.seed)
     trainer = Trainer(config=config, resume_path=args.resume)
     logger.info(
-        "Startup: device={} seed={} tinygrad_training={}",
+        "Startup: device={} seed={} torch_training={}",
         trainer.device,
         config.seed,
-        Tensor.training,
+        True,
     )
     trainer.run()
 

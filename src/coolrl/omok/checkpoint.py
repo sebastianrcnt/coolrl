@@ -5,17 +5,33 @@ import pickle
 from pathlib import Path
 from typing import Any
 
-from tinygrad.nn.state import get_state_dict, load_state_dict, safe_load, safe_save
+import torch
 
 from .config import RunConfig, config_from_dict
-from .network import PolicyValueNet
+from .torch_network import PolicyValueNet, load_tinygrad_state_dict
+
+
+def _coerce_cpu(state: Any) -> Any:
+    if isinstance(state, dict):
+        return {key: _coerce_cpu(value) for key, value in state.items()}
+    if torch.is_tensor(state):
+        return state.detach().cpu()
+    if isinstance(state, (list, tuple)):
+        return type(state)(_coerce_cpu(item) for item in state)
+    return state
 
 
 def checkpoint_path(path: str | Path) -> Path:
     target = Path(path)
     if target.suffix:
         return target
-    return target.with_suffix(".safetensors")
+    pt = target.with_suffix(".pt")
+    if pt.exists():
+        return pt
+    legacy = target.with_suffix(".safetensors")
+    if legacy.exists():
+        return legacy
+    return pt
 
 
 def checkpoint_metadata_path(path: str | Path) -> Path:
@@ -27,45 +43,98 @@ def save_checkpoint(
     model: PolicyValueNet,
     config: RunConfig,
     metadata: dict[str, Any] | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
 ) -> Path:
     target = checkpoint_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    safe_save(model.state_dict(), str(target), metadata={"format": "coolrl.omok.v1"})
+
+    payload = {
+        "checkpoint_format": "coolrl.omok.torch.v1",
+        "model": _coerce_cpu(model.state_dict()),
+        "optimizer": _coerce_cpu(optimizer.state_dict()) if optimizer is not None else None,
+        "scheduler": _coerce_cpu(scheduler.state_dict()) if scheduler is not None else None,
+        "metadata": {
+            "torch_version": torch.__version__,
+            "config": config.to_dict(),
+            "iteration": 0,
+            **(metadata or {}),
+        },
+    }
+    torch.save(payload, target)
+
     checkpoint_metadata_path(target).write_text(
-        json.dumps(
-            {
-                "config": config.to_dict(),
-                "metadata": metadata or {},
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
+        json.dumps(payload["metadata"], ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     return target
 
 
-def load_checkpoint(path: str | Path) -> tuple[PolicyValueNet, RunConfig, dict[str, Any]]:
-    target = checkpoint_path(path)
-    payload = json.loads(checkpoint_metadata_path(target).read_text(encoding="utf-8"))
+def _load_legacy_model(path: Path) -> tuple[PolicyValueNet, RunConfig]:
+    from tinygrad.nn.state import safe_load
+
+    raw_metadata_path = checkpoint_metadata_path(path)
+    payload = json.loads(raw_metadata_path.read_text(encoding="utf-8"))
     config = config_from_dict(payload["config"])
     model = PolicyValueNet(config.rules.board_size, config.network)
-    load_state_dict(model, safe_load(target), strict=True, verbose=False)
-    return model, config, payload.get("metadata", {})
+    state = safe_load(path)
+    numpy_state = {key: value.numpy() for key, value in state.items()}
+    load_tinygrad_state_dict(model, numpy_state)
+    return model, config
+
+
+def load_checkpoint(
+    path: str | Path,
+) -> tuple[PolicyValueNet, RunConfig, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+    target = checkpoint_path(path)
+    if target.suffix == ".pt":
+        payload = torch.load(target, map_location="cpu", weights_only=False)
+        metadata = payload.get("metadata", {})
+        config = config_from_dict(metadata["config"])
+        model = PolicyValueNet(config.rules.board_size, config.network)
+        model.load_state_dict(payload["model"])
+        return (
+            model,
+            config,
+            metadata,
+            payload.get("optimizer"),
+            payload.get("scheduler"),
+        )
+
+    if target.suffix == ".safetensors":
+        model, config = _load_legacy_model(target)
+        metadata = {"checkpoint_format": "coolrl.omok.tinygrad.v1"}
+        raw_metadata_path = checkpoint_metadata_path(target)
+        if raw_metadata_path.exists():
+            raw = json.loads(raw_metadata_path.read_text(encoding="utf-8"))
+            metadata.update(raw.get("metadata", {}))
+            if "config" in raw:
+                config = config_from_dict(raw["config"])
+        metadata["torch_version"] = torch.__version__
+        return model, config, metadata, None, None
+
+    raise ValueError(f"unsupported checkpoint extension: {target.suffix!r}")
 
 
 def list_checkpoints(directory: str | Path) -> list[Path]:
     root = Path(directory)
     if not root.exists():
         return []
-    checkpoints = sorted(path for path in root.glob("*.safetensors") if path.name != "trainer_state.safetensors")
+    checkpoint_files = sorted(
+        path
+        for path in root.iterdir()
+        if path.is_file()
+        and path.suffix in {".pt", ".safetensors"}
+        and path.name not in {"trainer_state.pt", "optimizer.safetensors"}
+    )
     preferred = []
-    for name in ("best.safetensors", "latest.safetensors"):
-        path = root / name
-        if path in checkpoints:
-            preferred.append(path)
-    return [path for path in checkpoints if path not in preferred] + preferred
+    for name in ("best.pt", "latest.pt", "best.safetensors", "latest.safetensors"):
+        for path in checkpoint_files:
+            if path.name == name:
+                preferred.append(path)
+                break
+    remainder = [path for path in checkpoint_files if path not in preferred]
+    return remainder + preferred
 
 
 def save_trainer_state(
@@ -81,25 +150,6 @@ def save_trainer_state(
     )
     with (root / "replay.pkl").open("wb") as fh:
         pickle.dump(replay_state, fh, protocol=pickle.HIGHEST_PROTOCOL)
-
-
-def save_optimizer_state(directory: str | Path, optimizer: Any) -> None:
-    root = Path(directory)
-    root.mkdir(parents=True, exist_ok=True)
-    state = {
-        key: value
-        for key, value in get_state_dict(optimizer).items()
-        if not key.startswith("params.")
-    }
-    safe_save(state, str(root / "optimizer.safetensors"), metadata={"format": "coolrl.omok.optimizer.v1"})
-
-
-def load_optimizer_state(directory: str | Path, optimizer: Any) -> bool:
-    path = Path(directory) / "optimizer.safetensors"
-    if not path.exists():
-        return False
-    load_state_dict(optimizer, safe_load(path), strict=False, verbose=False)
-    return True
 
 
 def load_trainer_state(directory: str | Path) -> tuple[dict[str, Any], dict[str, Any] | None]:
