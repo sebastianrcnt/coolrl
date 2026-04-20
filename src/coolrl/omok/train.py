@@ -95,6 +95,16 @@ class Trainer:
             )
         else:
             logger.info("Self-play num_workers={}", self.num_workers)
+        self.search_threads, search_threads_auto = config.selfplay.resolved_search_threads()
+        self.config.selfplay.search_threads = self.search_threads
+        if search_threads_auto:
+            logger.info(
+                "Self-play search_threads=auto resolved to {} (os.cpu_count={})",
+                self.search_threads,
+                os.cpu_count(),
+            )
+        else:
+            logger.info("Self-play search_threads={}", self.search_threads)
         signal.signal(signal.SIGINT, self._handle_stop_signal)
         signal.signal(signal.SIGTERM, self._handle_stop_signal)
         if resume_path:

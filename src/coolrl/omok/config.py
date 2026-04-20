@@ -33,7 +33,7 @@ class SelfPlayConfig:
     games_per_iteration: int = 4
     batch_size: int = 2
     num_workers: int | str = 0
-    search_threads: int = 1
+    search_threads: int | str = 1
     inference_batch_size: int = 256
     inference_wait_ms: float = 1.0
     temperature_moves: int = 6
@@ -61,6 +61,18 @@ class SelfPlayConfig:
             except ValueError as exc:
                 raise ValueError(f"unsupported selfplay.num_workers: {value!r}") from exc
         return max(0, int(value)), False
+
+    def resolved_search_threads(self) -> tuple[int, bool]:
+        value = self.search_threads
+        if isinstance(value, str):
+            token = value.strip().lower()
+            if token == "auto":
+                return max(1, os.cpu_count() or 1), True
+            try:
+                return max(1, int(token)), False
+            except ValueError as exc:
+                raise ValueError(f"unsupported selfplay.search_threads: {value!r}") from exc
+        return max(1, int(value)), False
 
 
 @dataclass(slots=True)
