@@ -99,7 +99,7 @@ arena:
 
 checkpoint:
   directory: checkpoints/omok_full_cuda
-  save_every_iteration: false
-  save_iteration_interval: 8
+  save_every_iteration: true
+  save_iteration_interval: 1
   progress_interval_batches: 2
   progress_interval_seconds: 20.0
