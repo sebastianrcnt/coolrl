@@ -24,6 +24,8 @@ typedef struct Node {
   struct Node *children[CMCTS_ACTION_SIZE];
 } Node;
 
+typedef struct NodeBlock NodeBlock;
+
 typedef struct {
   CmctsState state;
   Node *node;
@@ -43,6 +45,9 @@ struct MctsTree {
   PendingEval *pending_leaves;
   int pending_leaf_count;
   int pending_leaf_capacity;
+  NodeBlock *node_blocks;
+  NodeBlock *active_node_block;
+  int next_node_block_capacity;
 };
 
 void state_init(CmctsState *state, const int8_t *board, int to_play, int last_action,
@@ -52,12 +57,13 @@ int state_legal_count(const CmctsState *state);
 void state_write_features(const CmctsState *state, float *out);
 float state_outcome_for_player(const CmctsState *state, int player);
 
-Node *node_new(int to_play, float prior);
-void node_free(Node *node);
+Node *tree_node_new(MctsTree *tree, int to_play, float prior);
+void tree_reset_nodes(MctsTree *tree);
+void tree_free_nodes(MctsTree *tree);
 int node_child_count(const Node *node);
 int node_legal_actions(const Node *node, int32_t *out_actions);
 Node *node_select_child(const Node *node, float c_puct, int *out_action);
-void node_expand(Node *node, const CmctsState *state, const float *priors);
+void node_expand(MctsTree *tree, Node *node, const CmctsState *state, const float *priors);
 void backup(Node **path, int path_len, float value);
 
 void tree_clear_pending_roots(MctsTree *tree);

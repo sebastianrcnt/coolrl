@@ -179,7 +179,7 @@ void mcts_batch_feed_leaves(MctsTree *const *trees,
     if (!tree) continue;
     for (int j = 0; j < tree->pending_leaf_count; j++) {
       PendingEval *pending = &tree->pending_leaves[j];
-      node_expand(pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
+      node_expand(tree, pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
       backup(pending->path, pending->path_len, values[offset]);
       offset += 1;
     }

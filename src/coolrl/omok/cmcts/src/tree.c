@@ -4,20 +4,67 @@
 #include <stdlib.h>
 #include <string.h>
 
-Node *node_new(int to_play, float prior) {
-  Node *node = (Node *)calloc(1, sizeof(Node));
+#define INITIAL_NODE_BLOCK_CAPACITY 1024
+
+struct NodeBlock {
+  Node *items;
+  int capacity;
+  int used;
+  NodeBlock *next;
+};
+
+static NodeBlock *node_block_new(int capacity) {
+  NodeBlock *block = (NodeBlock *)calloc(1, sizeof(NodeBlock));
+  if (!block) return NULL;
+  block->items = (Node *)calloc((size_t)capacity, sizeof(Node));
+  if (!block->items) {
+    free(block);
+    return NULL;
+  }
+  block->capacity = capacity;
+  return block;
+}
+
+Node *tree_node_new(MctsTree *tree, int to_play, float prior) {
+  if (!tree) return NULL;
+  if (tree->next_node_block_capacity <= 0) {
+    tree->next_node_block_capacity = INITIAL_NODE_BLOCK_CAPACITY;
+  }
+  NodeBlock *block = tree->active_node_block;
+  if (!block || block->used >= block->capacity) {
+    block = node_block_new(tree->next_node_block_capacity);
+    if (!block) return NULL;
+    block->next = tree->node_blocks;
+    tree->node_blocks = block;
+    tree->active_node_block = block;
+    if (tree->next_node_block_capacity < 65536) {
+      tree->next_node_block_capacity *= 2;
+    }
+  }
+  Node *node = &block->items[block->used++];
+  memset(node, 0, sizeof(Node));
   if (!node) return NULL;
   node->to_play = to_play;
   node->prior = prior;
   return node;
 }
 
-void node_free(Node *node) {
-  if (!node) return;
-  for (int i = 0; i < CMCTS_ACTION_SIZE; i++) {
-    node_free(node->children[i]);
+void tree_reset_nodes(MctsTree *tree) {
+  if (!tree) return;
+  NodeBlock *block = tree->node_blocks;
+  while (block) {
+    NodeBlock *next = block->next;
+    free(block->items);
+    free(block);
+    block = next;
   }
-  free(node);
+  tree->node_blocks = NULL;
+  tree->active_node_block = NULL;
+  tree->next_node_block_capacity = INITIAL_NODE_BLOCK_CAPACITY;
+}
+
+void tree_free_nodes(MctsTree *tree) {
+  tree_reset_nodes(tree);
 }
 
 int node_child_count(const Node *node) {
@@ -62,7 +109,8 @@ Node *node_select_child(const Node *node, float c_puct, int *out_action) {
   return best_child;
 }
 
-void node_expand(Node *node, const CmctsState *state, const float *priors) {
+void node_expand(MctsTree *tree, Node *node, const CmctsState *state, const float *priors) {
+  if (!tree || !node || node->expanded) return;
   float total = 0.0f;
   int legal_count = 0;
   for (int i = 0; i < CMCTS_ACTION_SIZE; i++) {
@@ -72,10 +120,6 @@ void node_expand(Node *node, const CmctsState *state, const float *priors) {
       legal_count += 1;
     }
   }
-  for (int i = 0; i < CMCTS_ACTION_SIZE; i++) {
-    node_free(node->children[i]);
-    node->children[i] = NULL;
-  }
   if (legal_count == 0) {
     node->expanded = 1;
     return;
@@ -83,7 +127,7 @@ void node_expand(Node *node, const CmctsState *state, const float *priors) {
   for (int i = 0; i < CMCTS_ACTION_SIZE; i++) {
     if (state->board[i] != 0) continue;
     float prior = total <= 0.0f ? 1.0f / (float)legal_count : priors[i] / total;
-    node->children[i] = node_new(-state->to_play, prior);
+    node->children[i] = tree_node_new(tree, -state->to_play, prior);
   }
   node->expanded = 1;
 }

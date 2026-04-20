@@ -7,13 +7,13 @@ MctsTree *mcts_tree_new(float c_puct, int exactly_five) {
   if (!tree) return NULL;
   tree->c_puct = c_puct;
   tree->exactly_five = exactly_five;
-  tree->root = node_new(1, 0.0f);
+  tree->root = tree_node_new(tree, 1, 0.0f);
   return tree;
 }
 
 void mcts_tree_free(MctsTree *tree) {
   if (!tree) return;
-  node_free(tree->root);
+  tree_free_nodes(tree);
   free(tree->pending_roots);
   free(tree->pending_leaves);
   free(tree);
@@ -28,8 +28,8 @@ void mcts_tree_set_initial(MctsTree *tree,
                            int terminal) {
   if (!tree) return;
   state_init(&tree->state, board, to_play, last_action, move_count, winner, terminal, tree->exactly_five);
-  node_free(tree->root);
-  tree->root = node_new(to_play, 0.0f);
+  tree_reset_nodes(tree);
+  tree->root = tree_node_new(tree, to_play, 0.0f);
   tree->root_value = 0.0f;
   tree_clear_pending_roots(tree);
   tree_clear_pending_leaves(tree);
@@ -41,12 +41,11 @@ int mcts_tree_advance(MctsTree *tree, int action) {
   Node *next = NULL;
   next = tree->root->children[action];
   tree->root->children[action] = NULL;
-  node_free(tree->root);
   if (!state_apply_action(&tree->state, action)) {
-    tree->root = next ? next : node_new(tree->state.to_play, 0.0f);
+    tree->root = next ? next : tree_node_new(tree, tree->state.to_play, 0.0f);
     return 0;
   }
-  tree->root = next ? next : node_new(tree->state.to_play, 0.0f);
+  tree->root = next ? next : tree_node_new(tree, tree->state.to_play, 0.0f);
   tree->root_value = tree->root && tree->root->visit_count > 0
                          ? tree->root->value_sum / (float)tree->root->visit_count
                          : 0.0f;
@@ -83,7 +82,7 @@ void mcts_batch_feed_roots(MctsTree *const *trees,
     if (!tree) continue;
     for (int j = 0; j < tree->pending_root_count; j++) {
       PendingEval *pending = &tree->pending_roots[j];
-      node_expand(pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
+      node_expand(tree, pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
       tree->root_value = values[offset];
       offset += 1;
     }
