@@ -43,7 +43,7 @@ selfplay:
 
   # C MCTS splits batched tree traversal across this many host threads while
   # keeping CUDA inference in the main process.
-  search_threads: 4
+  search_threads: 12
 
   # These fields are retained for compatibility with the reference profile.
   # The current tinygrad implementation parses them, but async inference queues

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import ctypes
 import importlib.util
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from .board import GameState
 from .evaluator import Evaluator
+from .mcts_types import SearchResult
 
 
 ACTION_SIZE = 81
@@ -92,14 +92,6 @@ _LIB.mcts_batch_feed_leaves.argtypes = [_TREE_ARRAY, ctypes.c_int, _FLOAT_ARRAY,
 _LIB.mcts_batch_feed_leaves.restype = None
 _LIB.mcts_batch_extract_visit_counts.argtypes = [_TREE_ARRAY, ctypes.c_int, _FLOAT_ARRAY]
 _LIB.mcts_batch_extract_visit_counts.restype = None
-
-
-@dataclass(slots=True)
-class SearchResult:
-    action: int
-    visit_policy: np.ndarray
-    root_value: float
-    next_root: "TreeNode | None" = None
 
 
 class _ChildrenProxy:

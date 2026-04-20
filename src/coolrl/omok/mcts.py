@@ -6,6 +6,7 @@ import numpy as np
 
 from .board import GameState
 from .evaluator import Evaluator
+from .mcts_types import SearchResult
 
 
 @dataclass(slots=True)
@@ -19,14 +20,6 @@ class TreeNode:
 
     def value(self) -> float:
         return 0.0 if self.visit_count == 0 else self.value_sum / self.visit_count
-
-
-@dataclass(slots=True)
-class SearchResult:
-    action: int
-    visit_policy: np.ndarray
-    root_value: float
-    next_root: TreeNode | None = None
 
 
 class MCTS:

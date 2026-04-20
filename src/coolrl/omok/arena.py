@@ -10,6 +10,7 @@ from coolrl.progress import make_progress
 from .board import GameState
 from .evaluator import ModelEvaluator
 from .mcts_backend import resolve_mcts_backend
+from .mcts_types import MCTSBackend
 from .network import PolicyValueNet
 from .openings import build_opening_sequences
 
@@ -138,7 +139,7 @@ class Arena:
                 games.append(ArenaGame(state=state, candidate_color=candidate_color))
         return games
 
-    def _advance_games(self, games: list[ArenaGame], search: object, candidate: bool) -> None:
+    def _advance_games(self, games: list[ArenaGame], search: MCTSBackend, candidate: bool) -> None:
         states = [game.state for game in games]
         roots = [game.candidate_root if candidate else game.best_root for game in games]
         results = search.search_batch(
