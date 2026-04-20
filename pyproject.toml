@@ -18,6 +18,7 @@ poker = [
     "inquirer>=3.4.1",
 ]
 omok = [
+    "matplotlib>=3.9.0",
     "numpy>=2.4.4",
     "pygame>=2.6.1",
     "pyyaml>=6.0.3",
@@ -26,6 +27,10 @@ omok = [
 all = [
     "coolrl[poker,omok]",
 ]
+
+[project.scripts]
+omok-train = "coolrl.omok.train:main"
+omok-plot = "coolrl.omok.plot_metrics:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

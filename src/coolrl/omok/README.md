@@ -305,6 +305,29 @@ cd src/coolrl/omok/web && python -m http.server 8080
 
 Then open `http://localhost:8080`, click **Load .onnx**, and upload an exported model. Controls: click to place a stone, Reset, Undo, Swap side, force AI Move, and a simulations slider (4–512).
 
+## Visualizing Metrics
+
+Plot training metrics from a completed or in-progress run:
+
+```bash
+# Save metrics.png in the checkpoint directory
+omok-plot checkpoints/omok_full_cuda
+
+# Open an interactive window instead
+omok-plot checkpoints/omok_full_cuda --show
+
+# Custom output path
+omok-plot checkpoints/omok_full_cuda -o ~/reports/run1.png
+```
+
+You can also point directly at the `metrics.jsonl` file:
+
+```bash
+omok-plot checkpoints/omok_full_cuda/metrics.jsonl
+```
+
+The report is a 2×3 grid: train loss, policy/value loss, arena win rate (with accepted-model markers), selfplay average moves, replay buffer size, and elapsed hours.
+
 ## Outputs
 
 Training writes under the configured checkpoint directory:
