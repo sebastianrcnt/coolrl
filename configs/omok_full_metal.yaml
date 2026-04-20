@@ -13,6 +13,11 @@
 # The important part is to keep batch_size smaller than games_per_iteration so
 # num_workers:auto creates multiple chunks instead of a single worker task.
 #
+# Unlike the CUDA profile, num_workers:auto is expected to be useful here. CUDA
+# has a discrete GPU that benefits from large main-process inference batches;
+# Metal shares memory with the CPU and the worker path avoids fragile shared GPU
+# contexts by design.
+#
 # Keep this checkpoint directory separate from CUDA/CPU runs. Replay buffers,
 # optimizer state, and timing assumptions should not be mixed across hardware
 # profiles.
@@ -33,6 +38,7 @@ network:
   se_reduction: 8
 
 selfplay:
+  mcts_backend: c
   games_per_iteration: 64
 
   # Metal profile: split 64 games into many chunks so ProcessPoolExecutor can
@@ -45,10 +51,12 @@ selfplay:
   # robust than trying to run many spawned workers against one GPU backend.
   num_workers: auto
 
-  # Reference compatibility fields. They document the intended profile shape,
-  # but the active tinygrad path is controlled mostly by batch_size,
-  # num_workers, and leaves_per_batch.
+  # C MCTS splits batched tree traversal across this many host threads.
   search_threads: 4
+
+  # Reference compatibility fields. Async inference queues are not implemented
+  # yet, so these are currently documentation/compatibility fields rather than
+  # active throughput knobs.
   inference_batch_size: 512
   inference_wait_ms: 2.0
 
@@ -59,9 +67,10 @@ selfplay:
   c_puct: 1.6
   virtual_loss: 1.0
 
-  # Smaller than the CUDA profile because each CPU worker evaluates its own
-  # chunk. This keeps latency and memory pressure more predictable on laptops.
-  leaves_per_batch: 4
+  # Smaller than CUDA's global 64-game batch, but larger than the old Python
+  # tree-walk setting because C MCTS can collect leaves cheaply. With
+  # batch_size=4 this gives each worker up to 32 positions per inference call.
+  leaves_per_batch: 8
 
   simulation_ramp_iterations: 96
   candidate_mix_fraction: 0.5

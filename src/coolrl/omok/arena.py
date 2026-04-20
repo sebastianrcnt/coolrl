@@ -47,6 +47,7 @@ class Arena:
         simulations: int,
         c_puct: float,
         leaves_per_batch: int = 1,
+        search_threads: int = 1,
         mcts_backend: str = "python",
         candidate_evaluator: ModelEvaluator | None = None,
         best_evaluator: ModelEvaluator | None = None,
@@ -56,6 +57,7 @@ class Arena:
         self.simulations = simulations
         self.c_puct = c_puct
         self.leaves_per_batch = leaves_per_batch
+        self.search_threads = max(1, int(search_threads))
         self.mcts_module = resolve_mcts_backend(mcts_backend)
         self.candidate_evaluator = candidate_evaluator or ModelEvaluator(candidate_model, device=device)
         self.best_evaluator = best_evaluator or ModelEvaluator(best_model, device=device)
@@ -79,12 +81,14 @@ class Arena:
             dirichlet_alpha=0.0,
             dirichlet_epsilon=0.0,
             evaluator=self.candidate_evaluator,
+            search_threads=self.search_threads,
         )
         best_search = self.mcts_module.MCTS(
             c_puct=self.c_puct,
             dirichlet_alpha=0.0,
             dirichlet_epsilon=0.0,
             evaluator=self.best_evaluator,
+            search_threads=self.search_threads,
         )
 
         with make_progress() as progress:

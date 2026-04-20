@@ -36,11 +36,13 @@ class MCTS:
         dirichlet_alpha: float,
         dirichlet_epsilon: float,
         evaluator: Evaluator,
+        search_threads: int = 1,
     ) -> None:
         self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
         self.evaluator = evaluator
+        self.search_threads = max(1, int(search_threads))
 
     def search_batch(
         self,
@@ -190,4 +192,3 @@ def sample_action_from_policy(policy: np.ndarray, temperature: float) -> int:
     adjusted = np.power(np.maximum(policy, 1.0e-8), 1.0 / temperature)
     adjusted /= adjusted.sum()
     return int(np.random.choice(np.arange(policy.size), p=adjusted))
-

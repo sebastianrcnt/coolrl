@@ -77,6 +77,17 @@ _LIB.mcts_batch_collect_leaves.argtypes = [
     ctypes.c_int,
 ]
 _LIB.mcts_batch_collect_leaves.restype = ctypes.c_int
+_HAS_THREADED_COLLECT = hasattr(_LIB, "mcts_batch_collect_leaves_threaded")
+if _HAS_THREADED_COLLECT:
+    _LIB.mcts_batch_collect_leaves_threaded.argtypes = [
+        _TREE_ARRAY,
+        ctypes.c_int,
+        ctypes.c_int,
+        _FLOAT_ARRAY,
+        ctypes.c_int,
+        ctypes.c_int,
+    ]
+    _LIB.mcts_batch_collect_leaves_threaded.restype = ctypes.c_int
 _LIB.mcts_batch_feed_leaves.argtypes = [_TREE_ARRAY, ctypes.c_int, _FLOAT_ARRAY, _FLOAT_ARRAY]
 _LIB.mcts_batch_feed_leaves.restype = None
 _LIB.mcts_batch_extract_visit_counts.argtypes = [_TREE_ARRAY, ctypes.c_int, _FLOAT_ARRAY]
@@ -146,11 +157,13 @@ class MCTS:
         dirichlet_alpha: float,
         dirichlet_epsilon: float,
         evaluator: Evaluator,
+        search_threads: int = 1,
     ) -> None:
         self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
         self.evaluator = evaluator
+        self.search_threads = max(1, int(search_threads))
 
     def search_batch(
         self,
@@ -202,13 +215,23 @@ class MCTS:
             leaves_this_round = min(leaves_per_batch, num_simulations - sims_done)
             max_leaves = len(active_roots) * leaves_this_round
             leaf_features = np.empty((max_leaves, 4, 9, 9), dtype=np.float32)
-            leaf_count = _LIB.mcts_batch_collect_leaves(
-                tree_ptrs,
-                len(active_roots),
-                leaves_this_round,
-                leaf_features.reshape(-1),
-                max_leaves,
-            )
+            if _HAS_THREADED_COLLECT and self.search_threads > 1:
+                leaf_count = _LIB.mcts_batch_collect_leaves_threaded(
+                    tree_ptrs,
+                    len(active_roots),
+                    leaves_this_round,
+                    leaf_features.reshape(-1),
+                    max_leaves,
+                    self.search_threads,
+                )
+            else:
+                leaf_count = _LIB.mcts_batch_collect_leaves(
+                    tree_ptrs,
+                    len(active_roots),
+                    leaves_this_round,
+                    leaf_features.reshape(-1),
+                    max_leaves,
+                )
             sims_done += leaves_this_round
             if not leaf_count:
                 continue

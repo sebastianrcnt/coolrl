@@ -363,6 +363,7 @@ class Trainer:
                 dirichlet_alpha=self.config.selfplay.dirichlet_alpha,
                 dirichlet_epsilon=self.config.selfplay.dirichlet_epsilon,
                 evaluator=evaluator,
+                search_threads=self.config.selfplay.search_threads,
             )
             states: list[GameState] = []
             histories: list[list[PendingSample]] = []
@@ -741,6 +742,7 @@ class Trainer:
             simulations=simulations,
             c_puct=self.config.selfplay.c_puct,
             leaves_per_batch=self.config.selfplay.leaves_per_batch,
+            search_threads=self.config.selfplay.search_threads,
             mcts_backend=self.config.selfplay.mcts_backend,
             candidate_evaluator=self.model_evaluator,
             best_evaluator=self.best_model_evaluator,

@@ -7,6 +7,9 @@ from setuptools import Extension, setup
 
 compile_args = ["-O3", "-std=c11", "-Wall", "-Wextra", "-Wpedantic"]
 link_args = []
+if os.name != "nt":
+    compile_args.append("-pthread")
+    link_args.append("-pthread")
 if os.environ.get("COOLRL_CMCTS_ASAN") == "1":
     compile_args.extend(["-fsanitize=address", "-fno-omit-frame-pointer"])
     link_args.append("-fsanitize=address")

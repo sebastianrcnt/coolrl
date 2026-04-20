@@ -41,6 +41,13 @@ uv run python -m coolrl.omok.train --config configs/omok_full_metal.yaml
 uv run python -m coolrl.omok.train --config configs/omok_full_cuda.yaml
 ```
 
+The full CUDA/Metal profiles use the C MCTS backend. If a source checkout cannot
+find the compiled extension, build it in place:
+
+```bash
+uv run --with setuptools python setup.py build_ext --inplace
+```
+
 Useful GUI keys:
 
 - Left click: place a stone.
@@ -81,23 +88,12 @@ GUI CLI options:
 - 16 optimizer updates per iteration.
 - small arena enabled.
 
-`configs/omok_full.yaml` mirrors the reference `rocm_unlimited.yaml` profile, adjusted only for this repo's names and checkpoint directory. Treat it as the reference/base profile.
-
-- unlimited iterations unless stopped manually.
-- 64 self-play games per iteration.
-- batch self-play size 64.
-- network: `channels=64`, `blocks=6`, `value_hidden=128`.
-- MCTS schedule from 96 to 256 simulations.
-- optimizer batch 256 and 96 updates per iteration.
-- replay capacity 80k and warmup 128 games.
-- arena: 48 games with 192 simulations.
-
 For actual full runs, prefer the hardware-specific presets:
 
-- `configs/omok_full_cuda.yaml`: NVIDIA/discrete GPU profile. It uses `device: CUDA`, `num_workers: 0`, and large self-play batches so neural network inference during self-play stays on the GPU.
-- `configs/omok_full_metal.yaml`: Apple Silicon profile. It uses `device: METAL`, smaller self-play chunks, and CPU worker parallelism so several games can be generated concurrently while avoiding shared Metal contexts across spawned processes.
+- `configs/omok_full_cuda.yaml`: NVIDIA/discrete GPU profile. It uses `device: CUDA`, C MCTS, `num_workers: 0`, `batch_size: 64`, and `leaves_per_batch: 16` so self-play neural network inference stays on the GPU in large batches.
+- `configs/omok_full_metal.yaml`: Apple Silicon profile. It uses `device: METAL`, C MCTS, smaller self-play chunks, `num_workers: auto`, and CPU worker parallelism so several games can be generated concurrently while avoiding shared Metal contexts across spawned processes.
 
-Compatibility note: the full profiles keep reference fields such as `use_amp`, `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and `grad_clip` so the profile stays easy to compare with `rocm_unlimited.yaml`. The current tinygrad trainer parses those fields, but the active self-play throughput knobs are `selfplay.batch_size`, `selfplay.num_workers`, and `selfplay.leaves_per_batch`.
+Compatibility note: the full profiles keep reference fields such as `use_amp`, `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and `grad_clip` so the profile stays easy to compare with `rocm_unlimited.yaml`. The C backend uses `search_threads` for tree-level parallel collection across active games, but it does not implement same-tree virtual-loss search or async inference queues. The active self-play throughput knobs are `selfplay.batch_size`, `selfplay.num_workers`, `selfplay.leaves_per_batch`, and `selfplay.search_threads`.
 
 For a longer run, copy `configs/omok_quick.yaml` and increase:
 
@@ -107,11 +103,13 @@ For a longer run, copy `configs/omok_quick.yaml` and increase:
 - `optimization.updates_per_iteration`
 - `arena.games`
 
-## Parallelization On MacBook
+## Self-Play Parallelization
 
 There are four different kinds of parallelism here.
 
-`METAL` kernel parallelism is already active when `device: auto` resolves to `METAL`, or when you pass `--device METAL`. This is the most important layer for neural network inference and training.
+GPU kernel parallelism is already active when tinygrad runs on `CUDA` or
+`METAL`. This is the most important layer for neural network inference and
+training.
 
 Training batch parallelism is controlled by:
 
@@ -120,7 +118,10 @@ optimization:
   batch_size: 64
 ```
 
-Larger batches feed more work to METAL per optimizer step, but use more memory. On an Apple M2 with 16GB RAM, start with `32` or `64`; try `128` only after the run is stable.
+Larger batches feed more work to the accelerator per optimizer step, but use
+more memory. On an Apple M2 with 16GB RAM, start with `32` or `64`; try `128`
+only after the run is stable. On a discrete GPU, `256` is the current full
+profile default.
 
 Self-play search throughput is controlled mostly by:
 
@@ -128,12 +129,24 @@ Self-play search throughput is controlled mostly by:
 selfplay:
   games_per_iteration: 16
   batch_size: 4
+  leaves_per_batch: 8
   simulation_schedule:
     - fraction: 0.0
       simulations: 16
 ```
 
-`selfplay.batch_size` is now active: `generate_selfplay()` keeps up to that many games alive together and sends their positions through `MCTS.search_batch(...)`. This increases model inference batch size and gives METAL more work per pass.
+`selfplay.batch_size` controls how many games stay active inside one
+`MCTS.search_batch(...)` call. `selfplay.leaves_per_batch` controls how many
+MCTS leaves each active game contributes before one neural network evaluation.
+Together they set the approximate inference batch size:
+
+```text
+active games * leaves_per_batch
+```
+
+For CUDA full self-play, `64 * 16 = 1024` positions per large evaluator call is
+the current measured sweet spot. See `docs/omok_cuda_tuning.md` for the RTX 3090
+measurements.
 
 Multi-process self-play is controlled by:
 
@@ -148,15 +161,20 @@ Accepted values:
 - `0`: disables multi-process and keeps the legacy single-process path.
 - any positive integer: fixed number of worker processes.
 
-When the resolved value is `>= 1`, self-play generation is dispatched to a `ProcessPoolExecutor` of CPU workers. Each worker receives a copy of the current model weights (as numpy arrays), reconstructs a tinygrad `PolicyValueNet` pinned to `Device.DEFAULT = "CPU"`, and runs MCTS + games independently. The main process keeps `METAL` for training so GPU context is never shared across processes. Results are collected back through the pool and appended to the shared replay buffer in the main process.
+When the resolved value is `>= 1`, self-play generation is dispatched to a `ProcessPoolExecutor` of CPU workers. Each worker receives a copy of the current model weights (as numpy arrays), reconstructs a tinygrad `PolicyValueNet` pinned to `Device.DEFAULT = "CPU"`, and runs MCTS + games independently. The main process keeps the configured accelerator for training so GPU context is never shared across processes. Results are collected back through the pool and appended to the shared replay buffer in the main process.
 
-Why CPU workers: for the 9x9 Omok network (~10k–500k params depending on config), GPU inference is latency-bound and underutilized per MCTS step. Running N concurrent CPU self-play workers, each batching their own leaves through a CPU evaluator, is much cheaper than fighting for one GPU context and it scales close to linearly with physical cores.
+Why CPU workers: this avoids sharing a GPU context across spawned processes. On
+Apple Silicon this can be a reasonable trade-off because the CPU and GPU share
+memory and multiple CPU workers can keep self-play moving while the main process
+uses Metal for training. On a discrete NVIDIA GPU, the trade-off is different:
+the worker path moves self-play inference from CUDA to CPU and was measured
+slower on the RTX 3090 profile. Use `num_workers: 0` for CUDA full runs.
 
 Defaults and trade-offs:
 
-- `num_workers: 0` (default): single-process self-play, unchanged legacy behavior. Pick this for debugging, smoke runs, and anything where profiling needs to be deterministic.
+- `num_workers: 0` (default): single-process self-play. Pick this for CUDA full runs, debugging, smoke runs, and anything where profiling needs to be deterministic.
 - `num_workers: 1`: one worker process. Rarely useful — use `0` instead unless you specifically want process isolation.
-- `num_workers: 2` to `os.cpu_count() - 1`: recommended for overnight runs. More workers = more games in flight, but diminishing returns once you exceed physical cores.
+- `num_workers: 2` to `os.cpu_count() - 1`: useful for CPU/Metal-style self-play. More workers = more games in flight, but diminishing returns once you exceed physical cores.
 
 Startup cost: each worker does a fresh `spawn` + tinygrad import (~1–2s on macOS). For tiny configs (smoke, quick) this startup can dominate a single iteration. For medium and full configs the pool cost is amortized across many MCTS calls per iteration. A new pool is created per self-play source per iteration (candidate and best each get their own), and workers are initialized once via `ProcessPoolExecutor(initializer=...)` so model weights are not re-shipped per chunk.
 
@@ -165,8 +183,11 @@ Work chunking: openings are split into chunks of `selfplay.batch_size` and each 
 The knobs that matter most are:
 
 - Increase `games_per_iteration` for more data per iteration.
-- Increase `selfplay.batch_size` until METAL is busier, but reduce it if the UI becomes sluggish.
-- Increase `selfplay.num_workers` to saturate CPU cores with self-play games in parallel. Start with 2 and scale toward your physical core count.
+- For CUDA, keep `num_workers: 0` and increase `selfplay.batch_size` /
+  `selfplay.leaves_per_batch` until CUDA is fed with large enough inference
+  batches.
+- For Metal/CPU workers, increase `selfplay.num_workers` to saturate CPU cores
+  and keep `selfplay.batch_size` small enough to create multiple chunks.
 - Increase `simulations` for stronger MCTS targets.
 - Increase `optimization.batch_size` and `updates_per_iteration` for more network learning.
 - Keep `arena.games` small during tuning, because arena games are also MCTS-heavy.
@@ -194,6 +215,7 @@ MacBook quick tuning:
 ```yaml
 max_iterations: 20
 selfplay:
+  mcts_backend: c
   games_per_iteration: 8
   batch_size: 8        # match games_per_iteration so all games join every batch
   leaves_per_batch: 4  # evaluate 4 leaves per MCTS step to increase METAL batch size
@@ -219,9 +241,11 @@ network:
   blocks: 3
   value_hidden: 96
 selfplay:
+  mcts_backend: c
   games_per_iteration: 16
   batch_size: 4
   num_workers: 4      # CPU self-play workers; tune to physical cores
+  leaves_per_batch: 8
   simulation_schedule:
     - fraction: 0.0
       simulations: 16

@@ -13,6 +13,7 @@ selfplay:
   num_workers: 0
   batch_size: 64
   leaves_per_batch: 16
+  search_threads: 4
 ```
 
 Keep `num_workers: 0` for the CUDA profile. The multi-process worker path pins
@@ -62,14 +63,24 @@ which is slower than batching inference on the 3090.
 Use worker parallelism for CPU/Metal-style profiles where avoiding shared GPU
 contexts is the goal. For the CUDA profile, keep self-play in the main process.
 
+## Threaded C MCTS
+
+`search_threads` controls tree-level parallelism inside the C backend. The work
+is split by active game/tree, so each `MctsTree` is still mutated by only one
+thread during a collection round. This applies to self-play and arena because
+both paths call the same `MCTS.search_batch(...)` implementation.
+
+This is intentionally not same-tree parallel MCTS: it does not use virtual
+loss, atomics, or locks inside one tree. Utilization is best while many games
+are active in the batch.
+
 ## Currently Unused Reference Fields
 
 These fields are parsed for compatibility with reference configs, but the
-current C backend does not implement async inference queues or threaded search:
+current C backend does not implement async inference queues:
 
 ```yaml
 selfplay:
-  search_threads: 4
   inference_batch_size: 512
   inference_wait_ms: 2.0
 ```
@@ -79,5 +90,3 @@ Useful future directions:
 - `inference_batch_size`: could become a target/cap for collecting multiple C
   leaf batches before calling the evaluator.
 - `inference_wait_ms`: only makes sense with an async inference server/queue.
-- `search_threads`: would require thread-safe tree mutation, atomics or locks,
-  and virtual loss; this is a larger design change.

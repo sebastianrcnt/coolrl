@@ -87,6 +87,17 @@ int mcts_batch_collect_leaves(MctsTree *const *trees,
                               float *out_features,
                               int max_entries);
 
+// Threaded variant of `mcts_batch_collect_leaves`. Work is split by tree, so a
+// single MctsTree is still owned by only one thread during the call. Pending
+// leaves and output features are ordered by tree index, matching
+// `mcts_batch_feed_leaves`.
+int mcts_batch_collect_leaves_threaded(MctsTree *const *trees,
+                                       int num_trees,
+                                       int leaves_per_tree,
+                                       float *out_features,
+                                       int max_entries,
+                                       int num_threads);
+
 // Feed evaluator output for `mcts_batch_collect_leaves`, in the same order.
 void mcts_batch_feed_leaves(MctsTree *const *trees,
                             int num_trees,

@@ -41,6 +41,7 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
         dirichlet_alpha=config.selfplay.dirichlet_alpha,
         dirichlet_epsilon=config.selfplay.dirichlet_epsilon,
         evaluator=evaluator,
+        search_threads=config.selfplay.search_threads,
     )
     _WORKER_STATE.clear()
     _WORKER_STATE["config"] = config

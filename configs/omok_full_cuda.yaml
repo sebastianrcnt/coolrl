@@ -41,10 +41,13 @@ selfplay:
   # pins inference to CPU, which would leave the 3090 idle during self-play.
   num_workers: 0
 
-  # These fields are retained for compatibility with the reference profile.
-  # The current tinygrad implementation parses them, but self-play throughput is
-  # primarily controlled by batch_size, num_workers, and leaves_per_batch.
+  # C MCTS splits batched tree traversal across this many host threads while
+  # keeping CUDA inference in the main process.
   search_threads: 4
+
+  # These fields are retained for compatibility with the reference profile.
+  # The current tinygrad implementation parses them, but async inference queues
+  # are not implemented yet.
   inference_batch_size: 512
   inference_wait_ms: 2.0
 
