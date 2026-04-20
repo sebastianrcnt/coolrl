@@ -55,9 +55,9 @@ selfplay:
   c_puct: 1.6
   virtual_loss: 1.0
 
-  # Expand 8 leaves per MCTS step so each inference call can see up to
-  # 64*8=512 positions, matching the original ROCm full-profile scale.
-  leaves_per_batch: 8
+  # C MCTS can collect leaves faster than the Python tree walk, so use larger
+  # inference batches to keep CUDA busier during self-play.
+  leaves_per_batch: 16
 
   simulation_ramp_iterations: 96
   candidate_mix_fraction: 0.5
