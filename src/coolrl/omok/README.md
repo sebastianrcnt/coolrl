@@ -24,10 +24,14 @@ Resume from a checkpoint directory:
 uv run python -m coolrl.omok.train --config configs/omok_quick.yaml --resume checkpoints/omok_quick --device METAL
 ```
 
-Open the GUI against the latest checkpoints in a directory:
+Export a checkpoint to ONNX and open the GUI against it:
 
 ```bash
-uv run python -m coolrl.omok.gui --config configs/omok_quick.yaml --checkpoint checkpoints/omok_quick --device METAL
+uv run --with torch --with onnx python -m coolrl.omok.export_onnx \
+    --checkpoint checkpoints/omok_quick \
+    --output exports/omok_quick.onnx
+
+uv run python -m coolrl.omok.gui --model exports/omok_quick.onnx
 ```
 
 Run the full reference-sized profile:
@@ -41,12 +45,20 @@ Useful GUI keys:
 - Left click: place a stone.
 - `R`: reset the game.
 - `S`: swap human side.
-- `N` / `P`: next or previous checkpoint in the directory.
-- `L`: reload checkpoint list while training is running.
 - `M`: force an AI move.
 - `O`: apply a deterministic opening from the current seed.
 - `[` / `]`: decrease or increase opening seed.
 - `Esc`: quit.
+
+GUI CLI options:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model FILE.onnx` | none | ONNX model file. Omit for two-player or UI testing. |
+| `--device auto\|cpu\|cuda\|coreml` | `auto` | ONNX Runtime execution provider. |
+| `--simulations N` | `64` | MCTS simulations per AI move. |
+| `--human-color black\|white` | `white` | Which color the human plays. |
+| `--seed N` | `0` | Opening seed (also adjustable with `[`/`]` in-game). |
 
 ## Configs
 

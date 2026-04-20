@@ -9,24 +9,23 @@ from pathlib import Path
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 os.environ.setdefault("SDL_VIDEO_HIGHDPI_DISABLED", "0")
 
+import numpy as np
 import pygame
 
 from .board import GameState
-from .checkpoint import list_checkpoints, load_checkpoint
-from .config import load_config
-from .device import configure_device
-from .evaluator import ModelEvaluator
+from .features import states_to_feature_planes
 from .mcts import MCTS
-from .network import PolicyValueNet
 from .openings import sample_balanced_openings
 
+
+BOARD_SIZE = 9
+C_PUCT = 1.0
+LEAVES_PER_BATCH = 8
 
 B612_FONT_DIR = Path(__file__).with_name("assets") / "fonts"
 B612_REGULAR = B612_FONT_DIR / "B612-Regular.ttf"
 B612_BOLD = B612_FONT_DIR / "B612-Bold.ttf"
 DEFAULT_WINDOW_SIZE = (1280, 960)
-DEFAULT_RENDER_SCALE = 2
-MAX_RENDER_SCALE = 3
 MIN_BOARD_PX = 360
 SIDEBAR_WIDTH = 320
 COCKPIT_WHITE = (238, 246, 250)
@@ -36,54 +35,68 @@ COCKPIT_AMBER = (245, 188, 74)
 COCKPIT_RED = (255, 108, 92)
 
 
+def _softmax(x: np.ndarray) -> np.ndarray:
+    e = np.exp(x - x.max(axis=1, keepdims=True))
+    return e / e.sum(axis=1, keepdims=True)
+
+
+def _ort_providers(device: str) -> list[str]:
+    if device == "cuda":
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    if device in ("coreml", "metal", "mps"):
+        return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+    if device == "auto":
+        return ["CoreMLExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
+    return ["CPUExecutionProvider"]
+
+
+class OnnxEvaluator:
+    def __init__(self, model_path: str, device: str) -> None:
+        import onnxruntime as ort
+        self.session = ort.InferenceSession(model_path, providers=_ort_providers(device))
+        self.input_name = self.session.get_inputs()[0].name
+        self.provider = self.session.get_providers()[0]
+
+    def evaluate(self, states: list[GameState]) -> tuple[np.ndarray, np.ndarray]:
+        features = np.ascontiguousarray(states_to_feature_planes(states))
+        logits, values = self.session.run(None, {self.input_name: features})
+        return _softmax(logits).astype(np.float32), values.astype(np.float32)
+
+
 class OmokGUI:
     def __init__(
         self,
-        checkpoint: str | None,
-        config_path: str,
-        device_name: str,
+        model_path: str | None,
+        device: str,
         simulations: int,
         human_color: int = -1,
         seed: int = 0,
-        render_scale: int = DEFAULT_RENDER_SCALE,
     ) -> None:
-        self.config = load_config(config_path)
-        requested_device = self.config.device if device_name == "auto" else device_name
-        self.device = configure_device(requested_device)
+        self.model_path = model_path
         self.simulations = simulations
-        self.checkpoint_source = checkpoint
-        self.model = PolicyValueNet(self.config.rules.board_size, self.config.network)
-        self.metadata: dict[str, object] = {}
-        self.state = GameState(self.config.rules.board_size, self.config.rules.exactly_five)
+        self.evaluator: OnnxEvaluator | None = None
+        self.provider = "none"
+        if model_path:
+            self.evaluator = OnnxEvaluator(model_path, device)
+            self.provider = self.evaluator.provider
+        self.state = GameState(BOARD_SIZE, False)
         self.current_opening: list[int] = []
         self.position_version = 0
         self.ai_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="omok-ai")
         self.ai_future: Future[int] | None = None
         self.ai_future_version = -1
         self.ai_error: str | None = None
-        self.checkpoints = self._discover_checkpoints(checkpoint)
-        self.checkpoint_index = len(self.checkpoints) - 1 if self.checkpoints else 0
-        if self.checkpoints:
-            self._load_checkpoint(self.checkpoints[self.checkpoint_index])
         self.human_color = 1 if int(human_color) >= 1 else -1
         self.seed = int(seed)
-        self.render_scale = 1  # supersampling removed; SCALED handles physical pixels
 
         pygame.init()
         pygame.display.set_caption("coolrl 9x9 Omok")
-        self.display_flags = pygame.RESIZABLE | pygame.DOUBLEBUF | pygame.SCALED
-        self.window_surface = pygame.display.set_mode(DEFAULT_WINDOW_SIZE, self.display_flags, vsync=1)
-        self.screen = self.window_surface
+        flags = pygame.RESIZABLE | pygame.DOUBLEBUF | pygame.SCALED
+        self.screen = pygame.display.set_mode(DEFAULT_WINDOW_SIZE, flags, vsync=1)
         self.clock = pygame.time.Clock()
-        self.font = self._load_font(B612_BOLD, 22 * self.render_scale)
-        self.small_font = self._load_font(B612_REGULAR, 18 * self.render_scale)
-        self.margin = 48 * self.render_scale
-        self.board_px = 720 * self.render_scale
-        self.cell = self.board_px / (self.config.rules.board_size - 1)
-        self.board_origin = (self.margin, self.margin)
-        self.sidebar_origin = (self.margin + self.board_px + 40 * self.render_scale, self.margin)
-        self.sidebar_width = SIDEBAR_WIDTH * self.render_scale
-        self.sidebar_line_height = 26 * self.render_scale
+        self.font = self._load_font(B612_BOLD, 16)
+        self.small_font = self._load_font(B612_REGULAR, 13)
+        self.sidebar_line_height = 20
         self._update_layout()
 
     @staticmethod
@@ -95,90 +108,40 @@ class OmokGUI:
     def _update_layout(self) -> None:
         width, height = self.screen.get_size()
         short_side = max(1, min(width, height))
-        min_margin = 24 * self.render_scale
-        max_margin = 64 * self.render_scale
-        min_gap = 28 * self.render_scale
-        max_gap = 56 * self.render_scale
-        sidebar_width = SIDEBAR_WIDTH * self.render_scale
-        min_board_px = MIN_BOARD_PX * self.render_scale
-        self.margin = max(min_margin, min(max_margin, short_side // 16))
-        gap = max(min_gap, min(max_gap, width // 24))
-        board_space_w = width - self.margin * 2 - gap - sidebar_width
-        board_space_h = height - self.margin * 2
+        margin = max(24, min(64, short_side // 16))
+        gap = max(28, min(56, width // 24))
 
-        if board_space_w >= min_board_px:
-            self.board_px = max(min_board_px, min(board_space_w, board_space_h))
-            board_x = self.margin
-            board_y = max(self.margin, (height - self.board_px) // 2)
+        board_space_w = width - margin * 2 - gap - SIDEBAR_WIDTH
+        board_space_h = height - margin * 2
+
+        if board_space_w >= MIN_BOARD_PX:
+            self.board_px = max(MIN_BOARD_PX, min(board_space_w, board_space_h))
+            board_x = margin
+            board_y = max(margin, (height - self.board_px) // 2)
             sidebar_x = board_x + self.board_px + gap
-            sidebar_y = max(self.margin, board_y)
-            self.sidebar_width = max(220 * self.render_scale, width - sidebar_x - self.margin)
+            sidebar_y = max(margin, board_y)
+            self.sidebar_width = max(220, width - sidebar_x - margin)
         else:
-            sidebar_height = 260 * self.render_scale
-            board_space_w = width - self.margin * 2
-            board_space_h = height - self.margin * 3 - sidebar_height
-            self.board_px = max(240 * self.render_scale, min(board_space_w, board_space_h))
-            board_x = max(self.margin, (width - self.board_px) // 2)
-            board_y = self.margin
-            sidebar_x = self.margin
-            sidebar_y = board_y + self.board_px + self.margin
-            self.sidebar_width = max(220 * self.render_scale, width - self.margin * 2)
+            sidebar_height = 260
+            board_space_w = width - margin * 2
+            board_space_h = height - margin * 3 - sidebar_height
+            self.board_px = max(240, min(board_space_w, board_space_h))
+            board_x = max(margin, (width - self.board_px) // 2)
+            board_y = margin
+            sidebar_x = margin
+            sidebar_y = board_y + self.board_px + margin
+            self.sidebar_width = max(220, width - margin * 2)
 
-        self.cell = self.board_px / (self.config.rules.board_size - 1)
+        self.cell = self.board_px / (BOARD_SIZE - 1)
         self.board_origin = (int(board_x), int(board_y))
         self.sidebar_origin = (int(sidebar_x), int(sidebar_y))
 
-    def _discover_checkpoints(self, checkpoint: str | None) -> list[Path]:
-        if checkpoint:
-            target = Path(checkpoint)
-            if target.is_dir():
-                return list_checkpoints(target)
-            return [target]
-        candidates = [
-            self.config.checkpoint_dir,
-            Path("checkpoints/omok_quick"),
-            Path("checkpoints/omok_smoke"),
-            Path("checkpoints/omok_default"),
-        ]
-        for directory in candidates:
-            found = list_checkpoints(directory)
-            if found:
-                return found
-        return []
-
-    def _load_checkpoint(self, path: Path) -> None:
-        try:
-            model, config, metadata = load_checkpoint(path)
-        except Exception as exc:
-            print(f"[gui] failed to load {path}: {exc}")
-            return
-        self.config = config
-        self.model = model
-        self.metadata = metadata
-        if path in self.checkpoints:
-            self.checkpoint_index = self.checkpoints.index(path)
-        self.state = GameState(self.config.rules.board_size, self.config.rules.exactly_five)
-        self.current_opening = []
-        self._invalidate_ai()
-
-    def _refresh_checkpoints(self) -> None:
-        previous = self.checkpoints[self.checkpoint_index] if self.checkpoints else None
-        self.checkpoints = self._discover_checkpoints(self.checkpoint_source)
-        if not self.checkpoints:
-            self.checkpoint_index = 0
-            return
-        if previous and previous in self.checkpoints:
-            self.checkpoint_index = self.checkpoints.index(previous)
-        else:
-            self.checkpoint_index = len(self.checkpoints) - 1
-        self._load_checkpoint(self.checkpoints[self.checkpoint_index])
-
     def _reset_state(self, apply_opening: bool) -> None:
-        self.state = GameState(self.config.rules.board_size, self.config.rules.exactly_five)
+        self.state = GameState(BOARD_SIZE, False)
         self.current_opening = []
         if apply_opening:
             rng = random.Random(self.seed)
-            openings = sample_balanced_openings(self.config.rules.board_size, 32, rng)
+            openings = sample_balanced_openings(BOARD_SIZE, 32, rng)
             if openings:
                 for action in openings[0]:
                     if self.state.terminal:
@@ -226,14 +189,15 @@ class OmokGUI:
 
     def _handle_resize(self, event: pygame.event.Event) -> None:
         if hasattr(event, "size"):
-            event_width, event_height = event.size
+            w, h = event.size
         else:
-            event_width = getattr(event, "w", getattr(event, "x", self.screen.get_width()))
-            event_height = getattr(event, "h", getattr(event, "y", self.screen.get_height()))
-        width = max(640, int(event_width))
-        height = max(560, int(event_height))
-        self.window_surface = pygame.display.set_mode((width, height), self.display_flags, vsync=1)
-        self.screen = self.window_surface
+            w = getattr(event, "w", getattr(event, "x", self.screen.get_width()))
+            h = getattr(event, "h", getattr(event, "y", self.screen.get_height()))
+        self.screen = pygame.display.set_mode(
+            (max(640, int(w)), max(560, int(h))),
+            pygame.RESIZABLE | pygame.DOUBLEBUF | pygame.SCALED,
+            vsync=1,
+        )
         self._update_layout()
 
     def _handle_key(self, key: int) -> bool:
@@ -246,14 +210,6 @@ class OmokGUI:
             self._reset_state(apply_opening=False)
         elif key == pygame.K_m and not self.state.terminal:
             self._start_ai_move(force=True)
-        elif key == pygame.K_n and self.checkpoints:
-            self.checkpoint_index = (self.checkpoint_index + 1) % len(self.checkpoints)
-            self._load_checkpoint(self.checkpoints[self.checkpoint_index])
-        elif key == pygame.K_p and self.checkpoints:
-            self.checkpoint_index = (self.checkpoint_index - 1) % len(self.checkpoints)
-            self._load_checkpoint(self.checkpoints[self.checkpoint_index])
-        elif key == pygame.K_l:
-            self._refresh_checkpoints()
         elif key == pygame.K_o:
             self._reset_state(apply_opening=True)
         elif key == pygame.K_LEFTBRACKET:
@@ -288,7 +244,7 @@ class OmokGUI:
     def _start_ai_move(self, force: bool = False) -> None:
         if self.ai_future is not None and self.ai_future.done():
             self._poll_ai_move()
-        if self.state.terminal:
+        if self.state.terminal or self.evaluator is None:
             return
         if not force and self.state.to_play == self.human_color:
             return
@@ -301,12 +257,8 @@ class OmokGUI:
         self.ai_future = self.ai_executor.submit(
             self._search_ai_action,
             self.state.clone(),
-            self.model,
-            self.device,
-            self.config.selfplay.c_puct,
-            self.config.selfplay.dirichlet_alpha,
+            self.evaluator,
             self.simulations,
-            self.config.selfplay.leaves_per_batch,
         )
 
     def _poll_ai_move(self) -> None:
@@ -338,19 +290,10 @@ class OmokGUI:
             print(f"[gui] illegal AI move: {action}")
 
     @staticmethod
-    def _search_ai_action(
-        state: GameState,
-        model: PolicyValueNet,
-        device: str,
-        c_puct: float,
-        dirichlet_alpha: float,
-        simulations: int,
-        leaves_per_batch: int,
-    ) -> int:
-        evaluator = ModelEvaluator(model, device=device)
+    def _search_ai_action(state: GameState, evaluator: OnnxEvaluator, simulations: int) -> int:
         search = MCTS(
-            c_puct=c_puct,
-            dirichlet_alpha=dirichlet_alpha,
+            c_puct=C_PUCT,
+            dirichlet_alpha=0.3,
             dirichlet_epsilon=0.0,
             evaluator=evaluator,
         )
@@ -359,7 +302,7 @@ class OmokGUI:
             simulations,
             [0.0],
             add_noise=False,
-            leaves_per_batch=leaves_per_batch,
+            leaves_per_batch=LEAVES_PER_BATCH,
         )[0]
         return result.action
 
@@ -368,34 +311,23 @@ class OmokGUI:
         self.screen.fill((0, 0, 0))
         self._draw_board()
         self._draw_sidebar()
-        self._present()
-
-    def _present(self) -> None:
-        if self.screen.get_size() == self.window_surface.get_size():
-            self.window_surface.blit(self.screen, (0, 0))
-            return
-        pygame.transform.smoothscale(self.screen, self.window_surface.get_size(), self.window_surface)
 
     def _draw_board(self) -> None:
         ox, oy = self.board_origin
-        size = self.config.rules.board_size
         board_end_x = ox + self.board_px
         board_end_y = oy + self.board_px
-        stone_radius = max(18 * self.render_scale, int(self.cell * 0.32))
-        grid_width = max(1, self.render_scale)
-        outline_width = max(2, 3 * self.render_scale)
-        marker_radius = max(4, 5 * self.render_scale)
+        stone_radius = max(18, int(self.cell * 0.32))
         black = (0, 0, 0)
         white = (245, 245, 245)
 
-        for i in range(size):
+        for i in range(BOARD_SIZE):
             x = int(ox + i * self.cell)
             y = int(oy + i * self.cell)
-            pygame.draw.line(self.screen, white, (ox, y), (board_end_x, y), grid_width)
-            pygame.draw.line(self.screen, white, (x, oy), (x, board_end_y), grid_width)
+            pygame.draw.line(self.screen, white, (ox, y), (board_end_x, y), 1)
+            pygame.draw.line(self.screen, white, (x, oy), (x, board_end_y), 1)
 
-        for row in range(size):
-            for col in range(size):
+        for row in range(BOARD_SIZE):
+            for col in range(BOARD_SIZE):
                 stone = self.state.board[row, col]
                 if stone == 0:
                     continue
@@ -403,31 +335,34 @@ class OmokGUI:
                 y = int(oy + row * self.cell)
                 if stone == 1:
                     pygame.draw.circle(self.screen, black, (x, y), stone_radius)
-                    pygame.draw.circle(self.screen, white, (x, y), stone_radius, outline_width)
+                    pygame.draw.circle(self.screen, white, (x, y), stone_radius, 3)
                 else:
                     pygame.draw.circle(self.screen, white, (x, y), stone_radius)
 
         if self.state.last_action is not None:
-            row, col = divmod(self.state.last_action, size)
+            row, col = divmod(self.state.last_action, BOARD_SIZE)
             x = int(ox + col * self.cell)
             y = int(oy + row * self.cell)
             marker = black if self.state.board[row, col] == -1 else white
-            pygame.draw.circle(self.screen, marker, (x, y), marker_radius)
+            pygame.draw.circle(self.screen, marker, (x, y), 5)
 
     def _draw_sidebar(self) -> None:
         x, y = self.sidebar_origin
+        model_label = Path(self.model_path).name if self.model_path else "no model"
         lines = [
-            "Checkpoint",
-            self.checkpoints[self.checkpoint_index].name if self.checkpoints else "random-init",
+            "Model",
+            model_label,
             "",
-            f"Device: {self.device}",
+            f"Provider: {self.provider}",
             f"Human: {'Black' if self.human_color == 1 else 'White'}",
             f"Turn: {'Black' if self.state.to_play == 1 else 'White'}",
             f"Moves: {self.state.move_count}",
             f"Simulations: {self.simulations}",
             "",
         ]
-        if self.ai_future is not None and not self.ai_future.done():
+        if self.evaluator is None:
+            lines.append("AI: no model loaded")
+        elif self.ai_future is not None and not self.ai_future.done():
             lines.append("AI: thinking...")
         elif self.ai_error:
             lines.append(f"AI error: {self.ai_error[:28]}")
@@ -454,22 +389,10 @@ class OmokGUI:
                 "O: apply opening",
                 "[ / ]: seed -/+",
                 "S: swap side",
-                "N/P: next/prev",
-                "L: reload list",
                 "M: force AI",
                 "Esc: quit",
             ]
         )
-
-        if self.metadata:
-            lines.extend(
-                [
-                    "",
-                    f"Iteration: {self.metadata.get('iteration', '-')}",
-                    f"Best: {self.metadata.get('best_iteration', '-')}",
-                    f"Role: {self.metadata.get('checkpoint_role', '-')}",
-                ]
-            )
 
         for index, text in enumerate(lines):
             font = self.font if index == 0 or text == "Controls" else self.small_font
@@ -479,9 +402,9 @@ class OmokGUI:
     def _sidebar_color(self, text: str) -> tuple[int, int, int]:
         if not text:
             return COCKPIT_WHITE
-        if text in {"Checkpoint", "Controls"}:
+        if text in {"Model", "Controls"}:
             return COCKPIT_CYAN
-        if text.startswith("AI error"):
+        if text.startswith("AI error") or text == "AI: no model loaded":
             return COCKPIT_RED
         if text == "AI: thinking...":
             return COCKPIT_AMBER
@@ -500,14 +423,7 @@ class OmokGUI:
         if ":" in text and not text.startswith("AI error"):
             label, value = text.split(":", 1)
             return self._render_sidebar_pair(font, f"{label}:", value, color)
-        if font.size(text)[0] <= self.sidebar_width:
-            return font.render(text, True, color)
-        suffix = "..."
-        available = max(1, self.sidebar_width - font.size(suffix)[0])
-        trimmed = text
-        while trimmed and font.size(trimmed)[0] > available:
-            trimmed = trimmed[:-1]
-        return font.render(f"{trimmed}{suffix}", True, color)
+        return self._render_truncated_text(font, text, color, self.sidebar_width)
 
     def _render_sidebar_pair(
         self,
@@ -524,10 +440,8 @@ class OmokGUI:
         if label_width >= surface_width:
             surface.blit(self._render_truncated_text(font, label, COCKPIT_CYAN, surface_width), (0, 0))
             return surface
-
         surface.blit(label_surface, (0, 0))
-        value_width = surface_width - label_width
-        value_surface = self._render_truncated_text(font, value, value_color, value_width)
+        value_surface = self._render_truncated_text(font, value, value_color, surface_width - label_width)
         surface.blit(value_surface, (label_width, 0))
         return surface
 
@@ -550,56 +464,72 @@ class OmokGUI:
     def _pos_to_action(self, pos: tuple[int, int]) -> int | None:
         self._update_layout()
         ox, oy = self.board_origin
-        x = pos[0] * self.render_scale
-        y = pos[1] * self.render_scale
-        size = self.config.rules.board_size
-        tolerance = 24 * self.render_scale
-        if (
-            x < ox - tolerance
-            or y < oy - tolerance
-            or x > ox + self.board_px + tolerance
-            or y > oy + self.board_px + tolerance
-        ):
+        x, y = pos
+        tolerance = 24
+        if x < ox - tolerance or y < oy - tolerance or x > ox + self.board_px + tolerance or y > oy + self.board_px + tolerance:
             return None
         col = round((x - ox) / self.cell)
         row = round((y - oy) / self.cell)
-        if not (0 <= row < size and 0 <= col < size):
+        if not (0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE):
             return None
-        return row * size + col
+        return row * BOARD_SIZE + col
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Play against a 9x9 Omok tinygrad checkpoint.")
-    parser.add_argument("--checkpoint", type=str, default=None)
-    parser.add_argument("--config", type=str, default="configs/omok_quick.yaml")
-    parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--simulations", type=int, default=64)
-    parser.add_argument("--human-color", type=str, default="white", choices=["black", "white"])
-    parser.add_argument("--seed", type=int, default=0)
+    parser = argparse.ArgumentParser(
+        description="coolrl Omok: play against a trained AI on a 9×9 board.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
-        "--render-scale",
+        "--model",
+        type=str,
+        default=None,
+        metavar="FILE.onnx",
+        help="Path to an ONNX model file (.onnx). If omitted, the board launches "
+             "without an AI (useful for two-player local play or testing the UI).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda", "coreml"],
+        help="ONNX Runtime execution provider. 'auto' tries CoreML → CUDA → CPU in order.",
+    )
+    parser.add_argument(
+        "--simulations",
         type=int,
-        default=DEFAULT_RENDER_SCALE,
-        choices=range(1, MAX_RENDER_SCALE + 1),
-        metavar=f"1-{MAX_RENDER_SCALE}",
-        help="Internal supersampling scale for sharper text and stones.",
+        default=64,
+        metavar="N",
+        help="Number of MCTS simulations the AI runs per move. "
+             "Higher values improve move quality but increase think time.",
+    )
+    parser.add_argument(
+        "--human-color",
+        type=str,
+        default="white",
+        choices=["black", "white"],
+        help="Which color the human plays. Black moves first.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Random seed used when sampling opening sequences (O key in-game). "
+             "Change with [ / ] keys during play.",
     )
     return parser
 
 
 def main() -> None:
     args = build_argparser().parse_args()
-    if args.render_scale != DEFAULT_RENDER_SCALE:
-        print("[gui] --render-scale is deprecated; HiDPI is handled automatically via pygame.SCALED")
     human_color = 1 if args.human_color == "black" else -1
     app = OmokGUI(
-        checkpoint=args.checkpoint,
-        config_path=args.config,
-        device_name=args.device,
+        model_path=args.model,
+        device=args.device,
         simulations=args.simulations,
         human_color=human_color,
         seed=args.seed,
-        render_scale=args.render_scale,
     )
     app.run()
 
