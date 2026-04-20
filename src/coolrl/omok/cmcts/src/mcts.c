@@ -26,7 +26,11 @@ static void collect_one_leaf(MctsTree *tree, float *out_features, int *written, 
     return;
   }
   if (*written >= max_entries) return;
-  if (!tree_push_pending_leaf(tree, &state, node, path, path_len)) return;
+  apply_virtual_loss(path, path_len, tree->virtual_loss);
+  if (!tree_push_pending_leaf(tree, &state, node, path, path_len)) {
+    revert_virtual_loss(path, path_len, tree->virtual_loss);
+    return;
+  }
   state_write_features(&state, out_features + (size_t)(*written) * CMCTS_FEATURE_STRIDE);
   *written += 1;
 }
@@ -179,6 +183,7 @@ void mcts_batch_feed_leaves(MctsTree *const *trees,
     if (!tree) continue;
     for (int j = 0; j < tree->pending_leaf_count; j++) {
       PendingEval *pending = &tree->pending_leaves[j];
+      revert_virtual_loss(pending->path, pending->path_len, tree->virtual_loss);
       node_expand(tree, pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
       backup(pending->path, pending->path_len, values[offset]);
       offset += 1;

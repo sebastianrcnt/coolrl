@@ -2,10 +2,11 @@
 
 #include <stdlib.h>
 
-MctsTree *mcts_tree_new(float c_puct, int exactly_five) {
+MctsTree *mcts_tree_new(float c_puct, float virtual_loss, int exactly_five) {
   MctsTree *tree = (MctsTree *)calloc(1, sizeof(MctsTree));
   if (!tree) return NULL;
   tree->c_puct = c_puct;
+  tree->virtual_loss = virtual_loss;
   tree->exactly_five = exactly_five;
   tree->root = tree_node_new(tree, 1, 0.0f);
   return tree;

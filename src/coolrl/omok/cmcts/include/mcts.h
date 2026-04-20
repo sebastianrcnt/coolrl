@@ -23,7 +23,7 @@ typedef struct MctsTree MctsTree;
 
 // ---- lifecycle ----
 
-MctsTree *mcts_tree_new(float c_puct, int exactly_five);
+MctsTree *mcts_tree_new(float c_puct, float virtual_loss, int exactly_five);
 void mcts_tree_free(MctsTree *tree);
 
 // Reset tree and set the root position. `board` points to a row-major int8 buffer of size 81

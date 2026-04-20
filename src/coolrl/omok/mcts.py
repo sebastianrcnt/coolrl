@@ -30,12 +30,14 @@ class MCTS:
         dirichlet_epsilon: float,
         evaluator: Evaluator,
         search_threads: int = 1,
+        virtual_loss: float = 1.0,
     ) -> None:
         self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
         self.evaluator = evaluator
         self.search_threads = max(1, int(search_threads))
+        self.virtual_loss = float(virtual_loss)
 
     def search_batch(
         self,
@@ -98,6 +100,7 @@ class MCTS:
                     if state.terminal:
                         self._backup(path, state.outcome_for_player(state.to_play))
                         continue
+                    self._apply_virtual_loss(path)
                     pending_states.append(state)
                     pending_nodes.append(node)
                     pending_paths.append(path)
@@ -110,6 +113,7 @@ class MCTS:
             for state, node, path, prior, value in zip(
                 pending_states, pending_nodes, pending_paths, batch_priors, batch_values, strict=True
             ):
+                self._revert_virtual_loss(path)
                 self._expand(node, state, prior)
                 self._backup(path, float(value))
 
@@ -165,6 +169,16 @@ class MCTS:
             node.visit_count += 1
             node.value_sum += value
             value = -value
+
+    def _apply_virtual_loss(self, path: list[TreeNode]) -> None:
+        for node in path:
+            node.visit_count += 1
+            node.value_sum -= self.virtual_loss
+
+    def _revert_virtual_loss(self, path: list[TreeNode]) -> None:
+        for node in path:
+            node.visit_count -= 1
+            node.value_sum += self.virtual_loss
 
     def _apply_root_noise(self, root: TreeNode) -> None:
         if not root.children or self.dirichlet_alpha <= 0.0 or self.dirichlet_epsilon <= 0.0:

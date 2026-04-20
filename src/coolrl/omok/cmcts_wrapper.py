@@ -37,7 +37,7 @@ _FLOAT_ARRAY = np.ctypeslib.ndpointer(dtype=np.float32, flags="C_CONTIGUOUS")
 _INT8_ARRAY = np.ctypeslib.ndpointer(dtype=np.int8, flags="C_CONTIGUOUS")
 _INT32_ARRAY = np.ctypeslib.ndpointer(dtype=np.int32, flags="C_CONTIGUOUS")
 
-_LIB.mcts_tree_new.argtypes = [ctypes.c_float, ctypes.c_int]
+_LIB.mcts_tree_new.argtypes = [ctypes.c_float, ctypes.c_float, ctypes.c_int]
 _LIB.mcts_tree_new.restype = _TREE_P
 _LIB.mcts_tree_free.argtypes = [_TREE_P]
 _LIB.mcts_tree_free.restype = None
@@ -112,8 +112,14 @@ class TreeNode:
         self.children = _ChildrenProxy(self)
 
     @classmethod
-    def from_state(cls, state: GameState, c_puct: float) -> "TreeNode":
-        node = cls(_LIB.mcts_tree_new(ctypes.c_float(c_puct), int(state.exactly_five)))
+    def from_state(cls, state: GameState, c_puct: float, virtual_loss: float) -> "TreeNode":
+        node = cls(
+            _LIB.mcts_tree_new(
+                ctypes.c_float(c_puct),
+                ctypes.c_float(virtual_loss),
+                int(state.exactly_five),
+            )
+        )
         node.reset(state)
         return node
 
@@ -150,12 +156,14 @@ class MCTS:
         dirichlet_epsilon: float,
         evaluator: Evaluator,
         search_threads: int = 1,
+        virtual_loss: float = 1.0,
     ) -> None:
         self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
         self.evaluator = evaluator
         self.search_threads = max(1, int(search_threads))
+        self.virtual_loss = float(virtual_loss)
 
     def search_batch(
         self,
@@ -174,7 +182,7 @@ class MCTS:
             raise TypeError("C MCTS backend requires an evaluator with evaluate_features()")
 
         active_roots = [
-            root if root is not None else TreeNode.from_state(state, self.c_puct)
+            root if root is not None else TreeNode.from_state(state, self.c_puct, self.virtual_loss)
             for state, root in zip(states, roots, strict=True)
         ]
         tree_ptrs = np.ascontiguousarray([root.ptr for root in active_roots], dtype=np.uintp)

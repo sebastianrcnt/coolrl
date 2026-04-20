@@ -49,6 +49,7 @@ def worker_init(config_payload: dict, state_numpy: dict[str, np.ndarray]) -> Non
         dirichlet_epsilon=config.selfplay.dirichlet_epsilon,
         evaluator=evaluator,
         search_threads=config.selfplay.search_threads,
+        virtual_loss=config.selfplay.virtual_loss,
     )
 
     _WORKER_STATE.clear()

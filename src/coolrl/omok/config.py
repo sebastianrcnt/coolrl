@@ -42,7 +42,7 @@ class SelfPlayConfig:
     dirichlet_alpha: float = 0.25
     dirichlet_epsilon: float = 0.20
     c_puct: float = 1.6
-    virtual_loss: float = 0.0
+    virtual_loss: float = 1.0
     leaves_per_batch: int = 1
     simulation_ramp_iterations: int | None = None
     candidate_mix_fraction: float = 0.0
