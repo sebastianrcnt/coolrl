@@ -49,15 +49,28 @@ full iterations.
 The target should be backend-selection at the trainer level, not scattered
 conditionals across every file.
 
-Recommended config shape:
+Config shape (final decision):
 
 ```yaml
 training:
   backend: torch  # tinygrad | torch
+  optimization:
+    batch_size: 256
+    updates_per_iteration: 96
+    learning_rate: 0.0005
+    weight_decay: 0.0001
+    # ...remaining existing optimization fields
 
 selfplay:
   evaluator_backend: torch  # tinygrad | torch | auto
 ```
+
+Note this is a schema change: today's configs keep `optimization:` at top
+level. Moving it under `training:` is done as a prerequisite commit before
+Phase 2 backend work — see "Recommended Next Commit Sequence". The rationale
+for a new `training:` section (instead of `optimization.backend`) is that the
+backend choice affects checkpoint IO, replay tensor path, model construction,
+and device handling — not just optimizer internals.
 
 Short term, it is acceptable to keep `selfplay.evaluator_backend` under
 `selfplay` because it is already implemented. For full migration, add an
@@ -136,14 +149,21 @@ Acceptance criteria:
 
 Goal: make torch training possible without deleting tinygrad training.
 
-Decisions required before starting Phase 2 (see Open Questions):
+Prerequisites landed before Phase 2 backend work begins:
 
-- checkpoint format (`.pt` vs `.safetensors` vs both) — affects save/load code
-  shape, not just file extension.
-- `training.backend` config location — top-level vs nested — must be fixed
-  before the config is read in code.
-- Metal/CPU profile policy — default assumption for this plan is "Metal stays
-  on tinygrad until separately benchmarked"; flip only if decided otherwise.
+- Config rename commit moves `optimization:` under `training:` and adds a
+  `training.backend` field with default `tinygrad` (no behavior change).
+- `use_amp: true` top-level flag audited: confirmed either active (in which
+  case Phase 4 baseline must account for it) or dormant placeholder (in which
+  case remove or document). Phase 4 fp32-vs-fp32 comparison depends on this.
+
+Decisions already locked in (see "Decisions" section near the end):
+
+- Training checkpoint format: `.pt` (PyTorch native, bundles model + optimizer
+  + scheduler + metadata in one file).
+- `training.backend` lives at top level under `training:`, not under
+  `optimization:`.
+- Metal profile stays on tinygrad for this migration.
 
 Phase 2 must ship the minimum checkpoint save/load needed for its own smoke and
 quick runs. Full checkpoint compatibility (tinygrad→torch weight import, torch
@@ -228,14 +248,23 @@ Acceptance criteria:
 Goal: torch training can start from old tinygrad checkpoints and resume from new
 torch checkpoints.
 
-Recommended checkpoint policy:
+Checkpoint policy:
 
 | Format | Use | Notes |
 |---|---|---|
-| `coolrl.omok.v1` | existing tinygrad model checkpoints | keep readable |
-| `coolrl.omok.torch.v1` | new torch model checkpoints | explicit backend metadata |
-| `coolrl.omok.optimizer.v1` | existing tinygrad optimizer state | keep readable only for tinygrad |
-| `coolrl.omok.torch.optimizer.v1` | new torch optimizer state | `torch.save` or safetensors-compatible numpy payload |
+| `coolrl.omok.v1` | existing tinygrad model checkpoints (safetensors) | keep readable |
+| `coolrl.omok.optimizer.v1` | existing tinygrad optimizer state (safetensors) | keep readable only for tinygrad |
+| `coolrl.omok.torch.v1` | new torch training checkpoint (`.pt`) | bundles model state_dict, optimizer state_dict, scheduler state, training metadata |
+
+Training checkpoint file format: `.pt` (torch native). Rationale: PyTorch
+native serialization handles nested dicts (model + optimizer + scheduler +
+metadata) in a single file with no custom key-flattening. `.safetensors` is
+not used for training checkpoints in this migration.
+
+Optional inference/export artifact: `.safetensors` may be added later as a
+weights-only export format for ONNX conversion, external sharing, or
+zero-copy inference startup. This is out of scope for Phase 3 and must not
+block training checkpoint work.
 
 Do not silently load a tinygrad optimizer state into a torch optimizer. Model
 weights are portable; optimizer internals are not worth pretending to be
@@ -244,9 +273,11 @@ portable.
 Rules:
 
 - Torch backend may load model weights from tinygrad checkpoint.
-- Torch backend should initialize a fresh torch optimizer when resuming from a
-  tinygrad-only optimizer state.
-- Torch backend should fully resume optimizer state from a torch optimizer
+- Torch backend initializes a fresh torch optimizer when resuming from a
+  tinygrad-only checkpoint. This is the accepted behavior, not a fallback —
+  tinygrad → torch conversion always starts optimizer state from scratch.
+  Document this explicitly in resume logs.
+- Torch backend should fully resume optimizer state from a torch `.pt`
   checkpoint.
 - Metadata should record:
   - `training_backend`
@@ -424,9 +455,22 @@ Removal work:
 
 ## Recommended Next Commit Sequence
 
+0. `Move optimization config under training`
+   - rename all 4 yaml configs: `optimization:` → `training.optimization:`
+   - restructure `config.py`: `OptimizationConfig` becomes a field on a new
+     `TrainingConfig`
+   - add `training.backend` field defaulting to `tinygrad`
+   - no behavior change; prerequisite for Phase 2
+
+0b. `Audit use_amp flag`
+   - grep for actual uses of `use_amp`; confirm whether it is active in the
+     tinygrad path or a dormant placeholder
+   - either document its real effect or remove it before Phase 4
+
 1. `Extract shared PyTorch Omok network`
    - create `torch_network.py`
-   - update evaluator/export to use it
+   - update evaluator/export to use it (ONNX export may import
+     `torch_network` directly — this is the documented exception)
    - add parity script
 
 2. `Add torch training backend skeleton`
@@ -440,36 +484,76 @@ Removal work:
    - smoke and quick runs
 
 4. `Add torch checkpoint format`
-   - save/load model
+   - `.pt` training checkpoint (model + optimizer + scheduler + metadata)
    - resume torch optimizer
    - load tinygrad weights into torch model with fresh optimizer
 
 5. `Benchmark full CUDA torch training`
+   - fp32 torch vs fp32 tinygrad baseline
    - document iteration timings
    - update `docs/omok_cuda_tuning.md`
 
-6. `Re-tune torch search settings`
-   - sweep `leaves_per_batch`
+6. `Re-tune torch search settings and enable torch optimizations`
+   - layer in `cudnn.benchmark`, `channels_last`, `torch.compile`, AMP
+     independently with measurements
+   - sweep `leaves_per_batch` only after the optimizations above
    - update CUDA config only after measured results
 
 7. `Decide tinygrad deprecation`
    - remove or mark legacy after torch path is stable
 
-## Open Questions
+## Decisions
 
-Must decide before Phase 2 starts (blocks config and IO code shape):
+Final decisions driving the migration. These replace the earlier open
+questions; revisit only if new data contradicts them.
 
-- Should torch checkpoints use `.pt`, `.safetensors`, or both?
-- Should `training.backend` live at top level or under `optimization`?
-- Metal profile policy: move to torch MPS, torch CPU workers, or stay on
-  tinygrad? The plan's default assumption is "stay on tinygrad until separately
-  benchmarked"; confirm or override.
+**Training checkpoint format: `.pt` first, `.safetensors` deferred.**
+Training checkpoints use PyTorch native `.pt`, bundling model state_dict,
+optimizer state_dict, scheduler state, and training metadata in one file.
+`.safetensors` may be added later as an optional weights-only artifact for
+ONNX export or external inference — not as a training-loop format.
 
-Can be deferred until Phase 3 or later:
+**Config location: `training.backend` at top level under a new `training:`
+section.** Backend choice is cross-cutting (checkpoint IO, replay tensor
+path, model construction, device handling) and does not belong under
+`optimization:`. Existing `optimization:` fields move under
+`training.optimization:`. This is a schema migration landed as commit 0
+before Phase 2 backend work.
 
-- Do we care about preserving optimizer state when converting tinygrad runs to
-  torch, or is fresh optimizer acceptable?
-- Should the GUI/ONNX path depend on torch network directly, or remain
-  checkpoint-format based?
-- How much saved time should be reinvested in higher MCTS simulations versus
-  more iterations?
+**Metal profile: stays on tinygrad for this migration.** PyTorch MPS has
+less predictable op support and numerics than CUDA; mixing MPS migration
+with CUDA migration makes cause attribution hard. CUDA torch path stabilizes
+first; Metal is re-evaluated in a separate benchmark later. CPU workers can
+move to torch CPU later if needed.
+
+**Optimizer state portability (tinygrad → torch): fresh optimizer.** When
+loading a tinygrad checkpoint into the torch backend, model weights transfer
+but optimizer state starts fresh. The cost of reconstructing Adam moments
+accurately across backends exceeds the value of a few hundred warmup steps.
+Resume logs must state this explicitly.
+
+**GUI boundary: checkpoint-format based.** GUI does not import
+`torch_network` directly. It consumes checkpoint files (and later ONNX) via
+a backend-agnostic loader interface. This keeps the GUI working across
+backends and hardware profiles even after tinygrad removal.
+
+**ONNX boundary: export script depends on `torch_network` directly.** ONNX
+export inherently traces a torch model; the export script must instantiate
+`torch_network.TorchPolicyValueNet`. The checkpoint-format boundary applies
+to *consumers* of the exported ONNX file, not to the export script itself.
+Phase 1 already assumes this (it removes the duplicate torch model from
+`export_onnx.py`).
+
+**Saved-time reinvestment order: iterations first, then MCTS sweep.** After
+Phase 4, first verify learning curves with the same MCTS budget and more /
+faster iterations. Only once curves are stable, sweep `leaves_per_batch` and
+simulation counts in Phase 5. Mixing backend migration with search-budget
+changes makes effects inseparable.
+
+## Still Open
+
+- Stabilization criterion for "curves stable" before moving from iteration
+  investment to MCTS sweep (Phase 5 trigger). Candidates: N consecutive
+  arena promotions within expected range, or policy loss trend within X%
+  of tinygrad baseline over K iterations. Pick a concrete signal before
+  Phase 5.
