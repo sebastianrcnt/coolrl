@@ -1,7 +1,10 @@
-# 9x9 Omok RL
+# Omok RL
 
-This package trains a 9x9 Omok agent with PyTorch, self-play MCTS, a
-policy/value network, replay, checkpointing, arena promotion, and a Pygame GUI.
+This package trains Omok agents with PyTorch, self-play MCTS, a policy/value
+network, replay, checkpointing, arena promotion, Pygame play, and a browser GUI.
+Board size is configured through `rules.board_size`; the same `coolrl.omok`
+codepath supports 9x9, 13x13, 15x15, and other square sizes within the native
+backend limits.
 
 On a MacBook, training/evaluation can run on Apple Silicon via PyTorch MPS when
 available, otherwise PyTorch CPU fallback is used.
@@ -20,6 +23,13 @@ Run a short local training session:
 uv run python -m coolrl.omok.train --config configs/omok_quick.yaml --device CPU
 ```
 
+Run the 15x15 smoke or quick presets through the same trainer:
+
+```bash
+uv run python -m coolrl.omok.train --config configs/omok15_smoke.yaml --device CPU
+uv run python -m coolrl.omok.train --config configs/omok15_quick.yaml --device CPU
+```
+
 Resume from a checkpoint directory:
 
 ```bash
@@ -34,6 +44,9 @@ uv run --with torch --with onnx python -m coolrl.omok.export_onnx \
     --output exports/omok_quick.onnx
 
 uv run python -m coolrl.omok.gui --model exports/omok_quick.onnx
+
+# For a 15x15 model, pass the matching board size.
+uv run python -m coolrl.omok.gui --model exports/omok15_quick.onnx --board-size 15
 ```
 
 Run a full-sized profile for your machine:
@@ -41,13 +54,13 @@ Run a full-sized profile for your machine:
 ```bash
 uv run python -m coolrl.omok.train --config configs/omok_full_metal.yaml
 uv run python -m coolrl.omok.train --config configs/omok_full_cuda.yaml
+uv run python -m coolrl.omok.train --config configs/omok15_full_cuda.yaml
 ```
 
-The full profiles use the C MCTS backend. An experimental Rust implementation
-also lives at `src/coolrl/omok/rmcts/`, and can be selected with
-`selfplay.mcts_backend: rust` (currently routed through a Python shim while native
-integration is being finalized). If a source checkout cannot
-find the compiled extension, build it in place:
+The full profiles use native MCTS backends. The C backend lives under
+`src/coolrl/omok/cmcts/`; the Rust backend lives under
+`src/coolrl/omok/rmcts/` and can be selected with `selfplay.mcts_backend: rust`.
+If a source checkout cannot find the compiled C extension, build it in place:
 
 ```bash
 uv run --with setuptools python setup.py build_ext --inplace
@@ -68,6 +81,7 @@ GUI CLI options:
 | Flag | Default | Description |
 |---|---|---|
 | `--model FILE.onnx` | none | ONNX model file. Omit for two-player or UI testing. |
+| `--board-size N` | `9` | Board size for play. Must match the ONNX policy output length when a model is loaded. |
 | `--device auto\|cpu\|cuda\|coreml` | `auto` | ONNX Runtime execution provider. |
 | `--simulations N` | `64` | MCTS simulations per AI move. |
 | `--human-color black\|white` | `white` | Which color the human plays. |
@@ -75,7 +89,7 @@ GUI CLI options:
 
 ## Configs
 
-`configs/omok_smoke.yaml` is for debugging the plumbing:
+`configs/omok_smoke.yaml` is the 9x9 plumbing check:
 
 - 1 iteration.
 - 1 self-play game.
@@ -83,7 +97,7 @@ GUI CLI options:
 - small network: `channels=16`, `blocks=1`.
 - arena disabled.
 
-`configs/omok_quick.yaml` is a short real run:
+`configs/omok_quick.yaml` is a short 9x9 real run:
 
 - 20 iterations.
 - 8 self-play games per iteration.
@@ -97,6 +111,7 @@ For actual full runs, prefer the hardware-specific presets:
 
 - `configs/omok_full_cuda.yaml`: NVIDIA/discrete GPU profile. It uses `device: CUDA`, C MCTS, `evaluator_backend: torch`, `num_workers: 0`, `batch_size: 64`, and `leaves_per_batch: 64` so self-play and arena inference stay on the GPU in large batches.
 - `configs/omok_full_metal.yaml`: Apple Silicon profile. It uses `device: METAL`, C MCTS, smaller self-play chunks, `num_workers: auto`, and CPU worker parallelism so several games can be generated concurrently while avoiding shared Metal contexts across spawned processes.
+- `configs/omok15_smoke.yaml`, `configs/omok15_quick.yaml`, and `configs/omok15_full_cuda.yaml`: 15x15 presets that use the unified `coolrl.omok` trainer with `rules.board_size: 15`.
 
 Compatibility note: the full profiles keep reference fields such as `use_amp`,
 `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and
@@ -329,6 +344,8 @@ cd src/coolrl/omok/web && python -m http.server 8080
 ```
 
 Then open `http://localhost:8080`, click **Load .onnx**, and upload an exported model. Controls: click to place a stone, Reset, Undo, Swap side, force AI Move, and a simulations slider (4–512).
+Use the board-size selector before loading a model; the web UI checks that the
+ONNX policy output length matches the selected board size.
 
 ## Visualizing Metrics
 
@@ -351,7 +368,7 @@ You can also point directly at the `metrics.jsonl` file:
 omok-plot checkpoints/omok_full_cuda/metrics.jsonl
 ```
 
-The report is a 2×3 grid: train loss, policy/value loss, arena win rate (with accepted-model markers), selfplay average moves, replay buffer size, and elapsed hours.
+The report is a 2×3 grid: train loss, policy/value loss, arena win rate (with accepted-model markers), selfplay average moves, replay buffer size, and elapsed hours. The policy entropy reference line is derived from the run's recorded `board_size`, so 9x9 and 15x15 runs use different uniform baselines.
 
 ## Outputs
 
