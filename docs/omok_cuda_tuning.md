@@ -221,6 +221,68 @@ section. At 160 simulations, self-play, training updates, and arena are all
 material contributors. Future optimization should avoid focusing only on
 self-play MCTS traversal.
 
+## Built-In Training Metrics
+
+The trainer now writes enough per-iteration fields to diagnose the common Omok
+CUDA bottlenecks without running a separate microbenchmark first.
+
+Top-level phase timings:
+
+| Field | Meaning |
+|---|---|
+| `duration_seconds` | full iteration wall time, including checkpoint save |
+| `selfplay_seconds` | full self-play phase wall time |
+| `train_seconds` | optimizer update phase wall time |
+| `arena_seconds` | candidate-vs-best arena wall time |
+| `checkpoint_seconds` | checkpoint and runtime state save time |
+
+MCTS search timings are grouped by phase, for example
+`search_selfplay_candidate_*`, `search_selfplay_best_*`,
+`search_arena_candidate_*`, and `search_arena_best_*`:
+
+| Suffix | Meaning |
+|---|---|
+| `_calls` | number of `MCTS.search_batch(...)` calls |
+| `_seconds` | total search wall time, including evaluator calls |
+| `_avg_seconds` | average search call latency |
+| `_states` / `_avg_states` | active game states seen by search calls |
+| `_requested_leaves` | requested MCTS leaf visits, roughly states * simulations |
+| `_max_states` | largest active batch seen by that phase |
+| `_max_simulations` | largest simulation count used by that phase |
+| `_max_leaves_per_batch` | largest configured leaf batch used by that phase |
+
+Evaluator timings are grouped by the same phase names with `eval_*` fields:
+
+| Suffix | Meaning |
+|---|---|
+| `_calls` | number of neural evaluator calls |
+| `_seconds` | total evaluator wall time |
+| `_avg_seconds` | average evaluator call latency |
+| `_positions` | unpadded board positions evaluated |
+| `_padded_positions` | positions after power-of-two tinygrad bucket padding |
+| `_pad_ratio` | padded_positions / positions |
+| `_avg_batch` / `_max_batch` | actual evaluator batch sizes |
+| `_max_bucket` | largest padded tinygrad bucket |
+| `_bucket_counts` | count of calls per padded bucket size |
+
+Training update timings:
+
+| Field | Meaning |
+|---|---|
+| `train_metric_updates` | measured optimizer updates |
+| `train_metric_samples` | total sampled replay rows |
+| `train_sample_seconds` | replay sample and tensor creation time |
+| `train_forward_seconds` | model forward graph construction time |
+| `train_loss_seconds` | policy/value loss graph construction time |
+| `train_backward_seconds` | backward graph construction time |
+| `train_optimizer_seconds` | optimizer step graph construction/execution time |
+| `train_sync_seconds` | loss materialization and synchronization time |
+| `train_measured_seconds` | sum of measured training substeps |
+
+Use the separate `scripts/bench_omok_evaluator.py` only when isolating evaluator
+latency by synthetic batch size or comparing tinygrad against another inference
+backend. Normal training runs should rely on `metrics.jsonl` first.
+
 ## Current Handoff Notes
 
 - C MCTS traversal is fast after tree-level threading and node arena

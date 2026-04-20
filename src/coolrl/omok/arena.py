@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 from loguru import logger
 
 from coolrl.progress import make_progress
 
 from .board import GameState
-from .evaluator import ModelEvaluator
+from .evaluator import Evaluator, ModelEvaluator
+from .metrics import IterationMetrics
 from .mcts_backend import resolve_mcts_backend
 from .mcts_types import MCTSBackend
 from .network import PolicyValueNet
@@ -23,6 +24,7 @@ class ArenaResult:
     draws: int
     candidate_black_wins: int
     candidate_white_wins: int
+    moves: int = 0
 
     @property
     def candidate_win_rate(self) -> float:
@@ -50,8 +52,9 @@ class Arena:
         leaves_per_batch: int = 1,
         search_threads: int = 1,
         mcts_backend: str = "python",
-        candidate_evaluator: ModelEvaluator | None = None,
-        best_evaluator: ModelEvaluator | None = None,
+        candidate_evaluator: Evaluator | None = None,
+        best_evaluator: Evaluator | None = None,
+        metrics: IterationMetrics | None = None,
     ) -> None:
         self.board_size = board_size
         self.exactly_five = exactly_five
@@ -62,6 +65,7 @@ class Arena:
         self.mcts_module = resolve_mcts_backend(mcts_backend)
         self.candidate_evaluator = candidate_evaluator or ModelEvaluator(candidate_model, device=device)
         self.best_evaluator = best_evaluator or ModelEvaluator(best_model, device=device)
+        self.metrics = metrics
 
     def evaluate(self, games: int) -> ArenaResult:
         target_games = max(2, games)
@@ -75,6 +79,7 @@ class Arena:
             draws=0,
             candidate_black_wins=0,
             candidate_white_wins=0,
+            moves=0,
         )
 
         candidate_search = self.mcts_module.MCTS(
@@ -142,14 +147,28 @@ class Arena:
     def _advance_games(self, games: list[ArenaGame], search: MCTSBackend, candidate: bool) -> None:
         states = [game.state for game in games]
         roots = [game.candidate_root if candidate else game.best_root for game in games]
-        results = search.search_batch(
-            states,
-            self.simulations,
-            [0.0] * len(states),
-            add_noise=False,
-            roots=roots,
-            leaves_per_batch=self.leaves_per_batch,
-        )
+        phase = "arena_candidate" if candidate else "arena_best"
+
+        def run_search() -> list[Any]:
+            return search.search_batch(
+                states,
+                self.simulations,
+                [0.0] * len(states),
+                add_noise=False,
+                roots=roots,
+                leaves_per_batch=self.leaves_per_batch,
+            )
+
+        if self.metrics is None:
+            results = run_search()
+        else:
+            results = self.metrics.time_search(
+                phase,
+                len(states),
+                self.simulations,
+                self.leaves_per_batch,
+                run_search,
+            )
         for game, result in zip(games, results, strict=True):
             if candidate:
                 game.candidate_root = result.next_root
@@ -173,3 +192,4 @@ class Arena:
                 result.candidate_white_wins += 1
         else:
             result.best_wins += 1
+        result.moves += game.state.move_count

@@ -34,6 +34,7 @@ from .config import RunConfig, load_config
 from .device import configure_device
 from .evaluator import ModelEvaluator
 from .mcts_backend import resolve_mcts_backend
+from .metrics import IterationMetrics
 from .network import PolicyValueNet, clone_model
 from .openings import sample_balanced_openings
 from .replay import PendingSample, ReplayBuffer
@@ -70,6 +71,7 @@ class Trainer:
         self.best_model = clone_model(self.model)
         self.model_evaluator: ModelEvaluator | None = None
         self.best_model_evaluator: ModelEvaluator | None = None
+        self.iteration_metrics: IterationMetrics | None = None
         self.optimizer = self._build_optimizer()
         self.selfplay_rng = random.Random(config.seed + 1_048_583)
         self.iteration = 0
@@ -149,6 +151,7 @@ class Trainer:
 
         while self._should_start_iteration():
             self.iteration += 1
+            self.iteration_metrics = IterationMetrics()
             iteration_started = time.monotonic()
             simulations = self.current_simulations()
             logger.info("Iteration {} started: simulations={}", self.iteration, simulations)
@@ -209,6 +212,7 @@ class Trainer:
                 "selfplay_seconds": round(selfplay_seconds, 3),
                 "train_seconds": round(train_seconds, 3),
                 "arena_seconds": round(arena_seconds, 3),
+                **self.iteration_metrics.to_log_fields(),
                 **selfplay_stats,
                 **training_stats,
                 **arena_stats,
@@ -217,6 +221,8 @@ class Trainer:
             self.save_model_checkpoints(metadata)
             checkpoint_seconds = time.monotonic() - checkpoint_started
             metadata["checkpoint_seconds"] = round(checkpoint_seconds, 3)
+            metadata["duration_seconds"] = round(time.monotonic() - iteration_started, 3)
+            self._log_iteration_metrics(metadata)
             self._log(metadata)
             self.save_runtime_state(metadata)
 
@@ -226,6 +232,7 @@ class Trainer:
             self.elapsed_hours,
             self.best_iteration,
         )
+        self.iteration_metrics = None
 
     def current_simulations(self) -> int:
         schedule = self.config.selfplay.simulation_schedule
@@ -370,6 +377,8 @@ class Trainer:
         progress_task: TaskID,
     ) -> dict[str, int]:
         evaluator = self._evaluator_for_model(model)
+        if self.iteration_metrics is not None:
+            evaluator = self.iteration_metrics.timed_evaluator(f"selfplay_{source}", evaluator)
         MCTS = self.mcts_module.MCTS
         batch_size = max(1, self.config.selfplay.batch_size)
         black_wins = 0
@@ -414,14 +423,28 @@ class Trainer:
 
             while states and not self._should_stop():
                 temperatures = [self._selfplay_temperature(state.move_count) for state in states]
-                results = search.search_batch(
-                    states,
-                    simulations,
-                    temperatures,
-                    add_noise=True,
-                    roots=roots,
-                    leaves_per_batch=self.config.selfplay.leaves_per_batch,
-                )
+                leaves_per_batch = self.config.selfplay.leaves_per_batch
+
+                def run_search() -> list[Any]:
+                    return search.search_batch(
+                        states,
+                        simulations,
+                        temperatures,
+                        add_noise=True,
+                        roots=roots,
+                        leaves_per_batch=leaves_per_batch,
+                    )
+
+                if self.iteration_metrics is None:
+                    results = run_search()
+                else:
+                    results = self.iteration_metrics.time_search(
+                        f"selfplay_{source}",
+                        len(states),
+                        simulations,
+                        leaves_per_batch,
+                        run_search,
+                    )
 
                 next_states: list[GameState] = []
                 next_histories: list[list[PendingSample]] = []
@@ -693,25 +716,47 @@ class Trainer:
                 for _ in range(self.config.optimization.updates_per_iteration):
                     if self._should_stop():
                         break
+                    update_started = time.perf_counter()
                     states, target_policy, target_value = self.replay.sample_batch(
                         batch_size,
                         device=self.device,
                         recency_temperature=self.config.optimization.recency_temperature,
                     )
+                    sample_seconds = time.perf_counter() - update_started
+                    step_started = time.perf_counter()
                     self.optimizer.zero_grad()
                     logits, value = self.model(states)
+                    forward_seconds = time.perf_counter() - step_started
+                    step_started = time.perf_counter()
                     policy_loss = -(target_policy * logits.log_softmax(axis=1)).sum(axis=1).mean()
                     value_loss = ((value - target_value) ** 2).mean()
                     loss = (
                         self.config.optimization.policy_loss_weight * policy_loss
                         + self.config.optimization.value_loss_weight * value_loss
                     )
+                    loss_seconds = time.perf_counter() - step_started
+                    step_started = time.perf_counter()
                     loss.backward()
+                    backward_seconds = time.perf_counter() - step_started
+                    step_started = time.perf_counter()
                     self.optimizer.step()
+                    optimizer_seconds = time.perf_counter() - step_started
 
+                    sync_started = time.perf_counter()
                     loss_value = float(loss.realize().numpy())
                     policy_loss_value = float(policy_loss.realize().numpy())
                     value_loss_value = float(value_loss.realize().numpy())
+                    sync_seconds = time.perf_counter() - sync_started
+                    if self.iteration_metrics is not None:
+                        self.iteration_metrics.training.record(
+                            batch_size=batch_size,
+                            sample_seconds=sample_seconds,
+                            forward_seconds=forward_seconds,
+                            loss_seconds=loss_seconds,
+                            backward_seconds=backward_seconds,
+                            optimizer_seconds=optimizer_seconds,
+                            sync_seconds=sync_seconds,
+                        )
                     total_loss += loss_value
                     total_policy_loss += policy_loss_value
                     total_value_loss += value_loss_value
@@ -757,6 +802,14 @@ class Trainer:
             accept_win_rate = self.config.arena.bootstrap_accept_win_rate
             min_white_win_rate = self.config.arena.bootstrap_min_white_win_rate
 
+        candidate_evaluator = self.model_evaluator
+        best_evaluator = self.best_model_evaluator
+        if self.iteration_metrics is not None:
+            if candidate_evaluator is not None:
+                candidate_evaluator = self.iteration_metrics.timed_evaluator("arena_candidate", candidate_evaluator)
+            if best_evaluator is not None:
+                best_evaluator = self.iteration_metrics.timed_evaluator("arena_best", best_evaluator)
+
         arena = Arena(
             candidate_model=self.model,
             best_model=self.best_model,
@@ -768,8 +821,9 @@ class Trainer:
             leaves_per_batch=self.config.selfplay.leaves_per_batch,
             search_threads=self.config.selfplay.search_threads,
             mcts_backend=self.config.selfplay.mcts_backend,
-            candidate_evaluator=self.model_evaluator,
-            best_evaluator=self.best_model_evaluator,
+            candidate_evaluator=candidate_evaluator,
+            best_evaluator=best_evaluator,
+            metrics=self.iteration_metrics,
         )
         result = arena.evaluate(games)
         side_games = max(1, result.games // 2)
@@ -791,7 +845,32 @@ class Trainer:
             "arena_candidate_white_wins": result.candidate_white_wins,
             "arena_candidate_white_win_rate": round(candidate_white_win_rate, 4),
             "arena_win_rate": round(result.candidate_win_rate, 4),
+            "arena_avg_moves": round(0.0 if result.games == 0 else result.moves / result.games, 2),
         }
+
+    def _log_iteration_metrics(self, metadata: dict[str, Any]) -> None:
+        logger.info(
+            "Iteration {} timings: total={:.3f}s selfplay={:.3f}s train={:.3f}s arena={:.3f}s checkpoint={:.3f}s",
+            metadata["iteration"],
+            metadata["duration_seconds"],
+            metadata["selfplay_seconds"],
+            metadata["train_seconds"],
+            metadata["arena_seconds"],
+            metadata["checkpoint_seconds"],
+        )
+        logger.info(
+            "Iteration {} eval: selfplay={:.3f}s/{} calls arena={:.3f}s/{} calls train_sync={:.3f}s",
+            metadata["iteration"],
+            float(metadata.get("eval_selfplay_candidate_seconds", 0.0))
+            + float(metadata.get("eval_selfplay_best_seconds", 0.0)),
+            int(metadata.get("eval_selfplay_candidate_calls", 0))
+            + int(metadata.get("eval_selfplay_best_calls", 0)),
+            float(metadata.get("eval_arena_candidate_seconds", 0.0))
+            + float(metadata.get("eval_arena_best_seconds", 0.0)),
+            int(metadata.get("eval_arena_candidate_calls", 0))
+            + int(metadata.get("eval_arena_best_calls", 0)),
+            metadata.get("train_sync_seconds", 0.0),
+        )
 
     def save_model_checkpoints(self, metadata: dict[str, Any]) -> None:
         latest_metadata = {**metadata, "checkpoint_role": "candidate"}
