@@ -53,6 +53,8 @@ def run_selfplay_chunk(
     openings: list[list[int]],
     simulations: int,
     seed: int,
+    chunk_id: int,
+    progress_queue: Any | None = None,
 ) -> list[tuple[list[dict], int]]:
     from .board import GameState
     from .replay import PendingSample
@@ -64,11 +66,21 @@ def run_selfplay_chunk(
     random.seed(seed)
     np.random.seed(seed & 0xFFFFFFFF)
     Tensor.manual_seed(seed)
+    if progress_queue is not None:
+        progress_queue.put(
+            {
+                "type": "chunk_started",
+                "chunk_id": chunk_id,
+                "chunk_size": len(openings),
+                "pid": os.getpid(),
+            }
+        )
 
     finished: list[tuple[list[dict], int]] = []
     states: list[GameState] = []
     histories: list[list[PendingSample]] = []
     roots = []
+    completed_in_chunk = 0
 
     for opening in openings:
         state = GameState(config.rules.board_size, config.rules.exactly_five)
@@ -79,6 +91,19 @@ def run_selfplay_chunk(
                 state.apply_action(action)
         if state.terminal:
             finished.append(([], state.winner))
+            completed_in_chunk += 1
+            if progress_queue is not None:
+                progress_queue.put(
+                    {
+                        "type": "game_done",
+                        "chunk_id": chunk_id,
+                        "chunk_size": len(openings),
+                        "chunk_done": completed_in_chunk,
+                        "pid": os.getpid(),
+                        "moves": 0,
+                        "winner": state.winner,
+                    }
+                )
             continue
         states.append(state)
         histories.append([])
@@ -129,6 +154,19 @@ def run_selfplay_chunk(
                         state.winner,
                     )
                 )
+                completed_in_chunk += 1
+                if progress_queue is not None:
+                    progress_queue.put(
+                        {
+                            "type": "game_done",
+                            "chunk_id": chunk_id,
+                            "chunk_size": len(openings),
+                            "chunk_done": completed_in_chunk,
+                            "pid": os.getpid(),
+                            "moves": len(history),
+                            "winner": state.winner,
+                        }
+                    )
             else:
                 next_states.append(state)
                 next_histories.append(history)

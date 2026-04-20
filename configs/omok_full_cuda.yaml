@@ -1,0 +1,105 @@
+# Full-sized Omok profile for a discrete NVIDIA GPU, e.g. RTX 3090.
+#
+# This file intentionally differs from omok_full_metal.yaml in the self-play
+# strategy. With num_workers > 0, this trainer sends self-play to spawned worker
+# processes, and those workers currently force tinygrad to CPU in
+# selfplay_worker.py. On a CUDA box that means the expensive MCTS neural network
+# evaluations would bypass the GPU. For CUDA we therefore keep self-play in the
+# main process with num_workers: 0, so ModelEvaluator uses the CUDA device.
+#
+# batch_size stays large because MCTS search_batch evaluates many active games
+# together. On a 3090, larger batches and leaves_per_batch help amortize Python
+# and kernel launch overhead and give the GPU enough work per inference call.
+#
+# Keep this checkpoint directory separate from Metal/CPU runs. Replay buffers,
+# optimizer state, and timing assumptions should not be mixed across hardware
+# profiles.
+experiment_name: omok_full_cuda
+seed: 29
+max_hours: null
+device: CUDA
+use_amp: true
+
+rules:
+  board_size: 9
+  exactly_five: false
+
+network:
+  channels: 64
+  blocks: 6
+  value_hidden: 128
+  se_reduction: 8
+
+selfplay:
+  games_per_iteration: 64
+
+  # CUDA profile: keep all 64 active games in one search batch. This makes the
+  # neural network evaluator see larger feature batches, which is what a
+  # discrete GPU needs to stay useful during self-play.
+  batch_size: 64
+
+  # Critical CUDA choice: 0 disables ProcessPoolExecutor self-play. The
+  # multi-process worker path currently runs inference on CPU, so leaving this
+  # as auto would make the 3090 idle during self-play.
+  num_workers: 0
+
+  # These fields are retained for compatibility with the reference profile.
+  # The current tinygrad implementation parses them, but self-play throughput is
+  # primarily controlled by batch_size, num_workers, and leaves_per_batch.
+  search_threads: 4
+  inference_batch_size: 512
+  inference_wait_ms: 2.0
+
+  temperature_moves: 10
+  temperature_end: 0.1
+  dirichlet_alpha: 0.30
+  dirichlet_epsilon: 0.25
+  c_puct: 1.6
+  virtual_loss: 1.0
+
+  # Evaluate multiple leaves per MCTS round to increase inference batch sizes.
+  # This is favorable on CUDA, where small frequent inference calls waste GPU
+  # throughput.
+  leaves_per_batch: 8
+
+  simulation_ramp_iterations: 96
+  candidate_mix_fraction: 0.5
+  mixed_iterations_after_promotion: 8
+  simulation_schedule:
+    - fraction: 0.0
+      simulations: 96
+    - fraction: 0.4
+      simulations: 160
+    - fraction: 0.8
+      simulations: 256
+
+optimization:
+  batch_size: 256
+  updates_per_iteration: 96
+  learning_rate: 0.0005
+  min_learning_rate: 0.0005
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  replay_capacity: 80000
+  warmup_games: 128
+  policy_loss_weight: 1.0
+  value_loss_weight: 1.5
+  value_discount: 0.98
+  recency_temperature: 3.0e-5
+
+arena:
+  games: 48
+  simulations: 192
+  accept_win_rate: 0.55
+  min_white_win_rate: 0.1667
+  bootstrap_games: 24
+  bootstrap_simulations: 96
+  bootstrap_accept_win_rate: 0.5
+  bootstrap_min_white_win_rate: 0.1667
+
+checkpoint:
+  directory: checkpoints/omok_full_cuda
+  save_every_iteration: false
+  save_iteration_interval: 8
+  progress_interval_batches: 2
+  progress_interval_seconds: 20.0

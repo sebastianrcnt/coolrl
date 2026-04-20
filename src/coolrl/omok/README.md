@@ -34,10 +34,11 @@ uv run --with torch --with onnx python -m coolrl.omok.export_onnx \
 uv run python -m coolrl.omok.gui --model exports/omok_quick.onnx
 ```
 
-Run the full reference-sized profile:
+Run a full-sized profile for your machine:
 
 ```bash
-uv run python -m coolrl.omok.train --config configs/omok_full.yaml --device METAL
+uv run python -m coolrl.omok.train --config configs/omok_full_metal.yaml
+uv run python -m coolrl.omok.train --config configs/omok_full_cuda.yaml
 ```
 
 Useful GUI keys:
@@ -80,7 +81,7 @@ GUI CLI options:
 - 16 optimizer updates per iteration.
 - small arena enabled.
 
-`configs/omok_full.yaml` mirrors the reference `rocm_unlimited.yaml` profile, adjusted only for this repo's names and checkpoint directory:
+`configs/omok_full.yaml` mirrors the reference `rocm_unlimited.yaml` profile, adjusted only for this repo's names and checkpoint directory. Treat it as the reference/base profile.
 
 - unlimited iterations unless stopped manually.
 - 64 self-play games per iteration.
@@ -91,7 +92,12 @@ GUI CLI options:
 - replay capacity 80k and warmup 128 games.
 - arena: 48 games with 192 simulations.
 
-Compatibility note: `omok_full.yaml` keeps reference fields such as `use_amp`, `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and `grad_clip` so the profile stays easy to compare with `rocm_unlimited.yaml`. The current tinygrad trainer parses those fields, but the active parallelism path is batch self-play through `selfplay.batch_size` plus METAL batch execution, not PyTorch AMP or threaded batched evaluators.
+For actual full runs, prefer the hardware-specific presets:
+
+- `configs/omok_full_cuda.yaml`: NVIDIA/discrete GPU profile. It uses `device: CUDA`, `num_workers: 0`, and large self-play batches so neural network inference during self-play stays on the GPU.
+- `configs/omok_full_metal.yaml`: Apple Silicon profile. It uses `device: METAL`, smaller self-play chunks, and CPU worker parallelism so several games can be generated concurrently while avoiding shared Metal contexts across spawned processes.
+
+Compatibility note: the full profiles keep reference fields such as `use_amp`, `search_threads`, `inference_batch_size`, `inference_wait_ms`, `virtual_loss`, and `grad_clip` so the profile stays easy to compare with `rocm_unlimited.yaml`. The current tinygrad trainer parses those fields, but the active self-play throughput knobs are `selfplay.batch_size`, `selfplay.num_workers`, and `selfplay.leaves_per_batch`.
 
 For a longer run, copy `configs/omok_quick.yaml` and increase:
 
@@ -138,7 +144,7 @@ selfplay:
 
 Accepted values:
 
-- `auto` (used by all shipped `configs/omok_*.yaml`): resolves to `os.cpu_count()` at startup and logs the resolved value, e.g. `Self-play num_workers=auto resolved to 8 (os.cpu_count=8)`. Portable across machines without editing the config.
+- `auto`: resolves to `os.cpu_count()` at startup and logs the resolved value, e.g. `Self-play num_workers=auto resolved to 8 (os.cpu_count=8)`. Portable across machines without editing the config.
 - `0`: disables multi-process and keeps the legacy single-process path.
 - any positive integer: fixed number of worker processes.
 

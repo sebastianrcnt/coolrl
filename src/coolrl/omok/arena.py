@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from loguru import logger
-from tqdm import tqdm
+
+from coolrl.progress import make_progress
 
 from .board import GameState
 from .evaluator import ModelEvaluator
@@ -57,13 +58,16 @@ class Arena:
         candidate_black_wins = 0
         candidate_white_wins = 0
 
-        for opening in tqdm(openings, desc="Arena", unit="pair", leave=False):
-            wins, losses, pair_draws, black_wins, white_wins = self._play_opening_pair(opening)
-            candidate_wins += wins
-            best_wins += losses
-            draws += pair_draws
-            candidate_black_wins += black_wins
-            candidate_white_wins += white_wins
+        with make_progress() as progress:
+            task = progress.add_task("Arena", total=len(openings), status="pairs")
+            for opening in openings:
+                wins, losses, pair_draws, black_wins, white_wins = self._play_opening_pair(opening)
+                candidate_wins += wins
+                best_wins += losses
+                draws += pair_draws
+                candidate_black_wins += black_wins
+                candidate_white_wins += white_wins
+                progress.update(task, advance=1, status="pairs")
 
         result = ArenaResult(
             games=pair_count * 2,
@@ -149,4 +153,3 @@ class Arena:
                     candidate_root = candidate_root.children.get(result.action)
             state.apply_action(result.action)
         return state.winner
-

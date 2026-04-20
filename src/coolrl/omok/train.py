@@ -6,17 +6,19 @@ import multiprocessing as mp
 import os
 import random
 import signal
-import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from pathlib import Path
+from queue import Empty
 from typing import Any
 
 import numpy as np
 from loguru import logger
+from rich.progress import Progress, TaskID
 from tinygrad import Tensor
 from tinygrad.nn.optim import AdamW
-from tqdm import tqdm
+
+from coolrl.progress import RichLogSink, make_progress
 
 from .arena import Arena
 from .board import GameState
@@ -38,19 +40,10 @@ from .replay import PendingSample, ReplayBuffer
 from .selfplay_worker import model_state_to_numpy, run_selfplay_chunk, worker_init
 
 
-class TqdmLogSink:
-    def write(self, message: str) -> None:
-        if message.rstrip():
-            tqdm.write(message, end="")
-
-    def flush(self) -> None:
-        sys.stderr.flush()
-
-
 def configure_logging() -> None:
     logger.remove()
     logger.add(
-        TqdmLogSink(),
+        RichLogSink(),
         level="INFO",
         colorize=True,
         format="<green>{time:HH:mm:ss}</green> | <level>{level:<8}</level> | {message}",
@@ -247,7 +240,8 @@ class Trainer:
         candidate_completed = 0
         best_completed = 0
 
-        with tqdm(total=len(openings), desc="Self-play", unit="game", leave=False) as progress:
+        with make_progress() as progress:
+            progress_task = progress.add_task("Self-play", total=len(openings), status="")
             for source, source_model in (("candidate", self.model), ("best", self.best_model)):
                 if not source_openings[source] or self._should_stop():
                     continue
@@ -257,6 +251,7 @@ class Trainer:
                     openings=source_openings[source],
                     simulations=simulations,
                     progress=progress,
+                    progress_task=progress_task,
                 )
                 black_wins += int(stats["black_wins"])
                 white_wins += int(stats["white_wins"])
@@ -298,7 +293,8 @@ class Trainer:
         model: PolicyValueNet,
         openings: list[list[int]],
         simulations: int,
-        progress: tqdm,
+        progress: Progress,
+        progress_task: TaskID,
     ) -> dict[str, int]:
         num_workers = self.num_workers
         if num_workers > 0:
@@ -308,6 +304,7 @@ class Trainer:
                 openings=openings,
                 simulations=simulations,
                 progress=progress,
+                progress_task=progress_task,
                 num_workers=num_workers,
             )
         return self._run_selfplay_source_sequential(
@@ -316,6 +313,7 @@ class Trainer:
             openings=openings,
             simulations=simulations,
             progress=progress,
+            progress_task=progress_task,
         )
 
     def _run_selfplay_source_sequential(
@@ -324,7 +322,8 @@ class Trainer:
         model: PolicyValueNet,
         openings: list[list[int]],
         simulations: int,
-        progress: tqdm,
+        progress: Progress,
+        progress_task: TaskID,
     ) -> dict[str, int]:
         evaluator = ModelEvaluator(model, device=self.device)
         batch_size = max(1, self.config.selfplay.batch_size)
@@ -361,7 +360,7 @@ class Trainer:
                     white_wins += int(state.winner == -1)
                     draws += int(state.winner == 0)
                     completed_games += 1
-                    progress.update(1)
+                    progress.update(progress_task, advance=1, status=f"{source} games")
                     continue
                 states.append(state)
                 histories.append([])
@@ -398,7 +397,7 @@ class Trainer:
                         white_wins += int(state.winner == -1)
                         draws += int(state.winner == 0)
                         completed_games += 1
-                        progress.update(1)
+                        progress.update(progress_task, advance=1, status=f"{source} games")
                     else:
                         next_states.append(state)
                         next_histories.append(history)
@@ -427,7 +426,8 @@ class Trainer:
         model: PolicyValueNet,
         openings: list[list[int]],
         simulations: int,
-        progress: tqdm,
+        progress: Progress,
+        progress_task: TaskID,
         num_workers: int,
     ) -> dict[str, int]:
         batch_size = max(1, self.config.selfplay.batch_size)
@@ -454,49 +454,81 @@ class Trainer:
             len(chunks),
             batch_size,
         )
-        with ProcessPoolExecutor(
-            max_workers=effective_workers,
-            mp_context=ctx,
-            initializer=worker_init,
-            initargs=(config_payload, state_numpy),
-        ) as pool:
-            futures = {
-                pool.submit(
-                    run_selfplay_chunk,
-                    chunk,
-                    simulations,
-                    (seed_base ^ (idx * 0x9E3779B1)) & 0x7FFFFFFF,
-                ): idx
+        with ctx.Manager() as manager:
+            progress_queue = manager.Queue()
+            progress_events_seen = 0
+            chunk_tasks = {
+                idx: progress.add_task(
+                    f"{source} chunk {idx:02d}",
+                    total=len(chunk),
+                    status="pending",
+                )
                 for idx, chunk in enumerate(chunks)
             }
-            for future in as_completed(futures):
-                if self._should_stop():
-                    for pending in futures:
-                        if not pending.done():
-                            pending.cancel()
-                    break
-                try:
-                    finished = future.result()
-                except Exception:
-                    logger.exception("Self-play worker failed: source={}", source)
-                    raise
-                for history_dicts, winner in finished:
-                    history = [
-                        PendingSample(
-                            board=item["board"],
-                            to_play=item["to_play"],
-                            last_action=item["last_action"],
-                            policy=item["policy"],
-                        )
-                        for item in history_dicts
-                    ]
-                    self.replay.add_game(history, int(winner), self.config.optimization.value_discount)
-                    total_moves += len(history)
-                    black_wins += int(winner == 1)
-                    white_wins += int(winner == -1)
-                    draws += int(winner == 0)
-                    completed_games += 1
-                    progress.update(1)
+            with ProcessPoolExecutor(
+                max_workers=effective_workers,
+                mp_context=ctx,
+                initializer=worker_init,
+                initargs=(config_payload, state_numpy),
+            ) as pool:
+                futures = {
+                    pool.submit(
+                        run_selfplay_chunk,
+                        chunk,
+                        simulations,
+                        (seed_base ^ (idx * 0x9E3779B1)) & 0x7FFFFFFF,
+                        idx,
+                        progress_queue,
+                    ): idx
+                    for idx, chunk in enumerate(chunks)
+                }
+                pending: set[Future] = set(futures)
+                while pending:
+                    done, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+                    progress_events_seen += self._drain_selfplay_progress(
+                        progress_queue,
+                        progress,
+                        progress_task,
+                        source,
+                        chunk_tasks,
+                    )
+                    if self._should_stop():
+                        for future in pending:
+                            future.cancel()
+                        break
+                    for future in done:
+                        try:
+                            finished = future.result()
+                        except Exception:
+                            logger.exception("Self-play worker failed: source={}", source)
+                            raise
+                        for history_dicts, winner in finished:
+                            history = [
+                                PendingSample(
+                                    board=item["board"],
+                                    to_play=item["to_play"],
+                                    last_action=item["last_action"],
+                                    policy=item["policy"],
+                                )
+                                for item in history_dicts
+                            ]
+                            self.replay.add_game(history, int(winner), self.config.optimization.value_discount)
+                            total_moves += len(history)
+                            black_wins += int(winner == 1)
+                            white_wins += int(winner == -1)
+                            draws += int(winner == 0)
+                            completed_games += 1
+
+                progress_events_seen += self._drain_selfplay_progress(
+                    progress_queue,
+                    progress,
+                    progress_task,
+                    source,
+                    chunk_tasks,
+                )
+            missing_progress = max(0, completed_games - progress_events_seen)
+            if missing_progress:
+                progress.update(progress_task, advance=missing_progress, status=f"{source} games")
 
         logger.debug(
             "Self-play source finished (parallel): source={} games={} batch_size={} workers={}",
@@ -513,6 +545,51 @@ class Trainer:
             "total_moves": total_moves,
         }
 
+    def _drain_selfplay_progress(
+        self,
+        progress_queue: Any,
+        progress: Progress,
+        progress_task: TaskID,
+        source: str,
+        chunk_tasks: dict[int, TaskID] | None = None,
+    ) -> int:
+        drained = 0
+        while True:
+            try:
+                event = progress_queue.get_nowait()
+            except Empty:
+                break
+            if isinstance(event, dict):
+                event_type = event.get("type")
+                chunk_id = int(event.get("chunk_id", -1))
+                chunk_task = None if chunk_tasks is None else chunk_tasks.get(chunk_id)
+                pid = event.get("pid", "?")
+                if event_type == "chunk_started":
+                    if chunk_task is not None:
+                        progress.update(chunk_task, status=f"pid={pid} running")
+                    continue
+                if event_type == "game_done":
+                    drained += 1
+                    moves = event.get("moves", "?")
+                    winner = event.get("winner", "?")
+                    chunk_done = int(event.get("chunk_done", 0))
+                    chunk_size = int(event.get("chunk_size", 0))
+                    progress.update(progress_task, advance=1, status=f"{source} games")
+                    if chunk_task is not None:
+                        status = "done" if chunk_size > 0 and chunk_done >= chunk_size else (
+                            f"pid={pid} moves={moves} winner={winner}"
+                        )
+                        progress.update(
+                            chunk_task,
+                            advance=1,
+                            status=status,
+                        )
+                    continue
+            else:
+                drained += 1
+                progress.update(progress_task, advance=1, status=f"{source} games")
+        return drained
+
     def train_model(self) -> dict[str, float | int]:
         if len(self.replay) == 0:
             return {"updates_done": 0, "train_loss": 0.0, "policy_loss": 0.0, "value_loss": 0.0}
@@ -523,41 +600,41 @@ class Trainer:
         total_value_loss = 0.0
         updates_done = 0
 
-        progress = tqdm(
-            range(self.config.optimization.updates_per_iteration),
-            desc="Training",
-            unit="update",
-            leave=False,
-        )
-        with Tensor.train(True):
-            for _ in progress:
-                if self._should_stop():
-                    break
-                states, target_policy, target_value = self.replay.sample_batch(
-                    batch_size,
-                    device=self.device,
-                    recency_temperature=self.config.optimization.recency_temperature,
-                )
-                self.optimizer.zero_grad()
-                logits, value = self.model(states)
-                policy_loss = -(target_policy * logits.log_softmax(axis=1)).sum(axis=1).mean()
-                value_loss = ((value - target_value) ** 2).mean()
-                loss = (
-                    self.config.optimization.policy_loss_weight * policy_loss
-                    + self.config.optimization.value_loss_weight * value_loss
-                )
-                loss.backward()
-                self.optimizer.step()
+        with make_progress() as progress:
+            progress_task = progress.add_task(
+                "Training",
+                total=self.config.optimization.updates_per_iteration,
+                status="",
+            )
+            with Tensor.train(True):
+                for _ in range(self.config.optimization.updates_per_iteration):
+                    if self._should_stop():
+                        break
+                    states, target_policy, target_value = self.replay.sample_batch(
+                        batch_size,
+                        device=self.device,
+                        recency_temperature=self.config.optimization.recency_temperature,
+                    )
+                    self.optimizer.zero_grad()
+                    logits, value = self.model(states)
+                    policy_loss = -(target_policy * logits.log_softmax(axis=1)).sum(axis=1).mean()
+                    value_loss = ((value - target_value) ** 2).mean()
+                    loss = (
+                        self.config.optimization.policy_loss_weight * policy_loss
+                        + self.config.optimization.value_loss_weight * value_loss
+                    )
+                    loss.backward()
+                    self.optimizer.step()
 
-                loss_value = float(loss.realize().numpy())
-                policy_loss_value = float(policy_loss.realize().numpy())
-                value_loss_value = float(value_loss.realize().numpy())
-                total_loss += loss_value
-                total_policy_loss += policy_loss_value
-                total_value_loss += value_loss_value
-                updates_done += 1
-                self.total_updates += 1
-                progress.set_postfix(loss=f"{loss_value:.4f}")
+                    loss_value = float(loss.realize().numpy())
+                    policy_loss_value = float(policy_loss.realize().numpy())
+                    value_loss_value = float(value_loss.realize().numpy())
+                    total_loss += loss_value
+                    total_policy_loss += policy_loss_value
+                    total_value_loss += value_loss_value
+                    updates_done += 1
+                    self.total_updates += 1
+                    progress.update(progress_task, advance=1, status=f"loss={loss_value:.4f}")
 
         updates = max(1, updates_done)
         stats = {

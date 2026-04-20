@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import random
-import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import DefaultDict, Dict, List, Tuple
 
 import inquirer
 from loguru import logger
-from tqdm import tqdm
+
+from coolrl.progress import RichLogSink, make_progress
 
 # Card labels used in Kuhn poker, and a simple rank map for winner checks.
 CARDS = ("J", "Q", "K")
@@ -146,11 +146,14 @@ class KuhnTrainer:
             len(deals),
             shuffle_deals,
         )
-        for _ in tqdm(range(iterations), desc="Training CFR", unit="iter"):
-            if shuffle_deals:
-                random.shuffle(deals)
-            for p1_card, p2_card in deals:
-                util += self.cfr("", p1_card, p2_card, 1.0, 1.0)
+        with make_progress() as progress:
+            task = progress.add_task("Training CFR", total=iterations, status="iters")
+            for _ in range(iterations):
+                if shuffle_deals:
+                    random.shuffle(deals)
+                for p1_card, p2_card in deals:
+                    util += self.cfr("", p1_card, p2_card, 1.0, 1.0)
+                progress.update(task, advance=1, status="iters")
         avg_utility = util / (iterations * len(deals))
         logger.success("Finished CFR training: avg_utility_p1={:.6f}", avg_utility)
         return avg_utility
@@ -234,21 +237,11 @@ def choose_main_menu() -> str:
     return answer["choice"]
 
 
-class TqdmLogSink:
-    # Keep loguru logs from breaking the tqdm bar line layout.
-    def write(self, message: str) -> None:
-        if message.rstrip():
-            tqdm.write(message, end="")
-
-    def flush(self) -> None:
-        sys.stderr.flush()
-
-
 def configure_logging() -> None:
     # Replace default logger output with cleaner time/level logs for terminal and progress bar.
     logger.remove()
     logger.add(
-        TqdmLogSink(),
+        RichLogSink(),
         colorize=True,
         format="<green>{time:HH:mm:ss}</green> | <level>{level:<8}</level> | {message}",
     )
