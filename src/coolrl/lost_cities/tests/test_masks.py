@@ -1,0 +1,43 @@
+from coolrl.lost_cities.bots import RandomBot
+from coolrl.lost_cities.game import Card, GameState, LostCitiesConfig, tier_config
+
+
+def test_legal_mask_has_action_in_nonterminal_phases() -> None:
+    state = GameState.new_game(tier_config("tier1", seed=3))
+    while not state.terminal:
+        assert any(state.legal_mask())
+        action = RandomBot(11).act(state)
+        state.apply_action(action)
+
+
+def test_empty_hand_slots_are_masked() -> None:
+    state = GameState.empty(LostCitiesConfig())
+    state.hands[0] = [Card(0, 1)]
+    mask = state.legal_card_mask()
+    assert mask[0] is True
+    assert mask[1] is True
+    assert all(value is False for value in mask[2:])
+
+
+def test_empty_discard_pile_draw_is_illegal() -> None:
+    state = GameState.empty(LostCitiesConfig())
+    state.phase = "draw"
+    state.deck = [Card(0, 1)]
+    mask = state.legal_draw_mask()
+    assert mask[0] is True
+    assert all(mask[1 + color] is False for color in range(state.config.n_colors))
+
+
+def test_random_fuzz_invariants() -> None:
+    config = tier_config("tier1")
+    bot = RandomBot(99)
+    for seed in range(1000):
+        state = GameState.new_game(config, seed=seed)
+        steps = 0
+        while not state.terminal:
+            mask = state.legal_mask()
+            assert any(mask)
+            action = bot.act(state)
+            state.apply_action(action)
+            steps += 1
+            assert steps < 1000
