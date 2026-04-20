@@ -23,7 +23,7 @@ This installs the base dependencies from `[project.dependencies]`.
 This project defines extras in `[project.optional-dependencies]`:
 
 - `poker`: `inquirer`
-- `omok`: `torch`, `numpy`, `pygame`, `pyyaml` 
+- `omok`: `torch`, `numpy`, `pygame`, `pyyaml`, `safetensors`
 - `all`: installs both `poker` and `omok`
 
 Install one or more extras as needed:

@@ -102,7 +102,7 @@ parallel collection across active games, but it does not implement same-tree
 virtual-loss search or async inference queues. The active self-play throughput
 knobs are `selfplay.batch_size`, `selfplay.num_workers`,
 `selfplay.leaves_per_batch`, `selfplay.search_threads`, and
-`selfplay.evaluator_backend`.
+`selfplay.evaluator_backend` remains in the schema for compatibility, but the supported runtime evaluator is PyTorch.
 
 For a longer run, copy `configs/omok_quick.yaml` and increase:
 
@@ -172,14 +172,14 @@ Accepted values:
 
 When the resolved value is `>= 1`, self-play generation is dispatched to a
 `ProcessPoolExecutor` of CPU workers. Each worker receives a copy of the current
-model weights (as numpy arrays), reconstructs a torch `PolicyValueNet`, and runs
+model weights (as numpy arrays), reconstructs a torch `PolicyValueNet` on CPU, and runs
 MCTS + games independently. The main process keeps the configured training device
-so torch contexts are process-local. Results are collected back through the pool
+so accelerator contexts stay process-local. Results are collected back through the pool
 and appended to the shared replay buffer in the main process.
 
-Why CPU workers: this keeps torch contexts process-local. On Apple Silicon this can
+Why CPU workers: this keeps accelerator contexts process-local. On Apple Silicon this can
 be a reasonable trade-off because CPU workers can keep self-play moving while the
-main process runs updates. On a discrete NVIDIA GPU, the trade-off is different:
+main process runs updates on MPS. On a discrete NVIDIA GPU, the trade-off is different:
 the worker path moves self-play inference off CUDA and can be slower than full CUDA
 self-play. Use `num_workers: 0` for CUDA full runs.
 
@@ -189,7 +189,7 @@ Defaults and trade-offs:
 - `num_workers: 1`: one worker process. Rarely useful — use `0` instead unless you specifically want process isolation.
 - `num_workers: 2` to `os.cpu_count() - 1`: useful for CPU/Metal-style self-play. More workers = more games in flight, but diminishing returns once you exceed physical cores.
 
-Startup cost: each worker incurs startup overhead. For tiny configs (smoke, quick)
+Startup cost: each worker incurs startup overhead. For small configs (smoke, quick)
 this can dominate a single iteration. For medium and full configs the pool cost is
 amortized across many MCTS calls per iteration. A new pool is created per self-play
 source per iteration (candidate and best each get their own), and workers are
@@ -295,7 +295,7 @@ For a full GPU troubleshooting flow, use standard PyTorch tooling (`torch.profil
 
 A browser-based GUI runs ONNX models entirely client-side via ONNX Runtime Web (WASM).
 
-Export safetensors checkpoints to ONNX:
+Export PyTorch `.pt` checkpoints to ONNX:
 
 ```bash
 uv run --with torch --with onnx python -m coolrl.omok.export_onnx \
@@ -311,7 +311,7 @@ uv run --with torch --with onnx python -m coolrl.omok.export_onnx \
     --output exports/omokai
 ```
 
-Import existing ONNX checkpoints from omokai into safetensors:
+Import existing ONNX checkpoints from omokai into legacy `.safetensors` weight files:
 
 ```bash
 uv run --with onnx python -m coolrl.omok.convert_onnx \
@@ -362,5 +362,4 @@ Training writes under the configured checkpoint directory:
 - `metrics.jsonl`: one JSON metrics record per iteration.
 - `runtime_progress.json`: latest progress snapshot.
 
-Legacy `.safetensors` checkpoints can still be used as a model-weight-only seed path, but new
-training checkpoints are torch `.pt` only.
+Legacy `.safetensors` checkpoints can still be used as model-weight-only seed input. They do not restore optimizer state. New training checkpoints are PyTorch `.pt` only.
