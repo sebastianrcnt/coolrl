@@ -7,10 +7,10 @@
 extern "C" {
 #endif
 
-#define CMCTS_BOARD_SIZE 9
-#define CMCTS_ACTION_SIZE 81
+#define CMCTS_MIN_BOARD_SIZE 5
+#define CMCTS_MAX_BOARD_SIZE 19
+#define CMCTS_MAX_ACTION_SIZE (CMCTS_MAX_BOARD_SIZE * CMCTS_MAX_BOARD_SIZE)
 #define CMCTS_FEATURE_PLANES 4
-#define CMCTS_FEATURE_STRIDE (CMCTS_FEATURE_PLANES * CMCTS_ACTION_SIZE)
 
 typedef struct MctsTree MctsTree;
 
@@ -23,12 +23,16 @@ typedef struct MctsTree MctsTree;
 
 // ---- lifecycle ----
 
-MctsTree *mcts_tree_new(float c_puct, float virtual_loss, int exactly_five);
+MctsTree *mcts_tree_new(int board_size, float c_puct, float virtual_loss, int exactly_five);
 void mcts_tree_free(MctsTree *tree);
+int mcts_tree_board_size(const MctsTree *tree);
+int mcts_tree_action_size(const MctsTree *tree);
+int mcts_tree_feature_stride(const MctsTree *tree);
 
-// Reset tree and set the root position. `board` points to a row-major int8 buffer of size 81
-// with values in {-1, 0, 1}. `last_action` = -1 if none. `terminal` and `winner` describe the
-// current position outcome (winner in {-1, 0, 1}; 0 means draw or game ongoing).
+// Reset tree and set the root position. `board` points to a row-major int8 buffer
+// of size board_size * board_size with values in {-1, 0, 1}. `last_action` = -1
+// if none. `terminal` and `winner` describe the current position outcome
+// (winner in {-1, 0, 1}; 0 means draw or game ongoing).
 void mcts_tree_set_initial(MctsTree *tree,
                            const int8_t *board,
                            int to_play,
@@ -48,14 +52,15 @@ int mcts_tree_advance(MctsTree *tree, int action);
 // internally; pointer arrays are easy to build on the Python side via ctypes.
 
 // For every tree whose root is not yet expanded and whose state is non-terminal, append
-// its feature planes to `out_features` (shape [N, 4, 9, 9], float32, contiguous).
+// its feature planes to `out_features` (shape [N, 4, board_size, board_size], float32, contiguous).
 // `max_entries` caps N. Returns the number of entries written.
 int mcts_batch_prepare_roots(MctsTree *const *trees,
                              int num_trees,
                              float *out_features,
                              int max_entries);
 
-// Feed evaluator output for `mcts_batch_prepare_roots`. `priors` has shape [N, 81], `values`
+// Feed evaluator output for `mcts_batch_prepare_roots`.
+// `priors` has shape [N, action_size], `values`
 // shape [N], where N matches the return value of the preceding prepare call.
 void mcts_batch_feed_roots(MctsTree *const *trees,
                            int num_trees,
@@ -104,7 +109,7 @@ void mcts_batch_feed_leaves(MctsTree *const *trees,
                             const float *priors,
                             const float *values);
 
-// For each tree, write root visit counts to `out_counts` (shape [num_trees, 81], float32).
+// For each tree, write root visit counts to `out_counts` (shape [num_trees, action_size], float32).
 // For terminal roots, all zeros.
 void mcts_batch_extract_visit_counts(MctsTree *const *trees, int num_trees, float *out_counts);
 

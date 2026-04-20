@@ -11,18 +11,14 @@ from .evaluator import Evaluator
 from .mcts_types import SearchResult
 
 
-ACTION_SIZE = 81
-FEATURE_STRIDE = 4 * ACTION_SIZE
-SUPPORTED_BOARD_SIZE = 9
-
-
-def _require_supported_states(states: list[GameState]) -> None:
+def _batch_geometry(states: list[GameState]) -> tuple[int, int]:
+    if not states:
+        raise ValueError("states must not be empty")
+    board_size = states[0].board_size
     for state in states:
-        if state.board_size != SUPPORTED_BOARD_SIZE:
-            raise ValueError(
-                "C MCTS backend currently supports only 9x9 positions; "
-                f"got {state.board_size}x{state.board_size}"
-            )
+        if state.board_size != board_size:
+            raise ValueError("C MCTS backend requires one board_size per search_batch")
+    return board_size, board_size * board_size
 
 
 def _load_library() -> ctypes.CDLL:
@@ -47,10 +43,16 @@ _FLOAT_ARRAY = np.ctypeslib.ndpointer(dtype=np.float32, flags="C_CONTIGUOUS")
 _INT8_ARRAY = np.ctypeslib.ndpointer(dtype=np.int8, flags="C_CONTIGUOUS")
 _INT32_ARRAY = np.ctypeslib.ndpointer(dtype=np.int32, flags="C_CONTIGUOUS")
 
-_LIB.mcts_tree_new.argtypes = [ctypes.c_float, ctypes.c_float, ctypes.c_int]
+_LIB.mcts_tree_new.argtypes = [ctypes.c_int, ctypes.c_float, ctypes.c_float, ctypes.c_int]
 _LIB.mcts_tree_new.restype = _TREE_P
 _LIB.mcts_tree_free.argtypes = [_TREE_P]
 _LIB.mcts_tree_free.restype = None
+_LIB.mcts_tree_board_size.argtypes = [_TREE_P]
+_LIB.mcts_tree_board_size.restype = ctypes.c_int
+_LIB.mcts_tree_action_size.argtypes = [_TREE_P]
+_LIB.mcts_tree_action_size.restype = ctypes.c_int
+_LIB.mcts_tree_feature_stride.argtypes = [_TREE_P]
+_LIB.mcts_tree_feature_stride.restype = ctypes.c_int
 _LIB.mcts_tree_set_initial.argtypes = [
     _TREE_P,
     _INT8_ARRAY,
@@ -119,12 +121,15 @@ class TreeNode:
             raise RuntimeError("failed to allocate C MCTS tree")
         self.ptr = int(ptr)
         self._owns_ptr = owns_ptr
+        self.board_size = int(_LIB.mcts_tree_board_size(self.ptr))
+        self.action_size = int(_LIB.mcts_tree_action_size(self.ptr))
         self.children = _ChildrenProxy(self)
 
     @classmethod
     def from_state(cls, state: GameState, c_puct: float, virtual_loss: float) -> "TreeNode":
         node = cls(
             _LIB.mcts_tree_new(
+                int(state.board_size),
                 ctypes.c_float(c_puct),
                 ctypes.c_float(virtual_loss),
                 int(state.exactly_five),
@@ -134,6 +139,11 @@ class TreeNode:
         return node
 
     def reset(self, state: GameState) -> None:
+        if state.board_size != self.board_size:
+            raise ValueError(
+                f"cannot reset {self.board_size}x{self.board_size} C tree with "
+                f"{state.board_size}x{state.board_size} state"
+            )
         board = np.ascontiguousarray(state.board.reshape(-1), dtype=np.int8)
         _LIB.mcts_tree_set_initial(
             self.ptr,
@@ -184,7 +194,7 @@ class MCTS:
         roots: list[TreeNode | None] | None = None,
         leaves_per_batch: int = 1,
     ) -> list[SearchResult]:
-        _require_supported_states(states)
+        board_size, action_size = _batch_geometry(states)
         if roots is None:
             roots = [None] * len(states)
         if len(roots) != len(states):
@@ -192,13 +202,14 @@ class MCTS:
         if not hasattr(self.evaluator, "evaluate_features"):
             raise TypeError("C MCTS backend requires an evaluator with evaluate_features()")
 
-        active_roots = [
-            root if root is not None else TreeNode.from_state(state, self.c_puct, self.virtual_loss)
-            for state, root in zip(states, roots, strict=True)
-        ]
+        active_roots = []
+        for state, root in zip(states, roots, strict=True):
+            if root is not None and root.board_size != state.board_size:
+                raise ValueError("C MCTS root board_size does not match state board_size")
+            active_roots.append(root if root is not None else TreeNode.from_state(state, self.c_puct, self.virtual_loss))
         tree_ptrs = np.ascontiguousarray([root.ptr for root in active_roots], dtype=np.uintp)
 
-        root_features = np.empty((len(states), 4, 9, 9), dtype=np.float32)
+        root_features = np.empty((len(states), 4, board_size, board_size), dtype=np.float32)
         root_count = _LIB.mcts_batch_prepare_roots(
             tree_ptrs,
             len(active_roots),
@@ -207,6 +218,8 @@ class MCTS:
         )
         if root_count:
             priors, values = self.evaluator.evaluate_features(root_features[:root_count])
+            if priors.shape != (root_count, action_size):
+                raise ValueError(f"evaluator priors shape {priors.shape} does not match {(root_count, action_size)}")
             _LIB.mcts_batch_feed_roots(
                 tree_ptrs,
                 len(active_roots),
@@ -225,7 +238,7 @@ class MCTS:
         while sims_done < num_simulations:
             leaves_this_round = min(leaves_per_batch, num_simulations - sims_done)
             max_leaves = len(active_roots) * leaves_this_round
-            leaf_features = np.empty((max_leaves, 4, 9, 9), dtype=np.float32)
+            leaf_features = np.empty((max_leaves, 4, board_size, board_size), dtype=np.float32)
             if _HAS_THREADED_COLLECT and self.search_threads > 1:
                 leaf_count = _LIB.mcts_batch_collect_leaves_threaded(
                     tree_ptrs,
@@ -247,6 +260,8 @@ class MCTS:
             if not leaf_count:
                 continue
             priors, values = self.evaluator.evaluate_features(leaf_features[:leaf_count])
+            if priors.shape != (leaf_count, action_size):
+                raise ValueError(f"evaluator priors shape {priors.shape} does not match {(leaf_count, action_size)}")
             _LIB.mcts_batch_feed_leaves(
                 tree_ptrs,
                 len(active_roots),
@@ -254,7 +269,7 @@ class MCTS:
                 np.ascontiguousarray(values, dtype=np.float32),
             )
 
-        counts = np.empty((len(active_roots), ACTION_SIZE), dtype=np.float32)
+        counts = np.empty((len(active_roots), action_size), dtype=np.float32)
         _LIB.mcts_batch_extract_visit_counts(tree_ptrs, len(active_roots), counts)
         results: list[SearchResult] = []
         for idx, (state, root, temp) in enumerate(zip(states, active_roots, temperature, strict=True)):
