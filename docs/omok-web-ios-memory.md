@@ -302,6 +302,84 @@ keeps the code simple. Page-unmount (`OmokController.dispose`) also
 stays sync because the caller is leaving and we don't want to hold up
 teardown on a release() that might never answer.
 
+## Phase 4 — missed DOM/layout path during search progress
+
+Later Safari profiling showed a different symptom from the tab-death
+incidents above: Chrome spent very little time in rendering, while
+Safari repeatedly cycled through `Layout` -> `Styles recalculated` ->
+`Composite`, often against the full viewport, with the bundled app JS
+and `updateInfo`-adjacent UI code showing up as initiators.
+
+This does not invalidate the earlier memory/GPU conclusions, but it
+does correct an important blind spot in the phase 3 reasoning. The
+phase 3 note blamed continuous style/layout work primarily on the live
+WebGPU session keeping WebKit's compositor pipeline hot. That may still
+be a contributing factor, but the app also had a direct DOM mutation
+path tied to the inference/search loop.
+
+### What we missed
+
+The suspicious path is not only `updateInfo()` itself. The hotter path
+is:
+
+1. `MCTS.run(..., { onProgress })` yields roughly every
+   `yieldEveryMs` (default ~14 ms).
+2. `OmokController.aiMove()` / `showHint()` update candidates and call
+   `statusPresenter.setThinking(...)` from that progress callback.
+3. `StatusPresenter.setThinking()` writes the turn-pill class and text
+   immediately.
+
+That means a long search can push DOM text/class updates at close to
+frame cadence. Chrome/Blink tends to batch this well enough that the
+profile looks compute-heavy rather than rendering-heavy. Safari/WebKit
+is much more eager to invalidate style/layout for text and class
+changes, especially in a compact flex layout where a status pill can
+affect surrounding layout.
+
+There was also a separate forced synchronous layout pattern in
+`TurnPillText.set()` for animated status changes:
+
+- read `pill.getBoundingClientRect().width`
+- write `pill.style.width`
+- force flush with `pill.offsetWidth`
+- update text
+- set width to `auto`
+- read `getBoundingClientRect()` again
+- write width again inside `requestAnimationFrame`
+
+That pattern did not run for every thinking-progress tick because
+`setThinking(..., { animate: false })` bypassed it, but it did run for
+normal status renders, flashes, win/error states, and fallback paths.
+It is exactly the kind of write -> read -> write sequence that Safari
+turns into repeated full-layout work.
+
+The debug panel remains a secondary trigger when open: its render path
+reads `canvas.getBoundingClientRect()` and writes `innerHTML`. The
+earlier phase 1 fix correctly stopped polling while the panel is
+closed, so this is not a default idle-loop problem anymore.
+
+### Fix direction
+
+Keep inference/search progress and DOM writes decoupled:
+
+- Store the latest progress text/candidates in JS state.
+- Coalesce status DOM writes through a separate timer/rAF path.
+- Throttle progress text updates to human-visible cadence
+  (for example ~100-150 ms), not every MCTS yield.
+- Avoid layout reads in the same turn as DOM writes. In particular,
+  do not animate the status pill by measuring its current and target
+  width.
+- Prefer opacity/transform text animation, or no animation, over
+  width animation for status changes.
+- Add containment/compositing hints around the small status UI and the
+  canvas (`contain`, `transform: translateZ(0)`, `will-change`) so
+  Safari has less reason to invalidate the whole viewport.
+
+This should be treated as an app-level Safari performance bug, separate
+from ONNX Runtime memory pressure. If a future profile shows layout
+storms while Chrome remains fine, inspect DOM writes made from MCTS
+progress callbacks before assuming another ORT/WebGPU leak.
+
 ## Layered mitigations — what is active where
 
 | Category | Desktop | Mobile (non-iOS) | iOS Safari |

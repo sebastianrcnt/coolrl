@@ -328,9 +328,10 @@
       position: relative;
       overflow: hidden;
       isolation: isolate;
+      contain: layout paint style;
       max-width: 100%;
       justify-content: center;
-      transition: width 0.24s ease, color 0.18s ease;
+      transition: color 0.18s ease;
     }
 
     .turn-pill>* {
@@ -425,6 +426,7 @@
         inset 0 1px 0 var(--glass-highlight),
         inset 0 -0.5px 0 var(--glass-inner-shadow),
         var(--glass-shadow-lg);
+      contain: layout paint;
     }
 
     canvas#board {
@@ -435,6 +437,8 @@
       touch-action: manipulation;
       position: relative;
       z-index: 1;
+      transform: translateZ(0);
+      will-change: transform;
     }
 
     /* ---------- Bottom action bar ---------- */

@@ -19,40 +19,30 @@ export class TurnPillText {
   set(text: string, options: { animate?: boolean } = {}): void {
     if (this.textNode.textContent === text) return;
     const animate = options.animate ?? true;
-    if (!animate) {
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!animate || reduceMotion) {
       this.cancelTimer();
       this.pill.style.width = "";
       this.textNode.textContent = text;
       return;
     }
 
-    const oldWidth = this.pill.getBoundingClientRect().width;
-    const reduceMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion || oldWidth <= 0) {
-      this.textNode.textContent = text;
-      this.pill.style.width = "";
-      return;
-    }
-
     this.cancelTimer();
-    const fromWidth = Math.ceil(oldWidth);
-    const previousTransition = this.pill.style.transition;
-    this.pill.style.transition = "none";
-    this.pill.style.width = `${fromWidth}px`;
-    void this.pill.offsetWidth;
-
+    this.pill.style.width = "";
     this.textNode.textContent = text;
-    this.pill.style.width = "auto";
-    const toWidth = Math.ceil(this.pill.getBoundingClientRect().width);
-    this.pill.style.width = `${fromWidth}px`;
-    void this.pill.offsetWidth;
-    this.pill.style.transition = previousTransition;
 
-    requestAnimationFrame(() => {
-      this.pill.style.width = `${toWidth}px`;
-    });
+    if (typeof this.textNode.animate === "function") {
+      this.textNode.animate(
+        [
+          { opacity: 0.72, transform: "translateY(1px)" },
+          { opacity: 1, transform: "translateY(0)" },
+        ],
+        { duration: 140, easing: "ease-out" }
+      );
+    }
 
     this.resetTimer = setTimeout(() => {
       if (this.textNode.textContent === text) this.pill.style.width = "";
