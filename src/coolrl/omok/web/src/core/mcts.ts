@@ -37,15 +37,17 @@ export class TreeNode {
   valueSum: number;
   children: Map<number, TreeNode>;
   expanded: boolean;
+  stateKey?: string;
   rootValue?: number;
 
-  constructor(toPlay: Player, prior = 0) {
+  constructor(toPlay: Player, prior = 0, stateKey?: string) {
     this.toPlay = toPlay;
     this.prior = prior;
     this.visitCount = 0;
     this.valueSum = 0;
     this.children = new Map();
     this.expanded = false;
+    this.stateKey = stateKey;
   }
 
   averageValue(): number {
@@ -63,6 +65,20 @@ function yieldToBrowser(): Promise<void> {
     return sched.yield();
   }
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function stateKey(state: GameState): string {
+  const terminal = state.terminal ? 1 : 0;
+  const lastAction = state.lastAction ?? -1;
+  return [
+    state.boardSize,
+    state.toPlay,
+    state.moveCount,
+    lastAction,
+    state.winner,
+    terminal,
+    state.board.join(","),
+  ].join("|");
 }
 
 export interface MctsOptions {
@@ -87,8 +103,11 @@ export class MCTS {
 
   async run(state: GameState, numSims: number, options: RunOptions = {}): Promise<RunResult> {
     const { reuseRoot = null, onProgress = null } = options;
+    const currentKey = stateKey(state);
     const root =
-      reuseRoot && reuseRoot.toPlay === state.toPlay ? reuseRoot : new TreeNode(state.toPlay);
+      reuseRoot && reuseRoot.toPlay === state.toPlay && reuseRoot.stateKey === currentKey
+        ? reuseRoot
+        : new TreeNode(state.toPlay, 0, currentKey);
 
     if (!root.expanded && !state.terminal) {
       const { policy, value } = await this.evaluator.evaluate([state]);
@@ -108,6 +127,15 @@ export class MCTS {
       while (node.expanded && node.children.size > 0 && !simState.terminal) {
         const [action, child] = this.selectChild(node);
         simState.applyAction(action);
+        const childKey = stateKey(simState);
+        if (child.stateKey !== undefined && child.stateKey !== childKey) {
+          child.children.clear();
+          child.expanded = false;
+          child.visitCount = 0;
+          child.valueSum = 0;
+          child.rootValue = undefined;
+        }
+        child.stateKey = childKey;
         node = child;
         path.push(node);
       }
@@ -157,6 +185,7 @@ export class MCTS {
     let total = 0;
     for (const a of legal) total += priors[a] ?? 0;
     node.children.clear();
+    node.stateKey = stateKey(state);
     const nextPlayer = -state.toPlay as Player;
     if (total <= 0 || !isFinite(total)) {
       const uniform = legal.length > 0 ? 1.0 / legal.length : 0;
@@ -209,6 +238,7 @@ export class MCTS {
     let bestCount = -1;
     let total = 0;
     for (const [action, child] of root.children) {
+      if (state.board[action] !== 0) continue;
       total += child.visitCount;
       if (child.visitCount > bestCount) {
         bestCount = child.visitCount;
@@ -219,10 +249,16 @@ export class MCTS {
       const legal = state.legalIndices();
       bestAction = legal[Math.floor(Math.random() * legal.length)] ?? -1;
     }
+    const nextRoot = bestAction >= 0 ? root.children.get(bestAction) ?? null : null;
+    if (nextRoot) {
+      const nextState = state.clone();
+      nextState.applyAction(bestAction);
+      nextRoot.stateKey = stateKey(nextState);
+    }
     return {
       action: bestAction,
       rootValue: root.averageValue(),
-      nextRoot: state.terminal ? null : root.children.get(bestAction) ?? null,
+      nextRoot: state.terminal ? null : nextRoot,
     };
   }
 }

@@ -42,6 +42,25 @@ describe("GameState basics", () => {
     expect(g.terminal).toBe(true);
     expect(g.legalIndices()).toHaveLength(0);
   });
+
+  it("rejects moves after the game is terminal", () => {
+    const g = new GameState(15);
+    playSequence(g, [0, 15, 1, 16, 2, 17, 3, 18, 4]);
+    expect(() => g.applyAction(5)).toThrow("cannot play on a terminal position");
+  });
+
+  it("rejects occupied cells", () => {
+    const g = new GameState(15);
+    g.applyAction(0);
+    expect(() => g.applyAction(0)).toThrow("illegal move at (0, 0)");
+  });
+
+  it("rejects out-of-range or non-integer actions", () => {
+    const g = new GameState(15);
+    expect(() => g.applyAction(-1)).toThrow("action out of range: -1");
+    expect(() => g.applyAction(g.actionSize)).toThrow(`action out of range: ${g.actionSize}`);
+    expect(() => g.applyAction(1.5)).toThrow("action out of range: 1.5");
+  });
 });
 
 describe("GameState win detection", () => {
@@ -55,8 +74,8 @@ describe("GameState win detection", () => {
 
   it("detects vertical 5-in-a-row for white", () => {
     const g = new GameState(15);
-    // black: 0,1,2,3  white: 15,30,45,60,75
-    playSequence(g, [0, 15, 1, 30, 2, 45, 3, 60, 4, 75]);
+    // black avoids completing row 0; white: 15,30,45,60,75
+    playSequence(g, [0, 15, 1, 30, 2, 45, 3, 60, 5, 75]);
     expect(g.terminal).toBe(true);
     expect(g.winner).toBe(-1);
   });

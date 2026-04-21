@@ -53,9 +53,10 @@ export class WorkerEvaluator implements Evaluator {
     evaluator.worker = worker;
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => evaluator.onMessage(event);
     worker.onerror = (event) => evaluator.onError(event);
+    const workerBuffer = buf.slice(0);
     const response = (await evaluator.send(
-      { type: "init", buf, boardSize, backend, lowMemory },
-      [buf]
+      { type: "init", buf: workerBuffer, boardSize, backend, lowMemory },
+      [workerBuffer]
     )) as InitSuccess;
     evaluator.backend = response.backend ?? backend;
     return evaluator;

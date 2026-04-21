@@ -50,6 +50,15 @@ export class GameState {
   }
 
   applyAction(action: number): void {
+    if (this.terminal) throw new Error("cannot play on a terminal position");
+    if (!Number.isInteger(action) || action < 0 || action >= this.actionSize) {
+      throw new Error(`action out of range: ${action}`);
+    }
+    if (this.board[action] !== 0) {
+      const row = Math.floor(action / this.boardSize);
+      const col = action % this.boardSize;
+      throw new Error(`illegal move at (${row}, ${col})`);
+    }
     const player = this.toPlay;
     this.board[action] = player;
     this.lastAction = action;
