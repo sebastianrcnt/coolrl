@@ -780,10 +780,9 @@ export class OmokController {
     }
     if (this.env.isMobile) {
       // WebGPU/WebNN on iOS Safari OOM-kills the tab under sustained MCTS
-      // load; keep the options visible for transparency but block selection.
+      // load; keep the warning visible, but still honor explicit user choice.
       for (const option of Array.from(this.dom.backendSelect.options)) {
         if (option.value === "webgpu" || option.value === "webnn") {
-          option.disabled = true;
           option.title = "모바일 브라우저에서는 불안정";
           if (!option.textContent?.includes("(모바일 불안정)")) {
             option.textContent = `${option.textContent} (모바일 불안정)`;

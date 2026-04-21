@@ -179,9 +179,9 @@
       <span class="label">추론 방식</span>
       <select bind:this={backendSelect} id="backend-select">
         <option value="auto" selected>자동 (권장)</option>
-        <option value="wasm">WASM</option>
-        <option value="webgpu">WebGPU</option>
-        <option value="webnn">WebML (WebNN)</option>
+        <option value="wasm">WASM · 느리지만 안정적</option>
+        <option value="webgpu">WebGPU · 3~4배 빠르지만 불안정</option>
+        <option value="webnn">WebNN · 실험적</option>
       </select>
     </div>
     <label class="sheet-file" for="file-input">

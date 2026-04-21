@@ -64,7 +64,7 @@ describe("normalizeBackendChoice", () => {
 describe("backendLabel", () => {
   it("maps wasm to WASM", () => expect(backendLabel("wasm")).toBe("WASM"));
   it("maps webgpu to WebGPU", () => expect(backendLabel("webgpu")).toBe("WebGPU"));
-  it("maps webnn to WebML", () => expect(backendLabel("webnn")).toBe("WebML"));
+  it("maps webnn to WebNN", () => expect(backendLabel("webnn")).toBe("WebNN"));
   it("falls back to WASM for unknown", () => expect(backendLabel("cuda")).toBe("WASM"));
 });
 

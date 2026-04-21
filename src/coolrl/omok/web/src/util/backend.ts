@@ -12,7 +12,7 @@ export const BACKEND_CHOICES: readonly BackendChoice[] = [
 const BACKEND_LABELS: Record<InferenceBackend, string> = {
   wasm: "WASM",
   webgpu: "WebGPU",
-  webnn: "WebML",
+  webnn: "WebNN",
 };
 
 const BACKEND_CHOICE_LABELS: Record<BackendChoice, string> = {
