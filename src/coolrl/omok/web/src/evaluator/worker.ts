@@ -154,7 +154,7 @@ class EvaluatorSession {
   private buildSessionOptions(backend: InferenceBackend, lowMemory: boolean) {
     const options = {
       executionProviders: [backend],
-      graphOptimizationLevel: lowMemory ? ("basic" as const) : ("all" as const),
+      graphOptimizationLevel: "all" as const,
     };
     if (backend === "wasm") {
       return {

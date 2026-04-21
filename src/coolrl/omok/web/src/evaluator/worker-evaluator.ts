@@ -143,6 +143,20 @@ export class WorkerEvaluator implements Evaluator {
     return { policy, value };
   }
 
+  async healthCheck(): Promise<void> {
+    if (!this.worker) throw new Error("evaluator not initialized");
+    const dummy: StateSnapshot = {
+      boardSize: this.boardSize,
+      board: new Int8Array(this.actionSize),
+      toPlay: 1,
+      lastAction: null,
+    };
+    await this.send({
+      type: "evaluate",
+      states: [dummy],
+    });
+  }
+
   private send(
     request: { type: string } & Record<string, unknown>,
     transfer: Transferable[] = []

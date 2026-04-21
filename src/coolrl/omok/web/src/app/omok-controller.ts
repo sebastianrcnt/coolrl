@@ -109,6 +109,7 @@ export class OmokController {
   private defaultModelLoadStarted = false;
   private canvasCtx: CanvasRenderingContext2D | null = null;
   private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+  private visibilityRecoveryPromise: Promise<void> | null = null;
 
   private readonly stoneAnimations: StoneAnimations;
   private readonly thinkingGhosts: ThinkingGhosts;
@@ -252,7 +253,7 @@ export class OmokController {
     on(document, "dblclick", (e) => e.preventDefault(), { passive: false });
     on(window, "resize", () => this.handleResize());
     on(window, "orientationchange", () => this.handleResize());
-    on(document, "visibilitychange", () => this.debugPanel.syncTimer());
+    on(document, "visibilitychange", () => this.handleVisibilityChange());
     on(this.dom.debugPanel, "toggle", () => this.debugPanel.syncTimer());
 
     const themeObserver = new MutationObserver(() => this.redraw());
@@ -415,6 +416,55 @@ export class OmokController {
         });
       });
     }, 400);
+  }
+
+  private handleVisibilityChange(): void {
+    this.debugPanel.syncTimer();
+    if (document.visibilityState !== "visible") return;
+    if (!this.env.isMobile || !this.env.isWebKit) return;
+    void this.recoverEvaluatorAfterForeground();
+  }
+
+  private async recoverEvaluatorAfterForeground(): Promise<void> {
+    if (this.visibilityRecoveryPromise) {
+      await this.visibilityRecoveryPromise;
+      return;
+    }
+    this.visibilityRecoveryPromise = (async () => {
+      if (this.busy) return;
+      const evaluator = this.evaluator;
+      if (!evaluator) return;
+      try {
+        await evaluator.healthCheck();
+        logDebug("OmokController", "visibilityRecovery.healthCheck.ok");
+        return;
+      } catch (err) {
+        logWarn("OmokController", "visibilityRecovery.healthCheck.failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      if (this.evaluator !== evaluator) return;
+      try {
+        await this.disposeEvaluatorAsync();
+        this.mcts = null;
+        const buf = await this.fetchModelBuffer();
+        this.evaluator = await this.createEvaluator(buf);
+        this.mcts = this.makeMcts();
+        this.aiSubtree = null;
+        this.updateInfo();
+        this.debugPanel.render();
+        logInfo("OmokController", "visibilityRecovery.reinitialized");
+      } catch (err) {
+        logError("OmokController", "visibilityRecovery.reinitialize.failed", err);
+        this.statusPresenter.flash(`백그라운드 복귀 후 복구 실패${errorChipDetail(err)}`, "error", 8000);
+        this.updateInfo();
+      }
+    })();
+    try {
+      await this.visibilityRecoveryPromise;
+    } finally {
+      this.visibilityRecoveryPromise = null;
+    }
   }
 
   private async handleFileInput(e: Event & { target: HTMLInputElement }): Promise<void> {
