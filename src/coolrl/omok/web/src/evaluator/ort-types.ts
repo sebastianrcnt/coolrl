@@ -28,7 +28,7 @@ export interface OrtRuntime {
   InferenceSession: OrtInferenceSessionConstructor;
   env: {
     wasm: {
-      wasmPaths: Record<string, string>;
+      wasmPaths: string | Record<string, string>;
       numThreads: number;
       proxy: boolean;
     };

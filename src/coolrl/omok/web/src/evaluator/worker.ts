@@ -115,7 +115,11 @@ class EvaluatorSession {
     if (this.ortLoaded) return;
     const useWebGpuLoader = backend === "webgpu" || backend === "webnn";
     importScripts(ORT_CDN_BASE + (useWebGpuLoader ? "ort.webgpu.min.js" : "ort.wasm.min.js"));
-    ort.env.wasm.wasmPaths = wasmPaths();
+    // Hand the loader only the CDN base URL and let it construct its own
+    // filename (e.g. ort-wasm-simd-threaded.asyncify.mjs for the native
+    // WebGPU/WebNN EPs in 1.24+). Pinning explicit filenames couples us to
+    // the internal wasm-glue naming, which has changed each minor release.
+    ort.env.wasm.wasmPaths = ORT_CDN_BASE;
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.proxy = false;
     this.ortLoaded = true;
@@ -172,16 +176,6 @@ class EvaluatorSession {
     }
     return out;
   }
-}
-
-function wasmPaths(): Record<string, string> {
-  // ORT Web 1.24 moved WebGPU off the JSEP-based glue; ort.webgpu.min.js now
-  // calls webgpuInit on the plain ort-wasm-simd-threaded module, so the same
-  // non-jsep wasm/mjs pair is used for every backend loader we ship.
-  return {
-    wasm: `${ORT_CDN_BASE}ort-wasm-simd-threaded.wasm`,
-    mjs: `${ORT_CDN_BASE}ort-wasm-simd-threaded.mjs`,
-  };
 }
 
 function softmaxInPlace(arr: Float32Array, offset: number, len: number): void {
