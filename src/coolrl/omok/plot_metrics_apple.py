@@ -439,8 +439,18 @@ def build_figure(
         row = i // 2
         cx = col_xs[col]
         label_y, val_y, desc_y = row_positions[row]
+        ax_h.scatter(
+            [cx],
+            [label_y],
+            s=22,
+            c=accent,
+            marker="o",
+            edgecolors="none",
+            transform=ax_h.transAxes,
+            zorder=4,
+        )
         ax_h.text(
-            cx,
+            cx + 0.014,
             label_y,
             label,
             fontsize=9,
@@ -454,7 +464,7 @@ def build_figure(
             val_y,
             val,
             fontsize=22,
-            color=accent,
+            color=TEXT_PRIMARY,
             fontweight=900,
             transform=ax_h.transAxes,
             va="center",
