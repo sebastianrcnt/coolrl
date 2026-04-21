@@ -17,7 +17,7 @@ network:
 
 selfplay:
   mcts_backend: rust
-  evaluator_backend: torch
+  evaluator_backend: tensorrt
   games_per_iteration: 48
   batch_size: 48
   num_workers: 0

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 from loguru import logger
 
@@ -53,6 +55,20 @@ def _coerce_torch_model(model: object) -> TorchPolicyValueNet:
     raise TypeError("torch evaluator expects a PyTorch nn.Module")
 
 
+def _cuda_requested_or_available(device: str | None) -> bool:
+    _require_torch()
+    requested = (device or "auto").upper()
+    if requested in {"CPU", "METAL", "GPU"}:
+        return False
+    if requested == "CUDA":
+        return torch.cuda.is_available()
+    return torch.cuda.is_available()
+
+
+def _tensorrt_available() -> bool:
+    return importlib.util.find_spec("tensorrt") is not None
+
+
 class TorchModelEvaluator(Evaluator):
     def __init__(self, model: object, device: str | None = None) -> None:
         _require_torch()
@@ -86,6 +102,21 @@ class TorchModelEvaluator(Evaluator):
 
 def build_evaluator(model: object, *, backend: str, device: str | None) -> Evaluator:
     token = backend.strip().lower()
-    if token in {"torch", "auto"}:
+    if token == "auto":
+        if _cuda_requested_or_available(device) and _tensorrt_available():
+            try:
+                from .tensorrt_evaluator import TensorRTModelEvaluator
+
+                return TensorRTModelEvaluator(model, device=device)
+            except Exception as exc:
+                logger.warning("TensorRT evaluator unavailable; falling back to torch: {}", exc)
         return TorchModelEvaluator(model, device=device)
-    raise ValueError(f"unsupported selfplay.evaluator_backend: {backend!r}; use 'torch'")
+    if token == "torch":
+        return TorchModelEvaluator(model, device=device)
+    if token in {"tensorrt", "trt"}:
+        from .tensorrt_evaluator import TensorRTModelEvaluator
+
+        return TensorRTModelEvaluator(model, device=device)
+    raise ValueError(
+        f"unsupported selfplay.evaluator_backend: {backend!r}; use 'torch', 'tensorrt', or 'auto'"
+    )

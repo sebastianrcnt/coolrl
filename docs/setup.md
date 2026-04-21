@@ -31,10 +31,17 @@ Install one or more extras as needed:
 ```bash
 uv sync --extra poker
 uv sync --extra omok
+uv sync --extra omok-tensorrt
 uv sync --extra all
 uv sync --extra poker --extra omok
 uv sync --all-extras
 ```
+
+TensorRT is intentionally not part of the normal `omok` extra because it is
+NVIDIA CUDA-only. For CUDA inference experiments, install NVIDIA TensorRT and
+ONNX through `uv sync --extra omok-tensorrt`, then select
+`selfplay.evaluator_backend: tensorrt` or `auto`. The extra skips TensorRT on
+macOS so Apple Silicon setups keep the normal PyTorch/MPS path.
 
 ## 4) Run examples
 
