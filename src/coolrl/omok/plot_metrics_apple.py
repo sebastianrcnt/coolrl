@@ -112,10 +112,33 @@ def configure_fonts() -> None:
         if name not in font_names:
             font_names.append(name)
 
+    # Korean (and other CJK) glyph fallback — SF Pro doesn't ship Hangul.
+    cjk_candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    ]
+    cjk_names: list[str] = []
+    for path in cjk_candidates:
+        p = Path(path)
+        if not p.exists():
+            continue
+        try:
+            font_manager.fontManager.addfont(str(p))
+        except Exception:
+            continue
+        for entry in font_manager.fontManager.ttflist:
+            if entry.fname == str(p) and entry.name not in cjk_names:
+                cjk_names.append(entry.name)
+
+    # Matplotlib 3.6+ does per-glyph fallback when font.family is a concrete
+    # list of names (not the generic "sans-serif" alias). Listing Korean
+    # fonts here lets Hangul render via Noto while Latin stays on SF Pro.
+    family_list = [*font_names, *cjk_names, "DejaVu Sans"]
     plt.rcParams.update(
         {
-            "font.family": "sans-serif",
-            "font.sans-serif": [*font_names, "DejaVu Sans"],
+            "font.family": family_list,
+            "font.sans-serif": family_list,
             "axes.unicode_minus": False,
         }
     )
@@ -307,10 +330,16 @@ def _format_lr(v: float, _pos: int) -> str:
     )
 
 
-def panel_title(ax, theme: Theme, title: str, subtitle: str = "") -> None:
+def panel_title(
+    ax,
+    theme: Theme,
+    title: str,
+    subtitle: str = "",
+    caption: str = "",
+) -> None:
     ax.text(
         0.0,
-        1.34,
+        1.52,
         title,
         transform=ax.transAxes,
         fontsize=17,
@@ -320,11 +349,21 @@ def panel_title(ax, theme: Theme, title: str, subtitle: str = "") -> None:
     if subtitle:
         ax.text(
             0.0,
-            1.15,
+            1.32,
             subtitle,
             transform=ax.transAxes,
             fontsize=13,
             color=theme.text_secondary,
+        )
+    if caption:
+        ax.text(
+            0.0,
+            1.08,
+            caption,
+            transform=ax.transAxes,
+            fontsize=11,
+            color=theme.text_tertiary,
+            linespacing=1.4,
         )
 
 
@@ -400,7 +439,7 @@ def build_figure(
         nrows=6,
         ncols=4,
         height_ratios=[1.0, 1.0, 1.0, 1.05, 1.0, 0.85],
-        hspace=1.0,
+        hspace=1.4,
         wspace=0.32,
         left=0.055,
         right=0.97,
@@ -533,6 +572,7 @@ def build_figure(
         theme,
         "Policy Loss",
         f"Now {cur_policy:.2f}  ·  Uniform ln({board_size * board_size}) = {uniform_entropy:.2f}",
+        caption="정책 네트워크와 MCTS 탐색 분포의 교차엔트로피. 낮을수록 수 예측이 정확.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -554,7 +594,13 @@ def build_figure(
 
     # ---- Value Loss (wide right) ----
     ax = add_chart(gs[1, 2:])
-    panel_title(ax, theme, "Value Loss", f"Now {cur_value:.2f}  ·  Lower is better")
+    panel_title(
+        ax,
+        theme,
+        "Value Loss",
+        f"Now {cur_value:.2f}  ·  Lower is better",
+        caption="현재 포지션의 승패 예측 MSE. 낮을수록 실제 결과에 근접.",
+    )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(value):
@@ -565,7 +611,13 @@ def build_figure(
 
     # ---- Total Loss + Learning Rate ----
     ax = add_chart(gs[2, :2])
-    panel_title(ax, theme, "Total Loss", f"Now {cur_total:.2f}  ·  policy + 1.5 × value")
+    panel_title(
+        ax,
+        theme,
+        "Total Loss",
+        f"Now {cur_total:.2f}  ·  policy + 1.5 × value",
+        caption="정책 손실과 가치 손실의 가중합 — 전체 수렴도 지표.",
+    )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(total):
@@ -576,7 +628,13 @@ def build_figure(
 
     ax = add_chart(gs[2, 2:])
     cur_lr = float(lr[-1]) if len(lr) and np.isfinite(lr[-1]) else 0.0
-    panel_title(ax, theme, "Learning Rate", f"Constant {cur_lr:.0e}")
+    panel_title(
+        ax,
+        theme,
+        "Learning Rate",
+        f"Constant {cur_lr:.0e}",
+        caption="Adam 옵티마이저 학습률. 현재는 상수로 고정되어 있음.",
+    )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(lr):
@@ -593,6 +651,7 @@ def build_figure(
         theme,
         "Arena Win Rate",
         f"{accepted_count} candidates accepted  ·  Threshold {accept_thresh:.0f}%",
+        caption="새 후보 모델이 현재 best 모델과 대국 시 얻는 승률. 임계값을 넘으면 새 best로 채택됩니다.",
     )
     style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
@@ -628,6 +687,7 @@ def build_figure(
         theme,
         "Candidate White Win Rate",
         f"Now {cur_white:.0f}%  ·  Healthy band 30-70%  ·  Floor {white_thresh:.0f}%",
+        caption="후보 모델이 흑돌을 잡았을 때의 승률. 30-70% 구간을 크게 벗어나면 편향 의심.",
     )
     style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
@@ -652,6 +712,7 @@ def build_figure(
         f"Now {cur_moves:.1f} moves per game"
         if np.isfinite(cur_moves)
         else "Selfplay length",
+        caption="자기대국 한 판당 평균 착수 수. 실력이 오르면 길어지는 경향.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -663,7 +724,13 @@ def build_figure(
 
     # ---- Replay Buffer + Elapsed ----
     ax = add_chart(gs[5, :2])
-    panel_title(ax, theme, "Replay Buffer", f"{cur_buffer:,} games  ·  Capacity 200,000")
+    panel_title(
+        ax,
+        theme,
+        "Replay Buffer",
+        f"{cur_buffer:,} games  ·  Capacity 200,000",
+        caption="최근 자기대국 게임을 쌓아둔 학습 데이터 풀. 최대 20만 게임 보관.",
+    )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     ax.set_ylim(0, max(cur_buffer * 1.12, 1000))
@@ -682,6 +749,7 @@ def build_figure(
         theme,
         "Elapsed",
         f"{cur_elapsed:.2f} hours total  ·  {avg_iter_sec:.0f}s per iteration",
+        caption="학습 시작부터의 누적 경과 시간.",
     )
     style_axis(ax, theme, hours=True)
     ax.set_xlim(0, n_max)
