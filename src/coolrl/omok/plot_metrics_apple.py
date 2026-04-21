@@ -389,7 +389,7 @@ def build_figure(
     gs = fig.add_gridspec(
         nrows=6,
         ncols=4,
-        height_ratios=[0.85, 1.0, 1.0, 1.05, 1.0, 0.85],
+        height_ratios=[1.0, 1.0, 1.0, 1.05, 1.0, 0.85],
         hspace=1.0,
         wspace=0.32,
         left=0.055,
@@ -463,29 +463,38 @@ def build_figure(
             "lower is better",
         ),
     ]
-    sidebar_x0 = 0.60
-    col_xs = (sidebar_x0, (sidebar_x0 + 1.0) / 2)
+    sidebar_x0 = 0.55
+    sidebar_x1 = 1.0
+    inner_pad_x = 0.022
+    col_width = (sidebar_x1 - sidebar_x0) / 2
+    # Left-edge of each column's content area (after inner padding).
+    col_text_xs = (
+        sidebar_x0 + inner_pad_x,
+        sidebar_x0 + col_width + inner_pad_x,
+    )
     row_positions = (
         # (label_y, value_y, descriptor_y)
-        (0.92, 0.72, 0.55),
-        (0.38, 0.18, 0.01),
+        (0.93, 0.70, 0.52),
+        (0.36, 0.13, -0.05),
     )
-    divider_y = 0.48
+    divider_y = 0.43
     ax_h.plot(
-        [sidebar_x0, 1.0],
+        [sidebar_x0, sidebar_x1],
         [divider_y, divider_y],
         color=theme.grid,
         linewidth=0.7,
         transform=ax_h.transAxes,
         zorder=3,
     )
+    dot_offset = 0.016
     for i, (label, val, accent, desc) in enumerate(kpis):
         col = i % 2
         row = i // 2
-        cx = col_xs[col]
+        text_x = col_text_xs[col]
+        dot_x = text_x - dot_offset
         label_y, val_y, desc_y = row_positions[row]
         ax_h.scatter(
-            [cx],
+            [dot_x],
             [label_y],
             s=22,
             c=accent,
@@ -495,7 +504,7 @@ def build_figure(
             zorder=4,
         )
         ax_h.text(
-            cx + 0.014,
+            text_x,
             label_y,
             label,
             fontsize=9,
@@ -505,7 +514,7 @@ def build_figure(
             va="center",
         )
         ax_h.text(
-            cx,
+            text_x,
             val_y,
             val,
             fontsize=22,
@@ -515,7 +524,7 @@ def build_figure(
             va="center",
         )
         ax_h.text(
-            cx,
+            text_x,
             desc_y,
             desc,
             fontsize=9,
