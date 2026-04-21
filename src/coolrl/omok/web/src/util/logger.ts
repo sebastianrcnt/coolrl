@@ -6,7 +6,7 @@ let debugEnabled: boolean | null = null;
 
 type LogMethod = "debug" | "log";
 
-function hasConsole(): globalThis is Window & Console {
+function hasConsole(): boolean {
   return typeof globalThis !== "undefined" && "console" in globalThis;
 }
 

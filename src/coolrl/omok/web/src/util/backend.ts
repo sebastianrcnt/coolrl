@@ -48,13 +48,16 @@ export function backendChoiceLabel(
   return BACKEND_CHOICE_LABELS[normalizeBackendChoice(value ?? null)];
 }
 
-// "auto" tries WebGPU first and falls back to WASM; an explicit choice is
-// honored strictly with no fallback so the user can diagnose backend issues.
+// "auto" tries WebGPU first only on desktop and falls back to WASM; mobile
+// devices stay on WASM because WebGPU/WebNN support is still uneven there.
+// An explicit choice is honored strictly so the user can diagnose backend issues.
 export function resolveBackendAttempts(
   choice: BackendChoice,
-  webgpuSupported: boolean
+  webgpuSupported: boolean,
+  isMobile = false
 ): InferenceBackend[] {
   if (choice === "auto") {
+    if (isMobile) return ["wasm"];
     return webgpuSupported ? ["webgpu", "wasm"] : ["wasm"];
   }
   return [choice];

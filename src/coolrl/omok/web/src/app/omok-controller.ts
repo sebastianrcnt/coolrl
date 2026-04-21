@@ -273,7 +273,11 @@ export class OmokController {
     const webgpuSupported =
       typeof navigator !== "undefined" &&
       !!(navigator as { gpu?: unknown }).gpu;
-    const attempts = resolveBackendAttempts(this.backendChoice, webgpuSupported);
+    const attempts = resolveBackendAttempts(
+      this.backendChoice,
+      webgpuSupported,
+      this.env.isMobile
+    );
     let lastError: unknown = null;
     for (const backend of attempts) {
       try {
