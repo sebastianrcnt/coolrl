@@ -1,31 +1,36 @@
-# 설정
+# Setup
 
-## 1) uv 설치
+## 1) Install uv
 
-아직 `uv`가 없다면:
+If you don't have `uv` yet:
+
 ```bash
 pip install uv
 ```
-## 2) 환경 생성 및 동기화
 
-프로젝트 루트에서:
+## 2) Create and sync environment
+
+From the project root:
+
 ```bash
 uv sync
 ```
-그러면 `[project.dependent]`에서 기본 종속성이 설치됩니다.
 
-## 3) 선택적 기능 종속성
+This installs the base dependencies from `[project.dependencies]`.
 
-이 프로젝트는 `[project.ional-dependents]`에 추가 항목을 정의합니다.
+## 3) Optional feature dependencies
 
-- `포커`: `탐구자`
+This project defines extras in `[project.optional-dependencies]`:
+
+- `poker`: `inquirer`
 - `omok`: `torch`, `numpy`, `pygame`, `pyyaml`, `safetensors`
-- `omok-tui`: `omok` + `onnxruntime` 및 `textual`
-- `omok-tui-cuda`: `omok` + CUDA ONNX 런타임 및 `textual`
-- `omok-tui-tensorrt`: `omok` + CUDA ONNX 런타임, TensorRT 및 `textual`
-- `all`: `poker`, `omok`, `omok-tui`, `lost-cities`를 설치합니다.
+- `omok-tui`: `omok` plus `onnxruntime` and `textual`
+- `omok-tui-cuda`: `omok` plus CUDA ONNX Runtime and `textual`
+- `omok-tui-tensorrt`: `omok` plus CUDA ONNX Runtime, TensorRT, and `textual`
+- `all`: installs `poker`, `omok`, `omok-tui`, and `lost-cities`
 
-필요에 따라 하나 이상의 추가 기능을 설치하십시오.
+Install one or more extras as needed:
+
 ```bash
 uv sync --extra poker
 uv sync --extra omok
@@ -37,20 +42,22 @@ uv sync --extra all
 uv sync --extra poker --extra omok
 uv sync --all-extras
 ```
-TensorRT는 의도적으로 일반적인 'omok' 추가 항목의 일부가 아닙니다.
-NVIDIA CUDA 전용. CUDA 추론 실험을 위해서는 NVIDIA TensorRT를 설치하고
-'uv sync --extra omok-tensorrt'를 통해 ONNX를 선택한 다음 선택하세요.
-`selfplay.evaluator_backend: tensorrt` 또는 `auto`. 추가로 TensorRT를 건너뜁니다.
-macOS이므로 Apple Silicon 설정은 일반적인 PyTorch/MPS 경로를 유지합니다.
 
-## 4) 예제 실행
+TensorRT is intentionally not part of the normal `omok` extra because it is
+NVIDIA CUDA-only. For CUDA inference experiments, install NVIDIA TensorRT and
+ONNX through `uv sync --extra omok-tensorrt`, then select
+`selfplay.evaluator_backend: tensorrt` or `auto`. The extra skips TensorRT on
+macOS so Apple Silicon setups keep the normal PyTorch/MPS path.
 
-각 모듈에 대한 프로젝트 문서를 사용하십시오.
+## 4) Run examples
 
-- Kuhn Poker: `src/coolrl/kuhn_poker/tabular_cfr.md`를 참조하세요.
-- 오목: `src/coolrl/omok/README.md`를 참조하세요.
+Use the project docs for each module:
 
-오목 빠른 연기 테스트의 경우:
+- Kuhn Poker: see `src/coolrl/kuhn_poker/tabular_cfr.md`
+- Omok: see `src/coolrl/omok/README.md`
+
+For Omok quick smoke test:
+
 ```bash
 uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device CPU
 ```

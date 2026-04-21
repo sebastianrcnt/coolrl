@@ -1,80 +1,87 @@
-#오목MCTS추억사건
+# Omok MCTS Memory Incident
 
-이 메모는 시작하는 동안 관찰된 2026-04-21 메모리 폭발을 기록합니다.
+This note records the 2026-04-21 memory blow-up observed while starting:
+
 ```bash
 uv run python -m coolrl.omok.train --config configs/omok15_full_cuda_hdd.yaml
 ```
-프로세스는 64GB의 시스템 RAM을 소비하고 약 8GB의 스왑을 채우고 다음과 같은 오류를 발생시켰습니다.
-죽기 전에 SSD I/O가 너무 많습니다. 체크포인트 디렉터리가 시작 상태에만 도달했습니다.
-따라서 실패는 실패가 아닌 첫 번째 15x15 자체 플레이 단계에서 발생했습니다.
-재생 직렬화 또는 최적화 프로그램 교육 중.
 
-## 증상
+The process consumed 64 GB of system RAM, filled about 8 GB of swap, and caused
+heavy SSD I/O before dying. The checkpoint directory only reached startup state,
+so the failure happened during the first 15x15 self-play phase rather than
+during replay serialization or optimizer training.
 
-- `replay.pkl`은 사실상 비어 있었습니다.
-- `trainer_state.json`에 `반복: 0` 및 `상태: 시작`이 표시되었습니다.
-- 스왑이 소진될 때까지 시스템 RAM이 증가했습니다.
-- 체크포인트가 커서가 아니라 OS가 페이징 중이었기 때문에 디스크 I/O가 급증했습니다.
+## Symptoms
 
-## 근본 원인
+- `replay.pkl` remained effectively empty.
+- `trainer_state.json` showed `iteration: 0` and `status: startup`.
+- System RAM grew until swap was exhausted.
+- Disk I/O spiked because the OS was paging, not because checkpoints were large.
 
-직접적인 원인은 전환 후 C MCTS 트리 수명 관리였습니다.
-경기장 할당.
+## Root Cause
 
-각 C `MctsTree`는 게임 중에 할당된 모든 노드에 대한 경기장 블록을 소유합니다. 이전
-수정 사항인 `mcts_tree_advance()`는 `tree->root`를 선택한 하위 항목으로 이동했지만 그렇게 했습니다.
-이전 루트와 선택되지 않은 모든 형제를 보유하는 경기장 블록을 해제하지 않음
-가지. 이로 인해 게임이 끝날 때까지 오래된 검색 분기가 계속 유지되었습니다.
+The immediate cause was C MCTS tree lifetime management after switching to
+arena allocation.
 
-이는 일부 9x9 실행에서는 숨을 수 있을 만큼 견딜 수 있었지만 다음에서는 폭발적으로 나타났습니다.
+Each C `MctsTree` owns arena blocks for all nodes allocated during a game. Before
+the fix, `mcts_tree_advance()` moved `tree->root` to the selected child but did
+not release arena blocks holding the previous root and all unselected sibling
+branches. That made old search branches remain alive for the rest of the game.
+
+This was tolerable enough to hide on some 9x9 runs but became explosive on
 15x15:
+
 ```text
 9x9 action_size  = 81
 15x15 action_size = 225
 ```
-게임 초반 확장 시 법적 조치당 한 명의 자녀가 생성됩니다. 조밀한 자식 포인터
-노드당 배열은 보드 크기 비용을 작업 공간에서 대략 2차로 만듭니다.
-넓고 얕은 확장을 위해. 15x15 전체 CUDA 프로필도 15x15 이상에서 시작됩니다.
-9x9 전체 CUDA 프로필보다 시뮬레이션이 더 많아져서 동일한 수명 버그가
-시스템 수준 OOM.
 
-## 수정
+Early-game expansion creates one child per legal action. A dense child-pointer
+array per node makes the board-size cost roughly quadratic in the action space
+for broad shallow expansion. The 15x15 full CUDA profile also starts at more
+simulations than the 9x9 full CUDA profile, so the same lifetime bug became a
+system-level OOM.
 
-C 백엔드는 이제 두 가지 작업을 수행합니다.
+## Fix
 
-- 확장되지 않은 노드는 더 이상 '자식' 포인터 배열을 할당하지 않습니다.
-- `mcts_tree_advance()`는 선택된 하위 하위 트리만 새로운 영역으로 복제합니다.
-  그런 다음 이전 경기장을 해제합니다.
+The C backend now does two things:
 
-이는 선택되지 않은 가지를 삭제하는 동안 선택한 줄에 대한 트리 재사용을 유지합니다.
-움직일 때마다. 또한 기존 C/Python 패리티 동작을 유지합니다.
-딥 트리 재사용은 이후 검색 결과에 영향을 미칩니다.
+- unexpanded nodes no longer allocate their `children` pointer array;
+- `mcts_tree_advance()` clones only the selected child subtree into a fresh arena
+  and then frees the old arena.
 
-Rust 백엔드는 발전할 때 이미 선택되지 않은 분기를 삭제했습니다.
-루트는 `Box<TreeNode>`이고 선택된 하위 항목은 `take()`를 사용하여 밖으로 이동됩니다.
-Rust는 여전히 확장되지 않은 노드에 대해 지연 할당 하위 벡터로 변경되었습니다.
-15x15 검색은 확장 전의 조밀한 하위 배열에 대한 비용을 지불하지 않습니다.
+This preserves tree reuse for the chosen line while dropping unselected branches
+after every move. It also keeps the existing C/Python parity behavior where
+deep tree reuse affects later search results.
 
-## 운영 지침
+The Rust backend already dropped unselected branches when advancing because its
+root is a `Box<TreeNode>` and the selected child is moved out with `take()`.
+Rust was still changed to lazy-allocate child vectors for unexpanded nodes so
+15x15 searches do not pay for dense child arrays before expansion.
 
-- 이전 C 백엔드 빌드에서 대규모 15x15 프로필을 실행하지 마세요.
-- C 메모리 동작이 나타날 때까지 `mcts_backend: Rust`에 15x15 전체 CUDA 구성을 유지합니다.
-  긴 셀프 플레이 실행으로 프로파일링되었습니다.
-- `replay.pkl`이 작게 유지되는 동안 RAM이 커지면 MCTS 트리 수명을 의심해 보세요.
-  재생 지속성을 의심하기 전에 검색 배치 메모리를 사용합니다.
-- RSS가 주로 반복 경계에서 증가하고 `replay.pkl`이 큰 경우 검사
-  대신 재생 용량 및 체크포인트 직렬화를 사용합니다.
+## Operational Guidance
 
-## 검증
+- Do not run large 15x15 profiles with the old C backend build.
+- Keep 15x15 full CUDA configs on `mcts_backend: rust` until C memory behavior
+  has been profiled under long self-play runs.
+- If RAM grows while `replay.pkl` stays small, suspect MCTS tree lifetime or
+  search-batch memory before suspecting replay persistence.
+- If RSS grows mainly at iteration boundaries and `replay.pkl` is large, inspect
+  replay capacity and checkpoint serialization instead.
 
-전체 교육을 실행하지 않고 수정 사항이 검증되었습니다.
+## Validation
+
+The fix was validated without running full training:
+
 ```bash
 uv run python setup.py build_ext --inplace
 cargo fmt --manifest-path src/coolrl/omok/rmcts/Cargo.toml --check
 cargo test --locked --manifest-path src/coolrl/omok/rmcts/Cargo.toml
 uv run --with pytest pytest tests/omok/test_mcts_backends_parity.py tests/omok/test_board_size.py
 ```
-수정 당시 예상 결과:
+
+Expected result at the time of the fix:
+
 ```text
 143 passed, 3 skipped
 ```

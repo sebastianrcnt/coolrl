@@ -1,16 +1,17 @@
-# Tinygrad: 동적 배치를 2의 거듭제곱 버킷에 추가
+# Tinygrad: Pad Dynamic Batches to Power-of-Two Buckets
 
-## 왜?
+## Why
 
-Tinygrad JIT는 표시되는 모든 고유(모양, dtype, 장치) 조합**에 대해 **별도의 커널을 컴파일합니다. 런타임 시 모든 배치 크기를 허용하는 사전 구축된 cuDNN/cuBLAS 커널로 전달하는 PyTorch 열성 모드처럼 작동하지 않습니다.
+Tinygrad JIT-compiles a **separate kernel for every unique (shape, dtype, device) combination** it sees. It does not behave like PyTorch eager mode, which dispatches to pre-built cuDNN/cuBLAS kernels that accept any batch size at runtime.
 
-모델 입력 형태가 호출마다 달라지는 경우,tinygrad는 새로운 형태가 나타날 때마다 새로운 커널 세트를 컴파일합니다. NVRTC/LLVM을 사용하면 모양당 수백 ms에서 몇 초의 비용이 소요되며 훈련 루프의 "반복 1"이 반복 2+보다 훨씬 느려질 수 있습니다.
+If model input shapes vary across calls, tinygrad compiles a fresh set of kernels each time a new shape appears. With NVRTC/LLVM this costs hundreds of ms to several seconds per shape and can make "iteration 1" of a training loop dramatically slower than iteration 2+.
 
-이 저장소에서 평가자는 `features.shape[0] = N`을 사용하여 MCTS에서 호출됩니다. 여기서 N은 자체 플레이 배치의 활성 게임 수와 같습니다. Omok 게임은 다양한 이동 횟수로 종료되므로 단일 반복에서 N은 1부터 `batch_size * Leaves_per_batch`까지 거의 모든 값을 취할 수 있습니다. 버킷팅이 없으면 해당 범위의 거의 모든 정수가 새 컴파일을 트리거합니다.
+In this repo the evaluator is called from MCTS with `features.shape[0] = N` where N equals the number of active games in a self-play batch. Omok games terminate at different move counts, so across a single iteration N can take almost any value from 1 up to `batch_size * leaves_per_batch`. Without bucketing, nearly every integer in that range triggers a new compile.
 
-## 수정사항
+## The fix
 
-순방향 패스 전에 N을 2의 다음 거듭제곱으로 반올림하고 나중에 출력을 다시 N으로 자릅니다. `src/coolrl/omok/evaluator.py::ModelEvaluator.evaluate_features`를 참조하세요.
+Round N up to the next power of two before the forward pass, and slice the output back to N afterwards. See `src/coolrl/omok/evaluator.py::ModelEvaluator.evaluate_features`.
+
 ```python
 n = features.shape[0]
 bucket = 1 << (max(n, 1) - 1).bit_length()  # 1, 2, 4, 8, 16, 32, 64, 128, ...
@@ -19,38 +20,39 @@ if bucket > n:
 # forward pass on `features`
 priors, values = priors[:n], values[:n]
 ```
-고유한 모양은 O(batch_size)에서 O(log 배치_크기)로 축소됩니다. 마지막 버킷 경계에서 패딩 낭비는 최대 2배까지 계산됩니다. 피할 수 있는 컴파일 지연은 비용을 지불하는 것 이상입니다.
 
-## 평가자의 수명이 중요합니다
+Unique shapes collapse from O(batch_size) to O(log batch_size). Padding wastes at most ~2x compute on the last bucket boundary; the avoided compile stalls more than pay for it.
 
-버킷팅은 특정 평가자/JIT가 보는 고유한 모양의 수만 줄입니다.
-평생. 훈련 루프가 모든 것에 대해 새로운 'ModelEvaluator'를 구성하는 경우
-반복할 때마다 로컬 "표시된 버킷" 상태가 비어 있기 시작하고 다음과 같은 로그를 기록합니다.
-'ModelEvaluator JIT bucket: ... first use'는 반복 2, 3 및
-등등.
+## Evaluator lifetime matters
 
-순차적 CUDA 셀프 플레이의 경우 후보 평가자 한 명을 살려 두는 것이 좋습니다.
-반복 전반에 걸쳐 기본 모델 객체가 있는 경우에만 교체합니다.
-교체되었습니다. 후보 모델은 일반적으로 최적화 프로그램에 의해 그 자리에서 업데이트되므로
-평가자는 재사용될 수 있습니다. 최상의 모델 평가자는 다음과 같은 경우에 다시 생성되어야 합니다.
-'best_model'은 승격 또는 체크포인트 복원 후에 교체됩니다.
+Bucketing only reduces the number of unique shapes seen by a given evaluator/JIT
+lifetime. If the training loop constructs a new `ModelEvaluator` for every
+iteration, its local "seen buckets" state starts empty each time and logs such
+as `ModelEvaluator JIT bucket: ... first use` will repeat on iteration 2, 3, and
+so on.
 
-반복되는 최초 사용 로그는 Tinygrad가 모든 커널을 다시 컴파일했음을 증명하지 않습니다. 그들
-이 'ModelEvaluator' 인스턴스가 이전에 버킷을 본 적이 없다는 것을 증명하세요. 로그의 경우
-이후 반복에서도 동일한 긴 지연이 동반됩니다. 평가자/JIT
-수명이 너무 짧거나 영구tinygrad 캐시가 사용되지 않습니다.
+For sequential CUDA self-play, prefer keeping one candidate evaluator alive
+across iterations and replacing it only when the underlying model object is
+replaced. The candidate model is normally updated in-place by the optimizer, so
+its evaluator can be reused. The best-model evaluator should be recreated when
+`best_model` is replaced after promotion or checkpoint restore.
 
-## 이 패턴을 적용하는 경우
+Repeated first-use logs do not prove tinygrad recompiled every kernel; they
+prove this `ModelEvaluator` instance had not seen the bucket before. If the log
+is accompanied by the same long stalls on later iterations, the evaluator/JIT
+lifetime is too short or the persistent tinygrad cache is not being used.
 
-**선행(배치) 차원이 런타임 시 달라지고** 동일한 함수가 반복마다 여러 번 호출되는 모든 Tinygrad 코드 경로입니다. 이 저장소의 예: 셀프 플레이 중 모델 추론, 경기장 평가. 훈련 배치는 이미 `optimization.batch_size`에 의해 수정되었으므로 한 번만 컴파일하면 괜찮습니다.
+## When to apply this pattern
 
-## 하지 말아야 할 일
+Any tinygrad code path where a **leading (batch) dimension varies at runtime** and the same function is called many times per iteration. Examples in this repo: model inference during self-play, arena evaluation. Training batches are already fixed by `optimization.batch_size`, so they compile once and are fine.
 
-- **tinygrad가 PyTorch 열정처럼 동작한다고 가정하지 마세요**. 그렇지 않습니다. 가변 모양은 비용이 많이 듭니다.
-- **JIT를 비활성화하여 지연을 "수정"하지 마십시오**. 전체 성능 모델을 잃게 됩니다.
-- 계산 오버헤드가 컴파일 오버헤드보다 작다는 것을 측정하지 않은 한 **고정 최대값(예: 항상 1024)으로 패딩하지 마세요**. 소규모 네트워크의 경우 일반적으로 그렇지 않습니다. 2의 거듭제곱 버킷팅이 균형 잡힌 기본값입니다.
-- 이미 안정적인 모양(학습 루프, 고정 크기 유틸리티)에 버킷팅을 추가하지 마십시오**. 무의미한 패딩을 추가합니다.
+## What NOT to do
 
-## 캐시
+- **Do not** assume tinygrad behaves like PyTorch eager. It does not. Variable shapes are expensive.
+- **Do not** "fix" the stall by disabling JIT. You lose the whole performance model.
+- **Do not** pad to a large fixed maximum (e.g., always 1024) unless you have measured that the compute overhead is smaller than the compile overhead. For small networks it usually is not — power-of-two bucketing is the balanced default.
+- **Do not** add bucketing to shapes that are already stable (training loop, fixed-size utilities). It adds pointless padding.
 
-`CACHELEVEL=2`를 설정하면 컴파일된 커널이 `~/.cache/tinygrad/`에 유지되므로 후속 프로세스가 시작되어 컴파일 단계를 건너뜁니다. 이는 대체가 아닌 버킷팅을 보완하는 것입니다. 버킷팅을 사용하면 처음에 캐시해야 하는 *고유* 커널 수가 줄어듭니다.
+## Cache
+
+Setting `CACHELEVEL=2` persists compiled kernels to `~/.cache/tinygrad/` so subsequent process starts skip the compile step. This is complementary to bucketing, not a replacement — bucketing reduces the number of *unique* kernels that have to be cached in the first place.

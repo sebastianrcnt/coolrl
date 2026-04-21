@@ -1,10 +1,10 @@
-# 1단계
+# Step 1
 
-이 패키지는 `docs/lost-cities-plan-step1.md`의 1단계 계획을 구현합니다.
+This package implements the Step 1 plan from `docs/lost-cities-plan-step1.md`:
 
-- 구성 가능한 잃어버린 도시 규칙 엔진
-- Tier0부터 Tier3까지의 계층 사전 설정
-- 플레이스홀더 텐서를 포함한 RL 스타일 환경 래퍼
-- 무작위적이고 안전한 경험적 봇
-- 핫시트, 인간 대 봇, 봇 대 봇 플레이를 위한 텍스트 TUI
-- 규칙, 채점, 마스크 및 계층 구성에 대한 테스트
+- Configurable Lost Cities rules engine
+- Tier presets from tier0 through tier3
+- RL-style env wrapper with placeholder tensors
+- Random and safe heuristic bots
+- Textual TUI for hot-seat, human-vs-bot, and bot-vs-bot play
+- Tests for rules, scoring, masks, and tier configs
