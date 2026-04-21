@@ -125,6 +125,7 @@ class TensorRTModelEvaluator(Evaluator):
             raise RuntimeError(f"TensorRT engine expected 2 outputs, got {self.output_names}")
         self.priors_name = "priors" if "priors" in self.output_names else self.output_names[0]
         self.values_name = "values" if "values" in self.output_names else self.output_names[1]
+        self.stream = torch.cuda.Stream(device=self.device)
 
     def effective_batch_size(self, batch_size: int) -> int:
         return min(int(batch_size), self.max_batch_size)
@@ -143,13 +144,14 @@ class TensorRTModelEvaluator(Evaluator):
                 f"TensorRT evaluator batch {features.shape[0]} exceeds max profile batch {self.max_batch_size}"
             )
 
-        with torch.inference_mode():
+        caller_stream = torch.cuda.current_stream(self.device)
+        self.stream.wait_stream(caller_stream)
+        with torch.inference_mode(), torch.cuda.stream(self.stream):
             tensor = torch.as_tensor(np.ascontiguousarray(features), device=self.device)
             priors_shape = (tensor.shape[0], self.action_size)
             value_shape = (tensor.shape[0],)
             priors = torch.empty(priors_shape, dtype=self._tensor_dtype(self.priors_name), device=self.device)
             values = torch.empty(value_shape, dtype=self._tensor_dtype(self.values_name), device=self.device)
-            stream = torch.cuda.current_stream(self.device)
 
             if hasattr(self.context, "set_input_shape"):
                 self.context.set_input_shape(self.input_name, tuple(tensor.shape))
@@ -159,14 +161,14 @@ class TensorRTModelEvaluator(Evaluator):
             self._set_tensor_address(self.input_name, tensor)
             self._set_tensor_address(self.priors_name, priors)
             self._set_tensor_address(self.values_name, values)
-            if not self._execute(stream.cuda_stream):
+            if not self._execute(self.stream.cuda_stream):
                 raise RuntimeError("TensorRT execution failed")
-            stream.synchronize()
 
-            return (
-                priors.detach().float().cpu().numpy().astype(np.float32, copy=False),
-                values.detach().float().cpu().numpy().astype(np.float32, copy=False),
-            )
+        caller_stream.wait_stream(self.stream)
+        return (
+            priors.detach().float().cpu().numpy().astype(np.float32, copy=False),
+            values.detach().float().cpu().numpy().astype(np.float32, copy=False),
+        )
 
     def _load_or_build_engine(self) -> Any:
         cache_dir = _engine_cache_dir()
