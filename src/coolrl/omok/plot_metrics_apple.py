@@ -38,6 +38,7 @@ class Theme:
     text_secondary: str
     text_tertiary: str
     accents: dict  # name -> (gradient_start, gradient_end)
+    line_alpha: float = 1.0
 
 
 DARK = Theme(
@@ -81,6 +82,7 @@ LIGHT = Theme(
         "buffer": ("#0071a4", "#0040dd"),
         "elapsed": ("#6e6e73", "#8e8e93"),
     },
+    line_alpha=0.85,
 )
 
 THEMES: dict[str, Theme] = {"dark": DARK, "light": LIGHT}
@@ -193,7 +195,14 @@ def style_axis(
 
 
 def gradient_line(
-    ax, x, y, c0: str, c1: str, lw: float = 2.4, glow: bool = False
+    ax,
+    x,
+    y,
+    c0: str,
+    c1: str,
+    lw: float = 2.4,
+    glow: bool = False,
+    alpha: float = 1.0,
 ) -> None:
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -211,7 +220,7 @@ def gradient_line(
         cmap=cmap,
         norm=norm,
         linewidth=lw,
-        alpha=1.0,
+        alpha=alpha,
         capstyle="round",
         joinstyle="round",
         zorder=4,
@@ -565,7 +574,7 @@ def build_figure(
     )
     cs, ce = theme.accents["policy"]
     gradient_fill(ax, t_iters, policy, cs, ce, alpha=0.16)
-    gradient_line(ax, t_iters, policy, cs, ce, lw=2.4)
+    gradient_line(ax, t_iters, policy, cs, ce, lw=2.4, alpha=theme.line_alpha)
 
     # ---- Value Loss (wide right) ----
     ax = add_chart(gs[1, 2:])
@@ -576,7 +585,7 @@ def build_figure(
         ax.set_ylim(0, max(float(np.nanmax(value)) * 1.12, 1.0))
     cs, ce = theme.accents["value"]
     gradient_fill(ax, t_iters, value, cs, ce, alpha=0.16)
-    gradient_line(ax, t_iters, value, cs, ce, lw=2.4)
+    gradient_line(ax, t_iters, value, cs, ce, lw=2.4, alpha=theme.line_alpha)
 
     # ---- Total Loss + Learning Rate ----
     ax = add_chart(gs[2, :2])
@@ -587,7 +596,7 @@ def build_figure(
         ax.set_ylim(float(np.nanmin(total)) - 0.3, float(np.nanmax(total)) * 1.05)
     cs, ce = theme.accents["total"]
     gradient_fill(ax, t_iters, total, cs, ce, alpha=0.16)
-    gradient_line(ax, t_iters, total, cs, ce, lw=2.4)
+    gradient_line(ax, t_iters, total, cs, ce, lw=2.4, alpha=theme.line_alpha)
 
     ax = add_chart(gs[2, 2:])
     cur_lr = float(lr[-1]) if len(lr) and np.isfinite(lr[-1]) else 0.0
@@ -599,7 +608,7 @@ def build_figure(
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(_format_lr))
     ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
     cs, ce = theme.accents["lr"]
-    gradient_line(ax, t_iters, lr, cs, ce, lw=2.4, glow=False)
+    gradient_line(ax, t_iters, lr, cs, ce, lw=2.4, glow=False, alpha=theme.line_alpha)
 
     # ---- Arena Win Rate (full width) ----
     ax = add_chart(gs[3, :])
@@ -622,7 +631,7 @@ def build_figure(
     )
     cs, ce = theme.accents["winrate"]
     gradient_fill(ax, t_iters, arena, cs, ce, alpha=0.13)
-    gradient_line(ax, t_iters, arena, cs, ce, lw=1.9)
+    gradient_line(ax, t_iters, arena, cs, ce, lw=1.9, alpha=theme.line_alpha)
     if accepted.any():
         ax.scatter(
             t_iters[accepted],
@@ -657,7 +666,7 @@ def build_figure(
         zorder=2,
     )
     cs, ce = theme.accents["white"]
-    gradient_line(ax, t_iters, white, cs, ce, lw=2.0)
+    gradient_line(ax, t_iters, white, cs, ce, lw=2.0, alpha=theme.line_alpha)
 
     ax = add_chart(gs[4, 2:])
     panel_title(
@@ -674,7 +683,7 @@ def build_figure(
         ax.set_ylim(0, max(float(np.nanmax(moves)) * 1.1, 30))
     cs, ce = theme.accents["moves"]
     gradient_fill(ax, iters, moves, cs, ce, alpha=0.12)
-    gradient_line(ax, iters, moves, cs, ce, lw=2.0)
+    gradient_line(ax, iters, moves, cs, ce, lw=2.0, alpha=theme.line_alpha)
 
     # ---- Replay Buffer + Elapsed ----
     ax = add_chart(gs[5, :2])
@@ -689,7 +698,7 @@ def build_figure(
     )
     cs, ce = theme.accents["buffer"]
     gradient_fill(ax, iters, buffer, cs, ce, alpha=0.16)
-    gradient_line(ax, iters, buffer, cs, ce, lw=2.0)
+    gradient_line(ax, iters, buffer, cs, ce, lw=2.0, alpha=theme.line_alpha)
 
     ax = add_chart(gs[5, 2:])
     panel_title(
@@ -703,7 +712,7 @@ def build_figure(
     ax.set_ylim(0, max(cur_elapsed * 1.1, 1.0))
     cs, ce = theme.accents["elapsed"]
     gradient_fill(ax, iters, elapsed, cs, ce, alpha=0.10)
-    gradient_line(ax, iters, elapsed, cs, ce, lw=2.0)
+    gradient_line(ax, iters, elapsed, cs, ce, lw=2.0, alpha=theme.line_alpha)
 
     return fig
 
