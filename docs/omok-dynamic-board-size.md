@@ -41,6 +41,10 @@ The C and Rust wrappers validate:
 - reused roots match the incoming state board size;
 - evaluator priors have shape `[batch, board_size * board_size]`.
 
+See `docs/omok-mcts-memory.md` for the 15x15 memory incident that exposed why
+native MCTS node lifetime and dense child storage need extra care when scaling
+from 9x9 to larger boards.
+
 ## Configs
 
 The default 9x9 presets remain:

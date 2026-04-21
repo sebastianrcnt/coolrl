@@ -60,6 +60,11 @@ int mcts_tree_advance(MctsTree *tree, int action) {
   if (action < 0 || action >= tree->action_size || tree->state.board[action] != 0) return 0;
   Node *next = tree->root->children ? tree->root->children[action] : NULL;
   if (!state_apply_action(&tree->state, action)) return 0;
+  /*
+   * Nodes live in per-tree arena blocks. Advancing by only re-pointing root
+   * would keep all unselected sibling branches alive until game end. Clone the
+   * selected subtree into a fresh arena, then free the old arena.
+   */
   if (next) {
     tree->root = tree_clone_subtree_to_new_arena(tree, next);
     if (!tree->root) {

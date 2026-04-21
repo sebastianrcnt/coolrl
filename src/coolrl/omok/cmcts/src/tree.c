@@ -47,6 +47,10 @@ Node *tree_node_new(MctsTree *tree, int to_play, float prior) {
   node->action_size = tree->action_size;
   node->to_play = to_play;
   node->prior = prior;
+  /*
+   * Leave children NULL until expansion. On 15x15, preallocating one
+   * action_size pointer array per unexpanded node is a large hidden cost.
+   */
   return node;
 }
 
@@ -72,6 +76,11 @@ static Node *tree_clone_subtree(MctsTree *tree, const Node *source) {
 Node *tree_clone_subtree_to_new_arena(MctsTree *tree, const Node *source) {
   if (!tree || !source) return NULL;
 
+  /*
+   * Build the chosen subtree in a temporary fresh arena, restore the old arena
+   * handle long enough to free it, then install the fresh arena. This keeps tree
+   * reuse for the selected line without retaining abandoned branches.
+   */
   NodeBlock *old_node_blocks = tree->node_blocks;
   NodeBlock *old_active_node_block = tree->active_node_block;
   int old_next_node_block_capacity = tree->next_node_block_capacity;
@@ -184,6 +193,7 @@ void node_expand(MctsTree *tree, Node *node, const CmctsState *state, const floa
     return;
   }
   if (!node->children) {
+    /* Allocate dense child slots only for expanded nodes. */
     node->children = (Node **)calloc((size_t)tree->action_size, sizeof(Node *));
     if (!node->children) return;
   }
