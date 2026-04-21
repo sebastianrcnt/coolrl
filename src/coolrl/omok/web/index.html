@@ -1,345 +1,760 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko" data-theme="light">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>coolrl Omok</title>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#eef1f7">
+<title>coolrl 오목</title>
 <style>
 :root {
-  --bg: #0f1218;
-  --bg-grad: radial-gradient(ellipse at top, #1a1f2b 0%, #0f1218 60%);
-  --panel: #1a1f2a;
-  --panel-2: #242b38;
-  --border: #2a3140;
-  --border-strong: #3a4253;
-  --text: #e8ecf2;
-  --muted: #8a94a6;
-  --subtle: #5e6878;
-  --accent: #5aa7ff;
-  --accent-hover: #7bb8ff;
-  --accent-press: #3d92f0;
-  --green: #4ade80;
-  --amber: #fbbf24;
-  --red: #f87171;
-  --board-bg: #dcb477;
-  --board-line: #2a2118;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,0.45);
-  --radius: 10px;
-  --radius-sm: 6px;
-  --radius-xs: 4px;
+  /* Change this hue to reskin accent, status, and background wash together. */
+  --theme-hue: 286deg;
+  --theme-accent: hsl(var(--theme-hue) 54% 48%);
+  --theme-accent-soft: hsl(var(--theme-hue) 58% 56% / 0.09);
+  --theme-accent-faint: hsl(calc(var(--theme-hue) + 28deg) 72% 62% / 0.055);
+  --theme-sweep-edge: hsl(var(--theme-hue) 64% 58% / 0.09);
+  --theme-sweep-glow: hsl(calc(var(--theme-hue) + 18deg) 78% 62% / 0.18);
+  --theme-sweep-core: hsl(calc(var(--theme-hue) + 34deg) 82% 62% / 0.34);
+
+  --bg-base: #eef1f7;
+  --text: #0a0a12;
+  --muted: #5f6470;
+  --subtle: #b5bac3;
+  --separator: rgba(30, 35, 50, 0.08);
+  --separator-strong: rgba(30, 35, 50, 0.18);
+
+  --glass-bg: linear-gradient(180deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.38) 100%);
+  --glass-bg-subtle: linear-gradient(180deg, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0.22) 100%);
+  --glass-border: rgba(255,255,255,0.75);
+  --glass-highlight: rgba(255,255,255,0.9);
+  --glass-inner-shadow: rgba(20, 30, 60, 0.04);
+  /* Shadows are tinted navy, multi-layer, low opacity — never pure black */
+  --glass-shadow:
+    0 0.5px 1px rgba(22, 30, 55, 0.04),
+    0 2px 5px rgba(22, 30, 55, 0.05),
+    0 6px 16px rgba(22, 30, 55, 0.06);
+  --glass-shadow-lg:
+    0 1px 2px rgba(22, 30, 55, 0.05),
+    0 6px 16px rgba(22, 30, 55, 0.07),
+    0 18px 40px rgba(22, 30, 55, 0.08);
+  --glass-blur: saturate(180%) blur(22px);
+
+  --primary-bg: linear-gradient(180deg, #2a2a32 0%, #0a0a12 100%);
+  --primary-text: #ffffff;
+  --primary-highlight: rgba(255,255,255,0.18);
+
+  --accent: var(--theme-accent);
+  --status-thinking: var(--theme-accent);
+  --status-thinking-edge: var(--theme-sweep-edge);
+  --status-thinking-glow: var(--theme-sweep-glow);
+  --status-thinking-core: var(--theme-sweep-core);
+  --green: #28c840;
+  --red: #ff453a;
+
+  --board-line: rgba(20, 25, 40, 0.28);
+  --board-star: rgba(20, 25, 40, 0.48);
+  --board-grid-margin: 0.03;
+
+  --radius-lg: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --radius-pill: 999px;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { min-height: 100%; }
+
+html[data-theme="dark"] {
+  --theme-accent: hsl(var(--theme-hue) 76% 72%);
+  --theme-accent-soft: hsl(var(--theme-hue) 68% 68% / 0.10);
+  --theme-accent-faint: hsl(calc(var(--theme-hue) + 28deg) 78% 68% / 0.07);
+  --theme-sweep-edge: hsl(var(--theme-hue) 76% 72% / 0.10);
+  --theme-sweep-glow: hsl(calc(var(--theme-hue) + 18deg) 86% 72% / 0.22);
+  --theme-sweep-core: hsl(calc(var(--theme-hue) + 34deg) 90% 72% / 0.38);
+
+  --bg-base: #08080f;
+  --text: #f5f5f7;
+  --muted: #9a9aa4;
+  --subtle: #3a3a42;
+  --separator: rgba(255,255,255,0.08);
+  --separator-strong: rgba(255,255,255,0.16);
+
+  --glass-bg: linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.07) 100%);
+  --glass-bg-subtle: linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%);
+  --glass-border: rgba(255,255,255,0.22);
+  --glass-highlight: rgba(255,255,255,0.42);
+  --glass-inner-shadow: rgba(0, 0, 0, 0.18);
+  /* Dark: almost no outer shadow — the inset highlight and border do the separation. */
+  --glass-shadow:
+    0 0.5px 1px rgba(0, 0, 0, 0.3),
+    0 2px 6px rgba(0, 0, 0, 0.18);
+  --glass-shadow-lg:
+    0 1px 2px rgba(0, 0, 0, 0.32),
+    0 6px 18px rgba(0, 0, 0, 0.22);
+
+  --primary-bg: linear-gradient(180deg, #f7f7f9 0%, #d8d8dc 100%);
+  --primary-text: #0a0a12;
+  --primary-highlight: rgba(255,255,255,0.6);
+
+  --board-line: rgba(235, 235, 245, 0.28);
+  --board-star: rgba(235, 235, 245, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+html, body {
+  height: 100%;
+  overscroll-behavior: none;
+}
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: var(--bg); background-image: var(--bg-grad); background-attachment: fixed;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(ellipse 120% 70% at 50% -10%, var(--theme-accent-soft) 0%, transparent 55%),
+    radial-gradient(ellipse 90% 60% at 50% 110%, var(--theme-accent-faint) 0%, transparent 55%),
+    linear-gradient(180deg, #eff1f5 0%, #e4e7ec 100%);
   color: var(--text);
-  display: flex; justify-content: center; padding: 24px 16px 40px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  display: flex;
+  justify-content: center;
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  position: relative;
+  overflow-x: hidden;
 }
-.app { max-width: 980px; width: 100%; }
-
-/* Header */
-.header {
-  display: flex; align-items: baseline; justify-content: space-between;
-  gap: 12px; margin-bottom: 16px; padding: 0 2px;
-}
-.header h1 {
-  font-size: 1.15rem; font-weight: 700; color: var(--text);
-  letter-spacing: -0.01em;
-}
-.header h1 .accent { color: var(--accent); }
-.header .subtitle {
-  font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums;
-}
-
-/* Controls bar */
-.controls {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin-bottom: 14px; padding: 10px; background: var(--panel);
-  border-radius: var(--radius); border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
-}
-.control-group {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 2px 4px;
-}
-.control-group + .control-group {
-  border-left: 1px solid var(--border);
-  padding-left: 12px; margin-left: 4px;
-}
-.controls label.field {
-  display: inline-flex; align-items: center; gap: 6px;
-  color: var(--muted); font-size: 0.8rem; font-weight: 500;
-}
-.controls select {
-  background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-xs);
-  padding: 5px 8px; font-size: 0.82rem;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.controls select:hover { border-color: var(--border-strong); }
-.controls select:focus {
-  outline: none; border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(90,167,255,0.15);
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(ellipse 120% 70% at 50% -10%, var(--theme-accent-soft) 0%, transparent 55%),
+    radial-gradient(ellipse 90% 60% at 50% 110%, var(--theme-accent-faint) 0%, transparent 55%),
+    linear-gradient(180deg, #0c0c14 0%, #050509 100%);
 }
 
-/* Buttons */
-.btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid transparent; border-radius: var(--radius-xs);
-  padding: 6px 12px; font-weight: 600; font-size: 0.8rem;
-  cursor: pointer; line-height: 1.4;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+.app {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  position: relative;
+}
+
+/* ---------- Glass utility mixin (via shared properties) ---------- */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 var(--glass-inner-shadow),
+    var(--glass-shadow);
+}
+.glass-subtle {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--glass-shadow);
+}
+
+/* ---------- Top bar ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 8px;
+  gap: 8px;
+}
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-subtle);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
   font-family: inherit;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--glass-shadow);
+  transition: transform 0.08s ease-out, background 0.15s;
+  touch-action: manipulation;
 }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn:focus-visible {
-  outline: none; box-shadow: 0 0 0 3px rgba(90,167,255,0.25);
+.icon-btn:hover { background: var(--glass-bg); }
+.icon-btn:active:not(:disabled) { transform: scale(0.94); }
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.icon-btn svg {
+  width: 20px; height: 20px;
+  stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
-.btn-primary {
-  background: var(--accent); color: #0a1220; border-color: var(--accent);
+.topbar .title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.3);
 }
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover); border-color: var(--accent-hover);
+.topbar .title .muted { color: var(--muted); font-weight: 500; }
+html[data-theme="dark"] .topbar .title { text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+
+/* ---------- Player strip ---------- */
+.players {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 14px 6px;
 }
-.btn-primary:active:not(:disabled) { background: var(--accent-press); }
-.btn-secondary {
-  background: transparent; color: var(--text);
-  border-color: var(--border-strong);
+.turn-row {
+  display: flex;
+  justify-content: center;
+  padding: 5px 14px 8px;
 }
-.btn-secondary:hover:not(:disabled) {
-  background: var(--panel-2); border-color: var(--border-strong);
+.player-card {
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  transition: outline-color 0.2s, transform 0.2s;
+}
+.player-card.right { flex-direction: row-reverse; text-align: right; }
+.player-card .stone {
+  width: 22px; height: 22px; border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+.player-card .stone.black {
+  background: radial-gradient(circle at 35% 30%, #5a5a62 0%, #1c1c22 55%, #000 100%);
+  box-shadow:
+    inset 1px 1px 2px rgba(255,255,255,0.18),
+    inset -1px -1px 2px rgba(0,0,0,0.6),
+    0 1px 3px rgba(0,0,0,0.3);
+}
+.player-card .stone.white {
+  background: radial-gradient(circle at 35% 30%, #ffffff 0%, #eaeaee 60%, #b8b8c0 100%);
+  box-shadow:
+    inset 1px 1px 2px rgba(255,255,255,0.9),
+    inset -1px -1px 2px rgba(0,0,0,0.1),
+    0 1px 3px rgba(0,0,0,0.15);
+}
+.player-card .meta { display: flex; flex-direction: column; min-width: 0; }
+.player-card .name {
+  font-size: 0.88rem; font-weight: 600; letter-spacing: -0.01em;
+}
+.player-card .sub {
+  font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.player-card.active {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
 }
 
-/* File upload */
-.file-label {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: var(--accent); color: #0a1220;
-  border: 1px solid var(--accent); border-radius: var(--radius-xs);
-  padding: 6px 12px; font-weight: 600; cursor: pointer; font-size: 0.8rem;
-  transition: background 0.15s, border-color 0.15s;
+.turn-pill {
+  border-radius: var(--radius-pill);
+  padding: 7px 13px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  letter-spacing: -0.005em;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  max-width: 100%;
+  justify-content: center;
 }
-.file-label:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.file-label input { display: none; }
-.file-label svg { width: 14px; height: 14px; }
+.turn-pill > * { position: relative; z-index: 1; }
+.turn-pill.thinking { color: var(--status-thinking); }
+.turn-pill.thinking::after {
+  content: "";
+  position: absolute;
+  top: -35%;
+  bottom: -35%;
+  left: -92%;
+  width: 88%;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--status-thinking-edge) 18%,
+    var(--status-thinking-glow) 38%,
+    var(--status-thinking-core) 50%,
+    var(--status-thinking-glow) 62%,
+    var(--status-thinking-edge) 82%,
+    transparent 100%);
+  filter: blur(9px);
+  animation: thinking-sweep 2.05s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes thinking-sweep {
+  0%   { left: -96%; }
+  100% { left: 108%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-pill.thinking::after { animation: none; }
+}
+.turn-pill.win { color: var(--green); }
+.turn-pill.error { color: var(--red); }
+.turn-pill .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
 
-/* Sims slider */
-.sim-group { display: flex; align-items: center; gap: 8px; }
-.sim-group input[type=range] {
+/* ---------- Board ---------- */
+.board-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 0;
+  min-height: 0;
+}
+.board-card {
+  border-radius: var(--radius-lg);
+  padding: 0;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: min(100vw, calc(100dvh - 226px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  /* Plain glass: just the blur + border + soft rim. No decorative layers. */
+  background: var(--glass-bg-subtle);
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+  border: 0.5px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -0.5px 0 var(--glass-inner-shadow),
+    var(--glass-shadow-lg);
+}
+canvas#board {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+  touch-action: manipulation;
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- Bottom action bar ---------- */
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 12px 14px max(18px, env(safe-area-inset-bottom));
+}
+.action-btn {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border);
+  color: var(--text);
+  border-radius: var(--radius-md);
+  padding: 14px 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  min-width: 0;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 -1px 0 var(--glass-inner-shadow),
+    var(--glass-shadow);
+  transition: transform 0.08s ease-out, opacity 0.15s;
+  min-height: 54px;
+  touch-action: manipulation;
+}
+.action-btn:active:not(:disabled) { transform: scale(0.97); }
+.action-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.action-btn svg {
+  width: 18px; height: 18px; stroke: currentColor; fill: none;
+  stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+}
+.action-btn.primary {
+  background: var(--primary-bg);
+  color: var(--primary-text);
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 var(--primary-highlight),
+    inset 0 -1px 2px rgba(0,0,0,0.10),
+    0 1px 2px rgba(15, 20, 38, 0.10),
+    0 5px 14px rgba(15, 20, 38, 0.14);
+}
+html[data-theme="dark"] .action-btn.primary {
+  box-shadow:
+    inset 0 1px 0 var(--primary-highlight),
+    inset 0 -1px 2px rgba(0,0,0,0.08),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.action-btn.primary:disabled {
+  background: var(--glass-bg);
+  color: var(--muted);
+  border: 0.5px solid var(--glass-border);
+}
+
+/* ---------- Settings sheet ---------- */
+.sheet-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+.sheet-backdrop.open { opacity: 1; pointer-events: auto; }
+.sheet {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 100%);
+  width: 100%;
+  max-width: 560px;
+  background: var(--glass-bg);
+  backdrop-filter: saturate(180%) blur(30px);
+  -webkit-backdrop-filter: saturate(180%) blur(30px);
+  border: 0.5px solid var(--glass-border);
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 8px 14px max(20px, env(safe-area-inset-bottom));
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--glass-shadow-lg);
+  z-index: 11;
+  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  max-height: 85dvh;
+  overflow-y: auto;
+}
+.sheet.open { transform: translate(-50%, 0); }
+.sheet-handle {
+  width: 38px; height: 5px;
+  background: var(--subtle);
+  border-radius: 999px;
+  margin: 6px auto 14px;
+  opacity: 0.7;
+}
+.sheet-title {
+  font-size: 1.05rem; font-weight: 700;
+  text-align: center;
+  margin-bottom: 16px;
+  letter-spacing: -0.015em;
+}
+.sheet-group {
+  background: var(--glass-bg-subtle);
+  border: 0.5px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 14px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 2px rgba(0,0,0,0.04);
+}
+.sheet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  gap: 12px;
+  min-height: 48px;
+}
+.sheet-row + .sheet-row { border-top: 0.5px solid var(--separator); }
+.sheet-row .label {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.sheet-row .value {
+  font-size: 0.86rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.sheet-row select {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  color: var(--text);
+  border: 0.5px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 7px 30px 7px 12px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%238e8e93' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center, center;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 2px rgba(0,0,0,0.05);
+}
+.sheet-row input[type=range] {
   -webkit-appearance: none; appearance: none;
-  width: 110px; height: 4px; background: var(--border); border-radius: 2px;
+  flex: 1;
+  max-width: 180px;
+  height: 5px;
+  background: var(--separator-strong);
+  border-radius: 999px;
   cursor: pointer;
 }
-.sim-group input[type=range]:focus { outline: none; }
-.sim-group input[type=range]::-webkit-slider-thumb {
+.sheet-row input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--panel);
-  box-shadow: var(--shadow-sm); cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff 0%, #e5e5ea 100%);
+  border: 0.5px solid rgba(0,0,0,0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.9),
+    0 2px 6px rgba(0,0,0,0.2);
+  cursor: pointer;
 }
-.sim-group input[type=range]::-webkit-slider-thumb:hover { background: var(--accent-hover); transform: scale(1.15); }
-.sim-group input[type=range]::-moz-range-thumb {
-  width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--panel);
-  box-shadow: var(--shadow-sm); cursor: pointer;
+.sheet-row input[type=range]::-moz-range-thumb {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff 0%, #e5e5ea 100%);
+  border: 0.5px solid rgba(0,0,0,0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.9),
+    0 2px 6px rgba(0,0,0,0.2);
 }
-.sim-group .sims-val {
-  font-size: 0.8rem; min-width: 32px; text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--text); font-weight: 600;
+.advanced-settings summary {
+  list-style: none;
 }
-
-/* Game area */
-.game-area { display: flex; gap: 18px; align-items: flex-start; }
-canvas#board {
-  border-radius: var(--radius); cursor: crosshair;
-  max-width: 100%; height: auto;
-  box-shadow: var(--shadow-lg);
-  display: block;
+.advanced-settings summary::-webkit-details-marker {
+  display: none;
 }
-
-/* Sidebar */
-.sidebar {
-  flex: 1; min-width: 220px;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow-sm);
-  font-size: 0.85rem;
+.advanced-settings:not([open]) > :not(summary) {
+  display: none;
+}
+.sheet-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.sheet-summary .label {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.sheet-summary svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  stroke: var(--muted);
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.18s ease;
+}
+.advanced-settings[open] .sheet-summary svg {
+  transform: rotate(180deg);
+}
+.advanced-settings .sheet-row,
+.advanced-settings .sheet-file {
+  border-top: 0.5px solid var(--separator);
+}
+.sheet-file {
+  display: flex;
+  width: 100%;
+  padding: 14px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 500;
+  align-items: center;
+  gap: 10px;
+}
+.sheet-file svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--accent); }
+.sheet-file .file-name {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.84rem;
+  max-width: 55%;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.sidebar .section { padding: 12px 14px; }
-.sidebar .section + .section { border-top: 1px solid var(--border); }
-.sidebar .row {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 10px; padding: 3px 0;
+.sheet-file input { display: none; }
+.sheet-close {
+  display: block;
+  width: 100%;
+  background: var(--primary-bg);
+  color: var(--primary-text);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 15px;
+  font-family: inherit;
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  margin-top: 6px;
+  box-shadow:
+    inset 0 1px 0 var(--primary-highlight),
+    0 1px 2px rgba(15, 20, 38, 0.10),
+    0 5px 14px rgba(15, 20, 38, 0.12);
+  touch-action: manipulation;
 }
-.sidebar .label {
-  color: var(--muted); font-size: 0.78rem;
-  text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500;
+html[data-theme="dark"] .sheet-close {
+  box-shadow:
+    inset 0 1px 0 var(--primary-highlight),
+    0 1px 2px rgba(0, 0, 0, 0.32),
+    0 4px 12px rgba(0, 0, 0, 0.22);
 }
-.sidebar .val {
-  color: var(--text); font-variant-numeric: tabular-nums;
-  font-weight: 500; text-align: right; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.sidebar .val.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
-.sidebar .val.accent { color: var(--accent); }
+.sheet-close:active { transform: scale(0.98); }
 
-/* Turn pill with stone dot */
-.turn-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 2px 8px 2px 4px; background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: 999px;
-  font-size: 0.78rem; font-weight: 600;
-}
-.turn-pill .dot {
-  width: 12px; height: 12px; border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #555, #000);
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
-}
-.turn-pill.white .dot {
-  background: radial-gradient(circle at 30% 30%, #fff, #cfc8b8);
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15);
-}
-
-/* Status badge */
-.status-badge {
-  display: inline-block; padding: 4px 10px;
-  background: rgba(251,191,36,0.12); color: var(--amber);
-  border: 1px solid rgba(251,191,36,0.3);
-  border-radius: 999px; font-size: 0.78rem; font-weight: 600;
-  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.status-badge.thinking {
-  background: rgba(90,167,255,0.12); color: var(--accent);
-  border-color: rgba(90,167,255,0.3);
-}
-.status-badge.ok {
-  background: rgba(74,222,128,0.12); color: var(--green);
-  border-color: rgba(74,222,128,0.3);
-}
-.status-badge.error {
-  background: rgba(248,113,113,0.14); color: var(--red);
-  border-color: rgba(248,113,113,0.35);
-}
-
-/* Hint block */
-.hint {
-  color: var(--muted); font-size: 0.78rem; line-height: 1.6;
-}
-.hint kbd {
-  display: inline-block; padding: 1px 6px;
-  background: var(--panel-2); border: 1px solid var(--border);
-  border-radius: var(--radius-xs); font-family: ui-monospace, monospace;
-  font-size: 0.72rem; color: var(--text);
-}
-
-@media (max-width: 700px) {
-  body { padding: 14px 10px 28px; }
-  .game-area { flex-direction: column; }
-  canvas#board { width: 100% !important; }
-  .control-group + .control-group {
-    border-left: none; padding-left: 4px; margin-left: 0;
+@media (min-width: 720px) {
+  .board-wrap { padding: 4px 14px; }
+  .board-card {
+    padding: 6px;
+    max-width: 540px;
   }
-  .sidebar { width: 100%; }
+}
+@media (max-width: 719px) {
+  :root { --board-grid-margin: 0.03; }
 }
 </style>
 </head>
 <body>
 <div class="app">
-  <header class="header">
-    <h1><span class="accent">coolrl</span> &middot; <span id="header-board-size">9&times;9</span> Omok</h1>
-    <span class="subtitle">AlphaZero-style MCTS in your browser</span>
+  <header class="topbar">
+    <button class="icon-btn" id="btn-reset" title="새 대국" aria-label="새 대국">
+      <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+    </button>
+    <div class="title"><span id="header-board-size">15×15</span> <span class="muted">오목</span></div>
+    <button class="icon-btn" id="btn-settings" title="설정" aria-label="설정">
+      <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+    </button>
   </header>
-  <div class="controls">
-    <div class="control-group">
-      <label class="file-label" title="Load ONNX model">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>
-        Load .onnx
-        <input type="file" id="file-input" accept=".onnx">
-      </label>
-    </div>
-    <div class="control-group">
-      <label class="field">Board
-        <select id="board-size-select">
-          <option value="9" selected>9&times;9</option>
-          <option value="13">13&times;13</option>
-          <option value="15">15&times;15</option>
-        </select>
-      </label>
-      <label class="field">Play as
-        <select id="color-select">
-          <option value="-1" selected>White</option>
-          <option value="1">Black</option>
-        </select>
-      </label>
-      <div class="sim-group">
-        <label class="field">Sims</label>
-        <input type="range" id="sims" min="4" max="512" value="64" step="4">
-        <span class="sims-val" id="sims-val">64</span>
+
+  <div class="players">
+    <div class="player-card glass" id="card-black">
+      <span class="stone black"></span>
+      <div class="meta">
+        <span class="name" id="black-name">흑</span>
+        <span class="sub" id="black-sub">-</span>
       </div>
     </div>
-    <div class="control-group">
-      <button id="btn-reset" class="btn btn-secondary">Reset</button>
-      <button id="btn-undo" class="btn btn-secondary">Undo</button>
-      <button id="btn-swap" class="btn btn-secondary">Swap</button>
-      <button id="btn-ai" class="btn btn-primary">AI Move</button>
+    <div class="player-card glass right" id="card-white">
+      <span class="stone white"></span>
+      <div class="meta">
+        <span class="name" id="white-name">백</span>
+        <span class="sub" id="white-sub">-</span>
+      </div>
     </div>
   </div>
-  <div class="game-area">
-    <canvas id="board" width="540" height="540"></canvas>
-    <aside class="sidebar">
-      <div class="section">
-        <div class="row">
-          <span class="label">Status</span>
-          <span class="status-badge" id="status">Upload an .onnx model to play</span>
-        </div>
-        <div class="row">
-          <span class="label">Model</span>
-          <span class="val accent" id="model-name" title="none">none</span>
-        </div>
-      </div>
-      <div class="section">
-        <div class="row">
-          <span class="label">Turn</span>
-          <span class="turn-pill" id="turn-pill"><span class="dot"></span><span id="turn">Black</span></span>
-        </div>
-        <div class="row">
-          <span class="label">Human</span>
-          <span class="val" id="human-side">White</span>
-        </div>
-        <div class="row">
-          <span class="label">Moves</span>
-          <span class="val mono" id="moves">0</span>
-        </div>
-      </div>
-      <div class="section">
-        <div class="row">
-          <span class="label">AI value</span>
-          <span class="val mono" id="ai-value">&mdash;</span>
-        </div>
-        <div class="row">
-          <span class="label">AI time</span>
-          <span class="val mono" id="ai-time">&mdash;</span>
-        </div>
-        <div class="row">
-          <span class="label">Progress</span>
-          <span class="val mono" id="ai-progress">&mdash;</span>
-        </div>
-      </div>
-      <div class="section">
-        <div class="hint">
-          Click any intersection to place a stone. Load an ONNX model to play against the AI; without a model, both sides are manual.
-        </div>
-      </div>
-    </aside>
+  <div class="turn-row">
+    <span class="turn-pill glass" id="turn-pill"><span class="dot"></span><span id="turn-text">흑 차례</span></span>
   </div>
+
+  <div class="board-wrap">
+    <div class="board-card" id="board-card">
+      <canvas id="board"></canvas>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="action-btn" id="btn-undo" title="무르기">
+      <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+      아.. 실수
+    </button>
+    <button class="action-btn" id="btn-ai" title="추천 수 보기">
+      <svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.4L20 10l-4.2 3.8L17 20l-5-3-5 3 1.2-6.2L4 10l5.6-1.6L12 3z"/></svg>
+      AI한테 훈수 듣기
+    </button>
+    <button class="action-btn primary" id="btn-confirm" title="착수 확정" disabled>
+      <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+      가즈아
+    </button>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="sheet-backdrop"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="설정">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">설정</div>
+
+  <div class="sheet-group">
+    <div class="sheet-row">
+      <span class="label">내 돌</span>
+      <select id="color-select">
+        <option value="-1" selected>백(어려움)</option>
+        <option value="1">흑</option>
+      </select>
+    </div>
+    <div class="sheet-row">
+      <span class="label">탐색 횟수</span>
+      <input type="range" id="sims" min="4" max="1600" value="128" step="4">
+      <span class="value" id="sims-val">128</span>
+    </div>
+  </div>
+
+  <details class="sheet-group advanced-settings" id="advanced-settings">
+    <summary class="sheet-summary">
+      <span class="label">고급 설정</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <div class="sheet-row">
+      <span class="label">추론 방식</span>
+      <select id="backend-select">
+        <option value="wasm" selected>WASM (기본)</option>
+        <option value="webgpu">WebGPU</option>
+        <option value="webnn">WebML (WebNN)</option>
+      </select>
+    </div>
+    <label class="sheet-file" for="file-input">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>
+      <span>ONNX 모델</span>
+      <span class="file-name" id="file-name">기본 모델</span>
+      <input type="file" id="file-input" accept=".onnx">
+    </label>
+  </details>
+
+  <button class="sheet-close" id="btn-sheet-close">완료</button>
 </div>
 
 <script>
@@ -369,13 +784,6 @@ class GameState {
     s.winner = this.winner;
     s.terminal = this.terminal;
     return s;
-  }
-
-  legalMoves() {
-    const m = new Uint8Array(this.actionSize);
-    if (this.terminal) return m;
-    for (let i = 0; i < this.actionSize; i++) m[i] = this.board[i] === 0 ? 1 : 0;
-    return m;
   }
 
   legalIndices() {
@@ -427,11 +835,37 @@ class GameState {
 }
 
 // =========================================================================
-// Feature encoding
+// Worker-backed ONNX evaluator
+//
+// All ONNX inference runs in a dedicated Web Worker so the UI thread stays
+// responsive — backdrop-filter, animations, taps, status updates all keep
+// rendering even during long sim batches. We ship the worker as an inline
+// Blob so the single index.html deployment stays self-contained.
 // =========================================================================
+const WORKER_SRC = `
+"use strict";
+const ORT_CDN_BASE = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/";
+importScripts(ORT_CDN_BASE + "ort.webgpu.min.js");
+ort.env.wasm.wasmPaths = ORT_CDN_BASE;
+ort.env.wasm.numThreads = 1;
+
+let session = null;
+let activeBackend = "wasm";
+let boardSize = 9;
+let planeSize = 81;
+let actionSize = 81;
+
+function normalizeBackend(value) {
+  return value === "webgpu" || value === "webnn" ? value : "wasm";
+}
+
+function setSize(n) {
+  boardSize = n;
+  planeSize = n * n;
+  actionSize = n * n;
+}
+
 function encodeFeatures(states) {
-  const N = states[0].boardSize;
-  const planeSize = N * N;
   const out = new Float32Array(states.length * 4 * planeSize);
   for (let b = 0; b < states.length; b++) {
     const s = states[b];
@@ -451,53 +885,139 @@ function encodeFeatures(states) {
   return out;
 }
 
-// =========================================================================
-// ONNX Evaluator
-// =========================================================================
-class OnnxEvaluator {
-  constructor(session, boardSize) {
-    this.session = session;
+function softmax(arr, offset, len) {
+  let max = -Infinity;
+  for (let i = 0; i < len; i++) if (arr[offset + i] > max) max = arr[offset + i];
+  let sum = 0;
+  for (let i = 0; i < len; i++) {
+    arr[offset + i] = Math.exp(arr[offset + i] - max);
+    sum += arr[offset + i];
+  }
+  if (sum > 0) for (let i = 0; i < len; i++) arr[offset + i] /= sum;
+}
+
+self.onmessage = async (e) => {
+  const msg = e.data;
+  try {
+    if (msg.type === "init") {
+      setSize(msg.boardSize);
+      activeBackend = normalizeBackend(msg.backend);
+      session = await ort.InferenceSession.create(msg.buf, {
+        executionProviders: [activeBackend],
+        graphOptimizationLevel: "all",
+      });
+      // Warm-up pass to amortize first-run WASM JIT costs
+      const emptyFeat = new Float32Array(4 * planeSize);
+      for (let i = 0; i < planeSize; i++) emptyFeat[3 * planeSize + i] = 1.0;
+      const warm = new ort.Tensor("float32", emptyFeat, [1, 4, boardSize, boardSize]);
+      await session.run({ input: warm });
+      self.postMessage({ id: msg.id, ok: true, backend: activeBackend });
+    } else if (msg.type === "evaluate") {
+      const batch = msg.states.length;
+      const features = encodeFeatures(msg.states);
+      const tensor = new ort.Tensor("float32", features, [batch, 4, boardSize, boardSize]);
+      const out = await session.run({ input: tensor });
+      const logits = out.policy_logits.data;
+      const values = out.value.data;
+      if (logits.length !== batch * actionSize) {
+        throw new Error("policy size " + (logits.length / batch) + " != action size " + actionSize);
+      }
+      const policy = new Float32Array(logits.length);
+      policy.set(logits);
+      for (let b = 0; b < batch; b++) softmax(policy, b * actionSize, actionSize);
+      const valuesOut = new Float32Array(values);
+      self.postMessage(
+        { id: msg.id, ok: true, policy: policy.buffer, values: valuesOut.buffer, batch, actionSize },
+        [policy.buffer, valuesOut.buffer]
+      );
+    }
+  } catch (err) {
+    self.postMessage({ id: msg.id, ok: false, error: (err && err.message) || String(err) });
+  }
+};
+`;
+
+let _workerUrl = null;
+function workerUrl() {
+  if (!_workerUrl) {
+    _workerUrl = URL.createObjectURL(new Blob([WORKER_SRC], { type: "application/javascript" }));
+  }
+  return _workerUrl;
+}
+
+class WorkerEvaluator {
+  constructor(boardSize, backend) {
     this.boardSize = boardSize;
     this.actionSize = boardSize * boardSize;
+    this.backend = backend;
+    this.worker = null;
+    this.pending = new Map();
+    this.nextId = 1;
   }
 
-  static async fromArrayBuffer(buf, boardSize) {
-    const session = await ort.InferenceSession.create(buf, {
-      executionProviders: ["wasm"],
-      graphOptimizationLevel: "all",
+  static async fromArrayBuffer(buf, boardSize, backend = "wasm") {
+    const ev = new WorkerEvaluator(boardSize, backend);
+    ev.worker = new Worker(workerUrl());
+    ev.worker.onmessage = (e) => ev._onMessage(e);
+    ev.worker.onerror = (e) => ev._onError(e);
+    // Transfer the model buffer to the worker so we don't pay the copy cost
+    const init = await ev._send({ type: "init", buf, boardSize, backend }, [buf]);
+    ev.backend = init.backend || backend;
+    return ev;
+  }
+
+  terminate() {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    for (const [, p] of this.pending) p.reject(new Error("evaluator terminated"));
+    this.pending.clear();
+  }
+
+  _send(msg, transfer) {
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      this.pending.set(id, { resolve, reject });
+      this.worker.postMessage({ ...msg, id }, transfer || []);
     });
-    const evaluator = new OnnxEvaluator(session, boardSize);
-    await evaluator.evaluate([new GameState(boardSize)]);
-    return evaluator;
+  }
+
+  _onMessage(e) {
+    const { id, ok } = e.data;
+    const p = this.pending.get(id);
+    if (!p) return;
+    this.pending.delete(id);
+    if (ok) p.resolve(e.data);
+    else p.reject(new Error(e.data.error || "worker error"));
+  }
+
+  _onError(e) {
+    const msg = (e && e.message) || "worker crashed";
+    for (const [, p] of this.pending) p.reject(new Error(msg));
+    this.pending.clear();
   }
 
   async evaluate(states) {
-    const batch = states.length;
-    const features = encodeFeatures(states);
-    const tensor = new ort.Tensor("float32", features, [batch, 4, this.boardSize, this.boardSize]);
-    const out = await this.session.run({ input: tensor });
-    const logits = out.policy_logits.data;
-    const values = out.value.data;
-    if (logits.length !== batch * this.actionSize) {
-      throw new Error(`model policy size ${logits.length / batch} does not match board action size ${this.actionSize}`);
-    }
-    const policy = new Float32Array(logits.length);
-    policy.set(logits);
-    for (let b = 0; b < batch; b++) this._softmax(policy, b * this.actionSize, this.actionSize);
+    if (!this.worker) throw new Error("evaluator not initialized");
+    // Only ship the fields the worker actually needs
+    const lite = states.map((s) => ({
+      boardSize: s.boardSize,
+      board: s.board,
+      toPlay: s.toPlay,
+      lastAction: s.lastAction,
+    }));
+    const result = await this._send({ type: "evaluate", states: lite });
+    const policyArr = new Float32Array(result.policy);
+    const valuesArr = new Float32Array(result.values);
+    const batch = result.batch;
+    const aSize = result.actionSize;
     const policyOut = [], valueOut = [];
     for (let b = 0; b < batch; b++) {
-      policyOut.push(policy.subarray(b * this.actionSize, (b + 1) * this.actionSize));
-      valueOut.push(values[b]);
+      policyOut.push(policyArr.subarray(b * aSize, (b + 1) * aSize));
+      valueOut.push(valuesArr[b]);
     }
     return { policy: policyOut, value: valueOut };
-  }
-
-  _softmax(arr, offset, len) {
-    let max = -Infinity;
-    for (let i = 0; i < len; i++) if (arr[offset + i] > max) max = arr[offset + i];
-    let sum = 0;
-    for (let i = 0; i < len; i++) { arr[offset + i] = Math.exp(arr[offset + i] - max); sum += arr[offset + i]; }
-    if (sum > 0) for (let i = 0; i < len; i++) arr[offset + i] /= sum;
   }
 }
 
@@ -516,10 +1036,25 @@ class TreeNode {
   value() { return this.visitCount === 0 ? 0 : this.valueSum / this.visitCount; }
 }
 
+/*
+ * Hand control back to the browser so it can paint, process input, and run
+ * compositor work. WASM inference on the main thread is synchronous-inside-
+ * the-microtask, so without this the UI freezes for the full sims × per-eval
+ * duration. scheduler.yield() is preferred (keeps task priority); setTimeout
+ * is the universally-supported fallback.
+ */
+function yieldToBrowser() {
+  if (typeof scheduler !== "undefined" && typeof scheduler.yield === "function") {
+    return scheduler.yield();
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 class MCTS {
-  constructor({ cPuct = 1.6, evaluator }) {
+  constructor({ cPuct = 1.6, evaluator, yieldEveryMs = 14 }) {
     this.cPuct = cPuct;
     this.evaluator = evaluator;
+    this.yieldEveryMs = yieldEveryMs;
   }
 
   async run(state, numSims, { reuseRoot = null, onProgress = null } = {}) {
@@ -528,7 +1063,12 @@ class MCTS {
       const { policy, value } = await this.evaluator.evaluate([state]);
       this._expand(root, state, policy[0]);
       root.rootValue = value[0];
+      // Yield once after root expansion so the "AI thinking" status paints
+      // before the sim loop starts another blocking eval.
+      await yieldToBrowser();
     }
+
+    let yieldClock = performance.now();
 
     for (let sim = 0; sim < numSims; sim++) {
       let node = root;
@@ -552,8 +1092,16 @@ class MCTS {
       }
       this._backup(path, leafValue);
 
-      if (onProgress && (sim + 1) % 8 === 0) onProgress(sim + 1, numSims);
+      // Cooperative yield: when ~one frame of work has elapsed, update progress
+      // and release the event loop so the browser can paint & process input.
+      const now = performance.now();
+      if (now - yieldClock >= this.yieldEveryMs) {
+        if (onProgress) onProgress(sim + 1, numSims);
+        await yieldToBrowser();
+        yieldClock = performance.now();
+      }
     }
+    if (onProgress) onProgress(numSims, numSims);
     return this._chooseAction(root, state);
   }
 
@@ -593,10 +1141,8 @@ class MCTS {
   }
 
   _chooseAction(root, state) {
-    const counts = new Float32Array(state.actionSize);
-    let total = 0, best = -1, bestCount = -1;
+    let best = -1, bestCount = -1, total = 0;
     for (const [action, child] of root.children) {
-      counts[action] = child.visitCount;
       total += child.visitCount;
       if (child.visitCount > bestCount) { bestCount = child.visitCount; best = action; }
     }
@@ -615,12 +1161,18 @@ class MCTS {
 // =========================================================================
 // App
 // =========================================================================
-const DEFAULT_BOARD_SIZE = 9;
-const COLS = "ABCDEFGHJKLMNOP";
+const BOARD_SIZE = 15;
+const DEFAULT_MODEL_URL = "./best.onnx";
+const DEFAULT_BACKEND = "wasm";
 
-function coordinateLabel(index) {
-  if (index < COLS.length) return COLS[index];
-  return String(index + 1);
+const BACKEND_LABELS = {
+  wasm: "WASM",
+  webgpu: "WebGPU",
+  webnn: "WebML",
+};
+
+function backendLabel(value) {
+  return BACKEND_LABELS[value] || BACKEND_LABELS.wasm;
 }
 
 function starPoints(boardSize) {
@@ -638,63 +1190,209 @@ function starPoints(boardSize) {
 
 const els = {
   canvas: document.getElementById("board"),
-  headerBoardSize: document.getElementById("header-board-size"),
+  boardCard: document.getElementById("board-card"),
   fileInput: document.getElementById("file-input"),
-  boardSizeSelect: document.getElementById("board-size-select"),
+  fileName: document.getElementById("file-name"),
   colorSelect: document.getElementById("color-select"),
+  backendSelect: document.getElementById("backend-select"),
   sims: document.getElementById("sims"),
   simsVal: document.getElementById("sims-val"),
   btnReset: document.getElementById("btn-reset"),
+  btnSettings: document.getElementById("btn-settings"),
+  btnSheetClose: document.getElementById("btn-sheet-close"),
   btnUndo: document.getElementById("btn-undo"),
-  btnSwap: document.getElementById("btn-swap"),
   btnAi: document.getElementById("btn-ai"),
-  modelName: document.getElementById("model-name"),
-  status: document.getElementById("status"),
-  turn: document.getElementById("turn"),
+  btnConfirm: document.getElementById("btn-confirm"),
+  cardBlack: document.getElementById("card-black"),
+  cardWhite: document.getElementById("card-white"),
+  blackName: document.getElementById("black-name"),
+  whiteName: document.getElementById("white-name"),
+  blackSub: document.getElementById("black-sub"),
+  whiteSub: document.getElementById("white-sub"),
   turnPill: document.getElementById("turn-pill"),
-  moves: document.getElementById("moves"),
-  humanSide: document.getElementById("human-side"),
-  aiValue: document.getElementById("ai-value"),
-  aiTime: document.getElementById("ai-time"),
-  aiProgress: document.getElementById("ai-progress"),
+  turnText: document.getElementById("turn-text"),
+  sheet: document.getElementById("sheet"),
+  sheetBackdrop: document.getElementById("sheet-backdrop"),
 };
-const EM_DASH = "\u2014";
 
 const app = {
-  boardSize: DEFAULT_BOARD_SIZE,
-  game: new GameState(DEFAULT_BOARD_SIZE),
+  boardSize: BOARD_SIZE,
+  game: new GameState(BOARD_SIZE),
   history: [],
   evaluator: null,
   mcts: null,
+  backend: DEFAULT_BACKEND,
+  modelBuffer: null,
+  modelName: null,
+  modelTitle: null,
   humanPlayer: -1,
   busy: false,
   aiSubtree: null,
+  pendingAction: null,
+  aiValue: null,
+  aiTimeMs: null,
+  aiProgress: null,
+  statusOverride: null,
+  initialSetup: true,
+  defaultModelLoadStarted: false,
+  anims: new Map(), // action -> { start: performance.now() }
+  animRaf: 0,
 };
+
+const STONE_ANIM_MS = 280;
+
+function easeOutBack(t) {
+  const c = 1.70158, s = c + 1;
+  return 1 + s * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2);
+}
+
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+function startStoneAnim(action) {
+  app.anims.set(action, { start: performance.now() });
+  if (!app.animRaf) tickAnims();
+}
+
+function tickAnims() {
+  app.animRaf = 0;
+  const now = performance.now();
+  for (const [action, anim] of app.anims) {
+    if (now - anim.start >= STONE_ANIM_MS) app.anims.delete(action);
+  }
+  redraw();
+  if (app.anims.size > 0) app.animRaf = requestAnimationFrame(tickAnims);
+}
+
+function isHumansTurn() {
+  if (app.game.terminal) return false;
+  if (!app.evaluator) return true;
+  return app.game.toPlay === app.humanPlayer;
+}
 
 function setBusy(b) {
   app.busy = b;
   els.btnReset.disabled = b;
-  els.btnUndo.disabled = b;
-  els.btnSwap.disabled = b;
-  els.btnAi.disabled = b || !app.evaluator;
+  els.btnSettings.disabled = b;
+  els.backendSelect.disabled = b;
+  els.btnUndo.disabled = b || app.history.length === 0;
+  els.btnAi.disabled = b || !app.evaluator || app.game.terminal || !isHumansTurn();
+  updateConfirmEnabled();
 }
 
-function setStatus(msg, cls = "") {
-  els.status.textContent = msg;
-  els.status.className = "status-badge" + (cls ? " " + cls : "");
-  els.status.title = msg;
+function updateConfirmEnabled() {
+  els.btnConfirm.disabled = app.busy || app.pendingAction === null;
+}
+
+function fmtValue(v) {
+  if (v === null || v === undefined) return null;
+  return (v >= 0 ? "+" : "") + v.toFixed(2);
+}
+
+function fmtDuration(ms) {
+  if (ms === null || ms === undefined) return "";
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}초`;
+}
+
+const LOOKAHEAD_TEMPLATES = [
+  "{n}수 앞을 내다보는 중...",
+  "{n}번 짱구 굴리는 중...",
+  "머리 {n}번 굴리는 중...",
+  "{n}번 생각하는 중...",
+  "{n}번 수읽기 중...",
+  "{n}번 경우의 수 세는 중...",
+  "{n}번 착수 후보 훑는 중...",
+  "{n}번 승부수 찾는 중...",
+  "{n}번 묘수 찾는 중...",
+  "{n}번 함정 확인하는 중...",
+  "{n}번 노림수 재는 중...",
+  "{n}번 판을 다시 보는 중...",
+  "{n}번 돌 위치 재는 중...",
+  "{n}번 장고하는 중...",
+  "{n}번 계산기 두드리는 중...",
+  "{n}번 다음 수 고민하는 중...",
+  "{n}번 이길 척하는 중...",
+  "{n}번 망하지 않는 수 찾는 중...",
+  "{n}번 그럴듯한 수 찾는 중...",
+  "{n}번 수상한 자리 보는 중...",
+  "머리 {n}번 때리는 중...",
+];
+
+function pickLookaheadTemplate() {
+  return LOOKAHEAD_TEMPLATES[Math.floor(Math.random() * LOOKAHEAD_TEMPLATES.length)];
+}
+
+function lookaheadText(done, template = LOOKAHEAD_TEMPLATES[0]) {
+  return template.replace("{n}", String(Math.max(1, done)));
 }
 
 function updateInfo() {
-  const black = app.game.toPlay === 1;
-  els.turn.textContent = black ? "Black" : "White";
-  els.turnPill.classList.toggle("white", !black);
-  els.moves.textContent = app.game.moveCount;
-  els.humanSide.textContent = app.humanPlayer === 1 ? "Black" : "White";
-  if (app.game.terminal) {
-    if (app.game.winner === 0) setStatus("Draw", "ok");
-    else setStatus((app.game.winner === 1 ? "Black" : "White") + " wins!", "ok");
+  const toPlayIsBlack = app.game.toPlay === 1;
+  const aiPlayer = app.evaluator ? -app.humanPlayer : 0;
+  const aiIsBlack = aiPlayer === 1;
+
+  els.blackName.textContent = app.humanPlayer === 1 ? "흑(나)" : "흑(AI)";
+  els.whiteName.textContent = app.humanPlayer === -1 ? "백(나)" : "백(AI)";
+
+  els.cardBlack.classList.toggle("active", !app.game.terminal && toPlayIsBlack);
+  els.cardWhite.classList.toggle("active", !app.game.terminal && !toPlayIsBlack);
+
+  const humanMoves = `${app.game.moveCount}수`;
+  let aiSub;
+  if (!app.evaluator) {
+    aiSub = "수동";
+  } else if (app.aiProgress) {
+    aiSub = app.aiProgress;
+  } else if (app.aiValue !== null) {
+    const t = app.aiTimeMs !== null ? ` · ${fmtDuration(app.aiTimeMs)}` : "";
+    aiSub = `형세 ${fmtValue(app.aiValue)}${t}`;
+  } else {
+    aiSub = "대기";
   }
+
+  if (app.evaluator) {
+    if (aiIsBlack) { els.blackSub.textContent = aiSub; els.whiteSub.textContent = humanMoves; }
+    else           { els.whiteSub.textContent = aiSub; els.blackSub.textContent = humanMoves; }
+  } else {
+    els.blackSub.textContent = humanMoves;
+    els.whiteSub.textContent = humanMoves;
+  }
+
+  let text, cls = "";
+  if (app.statusOverride) {
+    text = app.statusOverride.text;
+    cls = app.statusOverride.cls || "";
+  } else if (app.game.terminal) {
+    if (app.game.winner === 0) text = "무승부";
+    else text = (app.game.winner === 1 ? "흑" : "백") + " 승리";
+    cls = "win";
+  } else if (app.initialSetup) {
+    text = "돌 색을 골라주세요";
+  } else if (app.busy) {
+    text = "컴퓨터가 생각하는 중입니다…";
+    cls = "thinking";
+  } else if (!app.evaluator) {
+    text = toPlayIsBlack ? "흑 차례" : "백 차례";
+  } else if (isHumansTurn()) {
+    text = app.pendingAction !== null ? "확정을 눌러주세요" : "내 차례";
+  } else {
+    text = "컴퓨터 차례";
+  }
+  els.turnText.textContent = text;
+  els.turnPill.className = "turn-pill glass" + (cls ? " " + cls : "");
+
+  els.btnUndo.disabled = app.busy || (app.history.length === 0 && app.pendingAction === null);
+  els.btnAi.disabled = app.busy || !app.evaluator || app.game.terminal || !isHumansTurn();
+  updateConfirmEnabled();
+}
+
+function flashStatus(text, cls, ms = 2400) {
+  app.statusOverride = { text, cls };
+  updateInfo();
+  clearTimeout(flashStatus._t);
+  flashStatus._t = setTimeout(() => {
+    app.statusOverride = null;
+    updateInfo();
+  }, ms);
 }
 
 // ---- File loading ----
@@ -702,87 +1400,149 @@ els.fileInput.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   setBusy(true);
-  setStatus("Loading model...", "thinking");
+  flashStatus(`모델 로딩 중… ${backendLabel(app.backend)}`, "thinking", 60_000);
+  if (app.evaluator) app.evaluator.terminate();
   app.evaluator = null;
   app.mcts = null;
   try {
     const buf = await file.arrayBuffer();
-    app.evaluator = await OnnxEvaluator.fromArrayBuffer(buf, app.boardSize);
+    const reusable = buf.slice(0);
+    app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend);
     app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
-    els.modelName.textContent = file.name;
-    els.modelName.title = file.name;
-    setStatus("Model loaded. Your turn.", "ok");
+    app.modelBuffer = reusable;
+    app.modelName = file.name;
+    app.modelTitle = file.name;
+    els.fileName.textContent = file.name;
+    els.fileName.title = file.name;
     app.aiSubtree = null;
+    app.statusOverride = null;
     setBusy(false);
+    updateInfo();
     maybeAiMove();
     return;
   } catch (err) {
-    setStatus("Load failed: " + err.message, "error");
     console.error(err);
+    flashStatus("로드 실패", "error");
   }
   setBusy(false);
+  updateInfo();
 });
 
 // ---- Controls ----
 els.sims.addEventListener("input", () => { els.simsVal.textContent = els.sims.value; });
-els.boardSizeSelect.addEventListener("change", () => {
-  setBoardSize(parseInt(els.boardSizeSelect.value));
-});
 els.colorSelect.addEventListener("change", () => {
   app.humanPlayer = parseInt(els.colorSelect.value);
   resetGame();
 });
-els.btnReset.addEventListener("click", resetGame);
-els.btnUndo.addEventListener("click", undo);
-els.btnSwap.addEventListener("click", () => {
-  app.humanPlayer = -app.humanPlayer;
-  els.colorSelect.value = String(app.humanPlayer);
-  resetGame();
+els.backendSelect.addEventListener("change", () => {
+  app.backend = els.backendSelect.value;
+  app.pendingAction = null;
+  app.aiSubtree = null;
+  app.aiValue = null;
+  app.aiTimeMs = null;
+  app.aiProgress = null;
+  if (!app.initialSetup) reloadModelForBackend();
+  else updateInfo();
 });
-els.btnAi.addEventListener("click", () => { if (app.evaluator && !app.busy) forceAiMove(); });
 
-function setBoardSize(boardSize) {
-  if (app.busy || boardSize === app.boardSize) return;
-  app.boardSize = boardSize;
+els.btnReset.addEventListener("click", () => { if (!app.busy) resetGame(); });
+els.btnUndo.addEventListener("click", undo);
+els.btnAi.addEventListener("click", () => { if (app.evaluator && !app.busy) showHint(); });
+els.btnConfirm.addEventListener("click", confirmPending);
+
+// ---- Settings sheet ----
+function openSheet() { els.sheet.classList.add("open"); els.sheetBackdrop.classList.add("open"); }
+function closeSheet() {
+  els.sheet.classList.remove("open");
+  els.sheetBackdrop.classList.remove("open");
+}
+function finishInitialSetup() {
+  if (!app.initialSetup) {
+    closeSheet();
+    return;
+  }
+  app.backend = els.backendSelect.value;
+  app.initialSetup = false;
+  els.btnSheetClose.textContent = "완료";
+  closeSheet();
+  updateInfo();
+  if (app.evaluator) maybeAiMove();
+  else tryAutoLoadDefault();
+}
+els.btnSettings.addEventListener("click", openSheet);
+els.btnSheetClose.addEventListener("click", finishInitialSetup);
+els.sheetBackdrop.addEventListener("click", finishInitialSetup);
+
+async function reloadModelForBackend() {
+  if (app.busy) return;
+  if (!app.modelBuffer) {
+    if (!app.evaluator) {
+      app.defaultModelLoadStarted = false;
+      tryAutoLoadDefault();
+    }
+    return;
+  }
+  setBusy(true);
+  flashStatus(`추론 방식 변경 중… ${backendLabel(app.backend)}`, "thinking", 60_000);
+  if (app.evaluator) app.evaluator.terminate();
   app.evaluator = null;
   app.mcts = null;
-  els.btnAi.disabled = true;
-  els.modelName.textContent = "none";
-  els.modelName.title = "none";
-  els.headerBoardSize.textContent = `${boardSize}\u00d7${boardSize}`;
-  resetGame();
+  try {
+    const buf = app.modelBuffer.slice(0);
+    app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend);
+    app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
+    app.aiSubtree = null;
+    app.statusOverride = null;
+    setBusy(false);
+    updateInfo();
+    maybeAiMove();
+  } catch (err) {
+    console.error(err);
+    setBusy(false);
+    flashStatus(`${backendLabel(app.backend)} 사용 불가`, "error", 8000);
+    updateInfo();
+  }
 }
 
 function resetGame() {
   app.game = new GameState(app.boardSize);
   app.history = [];
   app.aiSubtree = null;
-  els.aiValue.textContent = EM_DASH;
-  els.aiTime.textContent = EM_DASH;
-  els.aiProgress.textContent = EM_DASH;
-  setStatus(app.evaluator ? "Your turn" : "Upload an .onnx model to play", app.evaluator ? "ok" : "");
+  app.pendingAction = null;
+  app.aiValue = null;
+  app.aiTimeMs = null;
+  app.aiProgress = null;
+  app.statusOverride = null;
+  app.anims.clear();
   updateInfo();
   redraw();
   maybeAiMove();
 }
 
 function undo() {
-  if (app.busy || app.history.length === 0) return;
-  // Undo two moves (human + AI) when possible
-  const count = app.history.length >= 2 ? 2 : 1;
+  if (app.busy) return;
+  if (app.pendingAction !== null) {
+    app.pendingAction = null;
+    updateInfo();
+    redraw();
+    return;
+  }
+  if (app.history.length === 0) return;
+  const count = app.evaluator && app.history.length >= 2 ? 2 : 1;
   app.history.splice(-count, count);
   app.game = new GameState(app.boardSize);
   app.aiSubtree = null;
+  app.anims.clear();
   for (const a of app.history) app.game.applyAction(a);
+  app.statusOverride = null;
   updateInfo();
   redraw();
-  if (!app.game.terminal) setStatus("Your turn", "ok");
 }
 
 // ---- Board click ----
 els.canvas.addEventListener("click", (e) => {
   if (app.busy || app.game.terminal) return;
-  if (app.evaluator && app.game.toPlay !== app.humanPlayer) return;
+  if (!isHumansTurn()) return;
   const rect = els.canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (els.canvas.width / rect.width);
   const y = (e.clientY - rect.top) * (els.canvas.height / rect.height);
@@ -790,12 +1550,25 @@ els.canvas.addEventListener("click", (e) => {
   if (!cell) return;
   const action = cell.row * app.boardSize + cell.col;
   if (app.game.board[action] !== 0) return;
-  playMove(action);
+  if (app.pendingAction === action) app.pendingAction = null;
+  else app.pendingAction = action;
+  updateInfo();
+  redraw();
 });
+// Extra belt-and-suspenders against iOS double-tap zoom on the board.
+els.canvas.addEventListener("dblclick", (e) => e.preventDefault());
+
+function confirmPending() {
+  if (app.busy || app.pendingAction === null) return;
+  const action = app.pendingAction;
+  app.pendingAction = null;
+  playMove(action);
+}
 
 function playMove(action) {
   app.game.applyAction(action);
   app.history.push(action);
+  startStoneAnim(action);
   if (app.aiSubtree && app.aiSubtree.children.has(action)) {
     app.aiSubtree = app.aiSubtree.children.get(action);
   } else {
@@ -807,140 +1580,406 @@ function playMove(action) {
 }
 
 function maybeAiMove() {
+  if (app.initialSetup) return;
   if (!app.evaluator || app.busy || app.game.terminal) return;
   if (app.game.toPlay !== app.humanPlayer) aiMove();
-}
-
-async function forceAiMove() {
-  if (!app.evaluator || app.busy || app.game.terminal) return;
-  await aiMove();
 }
 
 async function aiMove() {
   if (!app.mcts || app.game.terminal) return;
   setBusy(true);
-  setStatus("AI thinking...", "thinking");
   const sims = parseInt(els.sims.value);
-  els.aiProgress.textContent = `0 / ${sims}`;
+  const progressTemplate = pickLookaheadTemplate();
+  app.aiProgress = lookaheadText(1, progressTemplate);
+  updateInfo();
   const t0 = performance.now();
-
   try {
     const result = await app.mcts.run(app.game, sims, {
       reuseRoot: app.aiSubtree,
-      onProgress: (done, total) => { els.aiProgress.textContent = `${done} / ${total}`; },
+      onProgress: (done, total) => {
+        app.aiProgress = lookaheadText(done, progressTemplate);
+        updateInfo();
+      },
     });
-    const dt = performance.now() - t0;
-    els.aiValue.textContent = result.rootValue.toFixed(3);
-    els.aiTime.textContent = `${dt.toFixed(0)} ms`;
-    els.aiProgress.textContent = `${sims} / ${sims}`;
-
+    app.aiTimeMs = performance.now() - t0;
+    app.aiValue = result.rootValue;
+    app.aiProgress = null;
     app.game.applyAction(result.action);
     app.history.push(result.action);
+    startStoneAnim(result.action);
     app.aiSubtree = result.nextRoot;
     updateInfo();
     redraw();
-    if (!app.game.terminal) setStatus("Your turn", "ok");
   } catch (err) {
-    setStatus("AI error: " + err.message, "error");
     console.error(err);
+    app.aiProgress = null;
+    flashStatus("컴퓨터 오류", "error");
   }
   setBusy(false);
+  updateInfo();
+}
+
+async function showHint() {
+  if (!app.mcts || app.game.terminal || !isHumansTurn()) return;
+  const sims = parseInt(els.sims.value);
+  const progressTemplate = pickLookaheadTemplate();
+  clearTimeout(flashStatus._t);
+  app.statusOverride = { text: lookaheadText(1, progressTemplate), cls: "thinking" };
+  setBusy(true);
+  const t0 = performance.now();
+  try {
+    const result = await app.mcts.run(app.game, sims, {
+      reuseRoot: app.aiSubtree,
+      onProgress: (done, total) => {
+        app.statusOverride = { text: lookaheadText(done, progressTemplate), cls: "thinking" };
+        updateInfo();
+      },
+    });
+    app.pendingAction = result.action;
+    app.statusOverride = null;
+    setBusy(false);
+    redraw();
+    flashStatus(`추천 수 표시 · 형세 ${fmtValue(result.rootValue)} · ${fmtDuration(performance.now() - t0)}`, "thinking", 1800);
+  } catch (err) {
+    console.error(err);
+    app.statusOverride = null;
+    setBusy(false);
+    flashStatus("힌트 계산 실패", "error");
+  }
 }
 
 // ---- Canvas rendering ----
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function syncCanvasSize() {
+  const canvas = els.canvas;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return false;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    return true;
+  }
+  return false;
+}
+
 function cellMetrics() {
   const W = els.canvas.width;
-  const margin = W * 0.07;
-  const step = (W - 2 * margin) / (app.boardSize - 1);
-  return { W, margin, step };
+  const H = els.canvas.height;
+  const S = Math.min(W, H);
+  const offsetX = (W - S) / 2;
+  const offsetY = (H - S) / 2;
+  const marginRatio = parseFloat(cssVar("--board-grid-margin")) || 0.03;
+  const margin = S * marginRatio;
+  const step = (S - 2 * margin) / (app.boardSize - 1);
+  return { W, H, S, offsetX, offsetY, margin, step };
 }
 
 function pixelToCell(x, y) {
-  const { margin, step } = cellMetrics();
-  const col = Math.round((x - margin) / step);
-  const row = Math.round((y - margin) / step);
+  const { margin, step, offsetX, offsetY } = cellMetrics();
+  const col = Math.round((x - offsetX - margin) / step);
+  const row = Math.round((y - offsetY - margin) / step);
   if (row < 0 || row >= app.boardSize || col < 0 || col >= app.boardSize) return null;
-  const dx = Math.abs(x - (margin + col * step));
-  const dy = Math.abs(y - (margin + row * step));
-  if (dx > step * 0.45 || dy > step * 0.45) return null;
+  const dx = Math.abs(x - offsetX - (margin + col * step));
+  const dy = Math.abs(y - offsetY - (margin + row * step));
+  if (dx > step * 0.5 || dy > step * 0.5) return null;
   return { row, col };
 }
 
 function redraw() {
+  // Defensive: guarantee bitmap matches CSS × DPR every frame. Cheap DOM read
+  // and prevents any stale state where layout happened after the observer ran.
+  syncCanvasSize();
   const ctx = els.canvas.getContext("2d");
-  const { W, margin, step } = cellMetrics();
-  const stoneR = step * 0.42;
+  const { W, H, S, offsetX, offsetY, margin, step } = cellMetrics();
+  const stoneR = step * 0.44;
+  const now = performance.now();
+  const cellX = (c) => offsetX + margin + c * step;
+  const cellY = (r) => offsetY + margin + r * step;
 
-  // Background
-  ctx.fillStyle = "#d9b271";
-  ctx.fillRect(0, 0, W, W);
+  // Transparent canvas — the board glass behind shows through
+  ctx.clearRect(0, 0, W, H);
 
-  // Grid
-  ctx.strokeStyle = "#2a2118";
-  ctx.lineWidth = 1;
+  const lineColor = cssVar("--board-line");
+  const starColor = cssVar("--board-star");
+
+  // Grid lines
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = Math.max(1, S * 0.0014);
   for (let i = 0; i < app.boardSize; i++) {
-    const p = margin + i * step;
-    ctx.beginPath(); ctx.moveTo(margin, p); ctx.lineTo(W - margin, p); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(p, margin); ctx.lineTo(p, W - margin); ctx.stroke();
+    const px = cellX(i), py = cellY(i);
+    ctx.beginPath(); ctx.moveTo(cellX(0), py); ctx.lineTo(cellX(app.boardSize - 1), py); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px, cellY(0)); ctx.lineTo(px, cellY(app.boardSize - 1)); ctx.stroke();
   }
 
   // Star points
-  ctx.fillStyle = "#2a2118";
+  ctx.fillStyle = starColor;
   for (const [r, c] of starPoints(app.boardSize)) {
     ctx.beginPath();
-    ctx.arc(margin + c * step, margin + r * step, Math.max(2.5, step * 0.07), 0, Math.PI * 2);
+    ctx.arc(cellX(c), cellY(r), Math.max(2.2, step * 0.06), 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Coordinate labels
-  ctx.fillStyle = "#3a2f22";
-  ctx.font = `${Math.max(10, step * 0.26)}px ui-monospace, monospace`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (let i = 0; i < app.boardSize; i++) {
-    ctx.fillText(coordinateLabel(i), margin + i * step, margin * 0.4);
-    ctx.fillText(String(app.boardSize - i), margin * 0.4, margin + i * step);
-  }
-
-  // Stones
-  if (!app.game) return;
+  // Stones (with drop-in animation)
   for (let i = 0; i < app.game.actionSize; i++) {
     const v = app.game.board[i];
     if (v === 0) continue;
     const r = Math.floor(i / app.boardSize);
     const c = i % app.boardSize;
-    const cx = margin + c * step;
-    const cy = margin + r * step;
-    const grad = ctx.createRadialGradient(cx - stoneR * 0.3, cy - stoneR * 0.3, stoneR * 0.1, cx, cy, stoneR);
-    if (v === 1) {
-      grad.addColorStop(0, "#555");
-      grad.addColorStop(1, "#000");
+    const cx = cellX(c), cy = cellY(r);
+    const anim = app.anims.get(i);
+    if (anim) {
+      const t = Math.min(1, (now - anim.start) / STONE_ANIM_MS);
+      const scale = 0.35 + easeOutBack(t) * 0.65; // 0.35 -> 1.0 with slight overshoot
+      const alpha = easeOutCubic(Math.min(1, t * 1.4));
+      drawGlassStone(ctx, cx, cy, stoneR * scale, v, alpha);
     } else {
-      grad.addColorStop(0, "#fff");
-      grad.addColorStop(1, "#cfc8b8");
+      drawGlassStone(ctx, cx, cy, stoneR, v, 1.0);
     }
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(cx, cy, stoneR, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = v === 1 ? "#000" : "#999";
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
   }
 
-  // Last move marker
-  if (app.game.lastAction !== null) {
+  // Pending ghost (dedicated renderer — no white highlights so color reads true)
+  if (app.pendingAction !== null && isHumansTurn()) {
+    const r = Math.floor(app.pendingAction / app.boardSize);
+    const c = app.pendingAction % app.boardSize;
+    drawGhostStone(ctx, cellX(c), cellY(r), stoneR, app.humanPlayer);
+  }
+
+  // Last-move marker (small neutral dot) — hidden while the stone is still animating in
+  if (app.game.lastAction !== null && app.pendingAction === null && !app.anims.has(app.game.lastAction)) {
+    const v = app.game.board[app.game.lastAction];
     const r = Math.floor(app.game.lastAction / app.boardSize);
     const c = app.game.lastAction % app.boardSize;
-    const cx = margin + c * step;
-    const cy = margin + r * step;
-    ctx.strokeStyle = "#e74c3c";
-    ctx.lineWidth = 2.2;
-    ctx.beginPath(); ctx.arc(cx, cy, stoneR * 0.35, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = v === 1 ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.75)";
+    ctx.beginPath();
+    ctx.arc(cellX(c), cellY(r), stoneR * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/*
+ * Glass-marble stones: cast shadow + body + inner luminance + specular highlight + rim.
+ *   v = 1 (black) or -1 (white). alpha < 1 makes it a ghost preview.
+ */
+function drawGlassStone(ctx, cx, cy, r, v, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // 1. Ambient occlusion / cast shadow below the stone
+  const sh = ctx.createRadialGradient(cx + r * 0.04, cy + r * 0.18, r * 0.25, cx + r * 0.04, cy + r * 0.22, r * 1.3);
+  sh.addColorStop(0, v === 1 ? "rgba(0,0,0,0.38)" : "rgba(0,0,0,0.22)");
+  sh.addColorStop(0.55, v === 1 ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.08)");
+  sh.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = sh;
+  ctx.beginPath();
+  ctx.ellipse(cx + r * 0.04, cy + r * 0.22, r * 1.2, r * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Body — clipped to circle
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+
+  if (v === 1) {
+    // Black glass marble body
+    const body = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.05, cx + r * 0.1, cy + r * 0.18, r * 1.1);
+    body.addColorStop(0, "#6e6e78");
+    body.addColorStop(0.28, "#2a2a32");
+    body.addColorStop(0.7, "#0e0e14");
+    body.addColorStop(1, "#020206");
+    ctx.fillStyle = body;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+    // Broad glow (simulated sub-surface)
+    const glow = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.4, 0, cx - r * 0.3, cy - r * 0.4, r * 0.95);
+    glow.addColorStop(0, "rgba(255,255,255,0.38)");
+    glow.addColorStop(0.4, "rgba(255,255,255,0.1)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+    // Sharp specular highlight
+    const spec = ctx.createRadialGradient(cx - r * 0.38, cy - r * 0.46, 0, cx - r * 0.38, cy - r * 0.46, r * 0.34);
+    spec.addColorStop(0, "rgba(255,255,255,0.78)");
+    spec.addColorStop(0.45, "rgba(255,255,255,0.25)");
+    spec.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = spec;
+    ctx.beginPath();
+    ctx.ellipse(cx - r * 0.38, cy - r * 0.46, r * 0.32, r * 0.18, -Math.PI / 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Counter-light on bottom-right (warm)
+    const cool = ctx.createRadialGradient(cx + r * 0.35, cy + r * 0.3, 0, cx + r * 0.35, cy + r * 0.3, r * 0.7);
+    cool.addColorStop(0, "rgba(120, 140, 200, 0.18)");
+    cool.addColorStop(1, "rgba(120, 140, 200, 0)");
+    ctx.fillStyle = cool;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  } else {
+    // White glass marble body
+    const body = ctx.createRadialGradient(cx - r * 0.22, cy - r * 0.28, r * 0.05, cx + r * 0.12, cy + r * 0.22, r * 1.05);
+    body.addColorStop(0, "#ffffff");
+    body.addColorStop(0.45, "#f4f4f6");
+    body.addColorStop(0.85, "#c2c2ca");
+    body.addColorStop(1, "#a8a8b2");
+    ctx.fillStyle = body;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+    // Broad top glow
+    const glow = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, 0, cx - r * 0.3, cy - r * 0.35, r * 0.85);
+    glow.addColorStop(0, "rgba(255,255,255,0.95)");
+    glow.addColorStop(0.5, "rgba(255,255,255,0.4)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+    // Crisp specular
+    const spec = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, 0, cx - r * 0.35, cy - r * 0.4, r * 0.3);
+    spec.addColorStop(0, "rgba(255,255,255,1)");
+    spec.addColorStop(0.5, "rgba(255,255,255,0.5)");
+    spec.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = spec;
+    ctx.beginPath();
+    ctx.ellipse(cx - r * 0.35, cy - r * 0.4, r * 0.28, r * 0.17, -Math.PI / 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Cool rim on lower-right (glass tint)
+    const cool = ctx.createRadialGradient(cx + r * 0.4, cy + r * 0.35, 0, cx + r * 0.4, cy + r * 0.35, r * 0.75);
+    cool.addColorStop(0, "rgba(140, 160, 200, 0.18)");
+    cool.addColorStop(1, "rgba(140, 160, 200, 0)");
+    ctx.fillStyle = cool;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  ctx.restore();
+
+  // 3. Outer rim (on the boundary, outside clip)
+  ctx.strokeStyle = v === 1 ? "rgba(255,255,255,0.18)" : "rgba(30,30,50,0.2)";
+  ctx.lineWidth = Math.max(0.6, r * 0.035);
+  ctx.beginPath(); ctx.arc(cx, cy, r - ctx.lineWidth / 2, 0, Math.PI * 2); ctx.stroke();
+
+  ctx.restore();
+}
+
+/*
+ * Ghost (pending) stone. Must read clearly as the player's color, so we
+ * deliberately skip the white glow/specular layers that wash a translucent
+ * black stone out to look white-ish over a light glass surface.
+ */
+function drawGhostStone(ctx, cx, cy, r, v) {
+  ctx.save();
+  // Black needs more opacity to read as black over translucent glass; white
+  // reads fine at lower alpha. Asymmetric on purpose.
+  ctx.globalAlpha = v === 1 ? 0.72 : 0.55;
+
+  // Soft cast shadow (slightly stronger for black)
+  const sh = ctx.createRadialGradient(cx, cy + r * 0.15, r * 0.2, cx, cy + r * 0.18, r * 1.15);
+  sh.addColorStop(0, v === 1 ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.16)");
+  sh.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = sh;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.18, r * 1.1, r * 0.38, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Solid color body — no white overlays, so color intent stays true
+  if (v === 1) {
+    const body = ctx.createRadialGradient(cx - r * 0.25, cy - r * 0.3, r * 0.05, cx, cy, r);
+    body.addColorStop(0, "#1c1c22");
+    body.addColorStop(0.55, "#08080c");
+    body.addColorStop(1, "#000000");
+    ctx.fillStyle = body;
+  } else {
+    const body = ctx.createRadialGradient(cx - r * 0.25, cy - r * 0.3, r * 0.05, cx, cy, r);
+    body.addColorStop(0, "#ffffff");
+    body.addColorStop(0.7, "#ededf1");
+    body.addColorStop(1, "#b4b4bf");
+    ctx.fillStyle = body;
+  }
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+
+  // Edge definition — crisp rim so ghost reads clearly on glass board
+  ctx.globalAlpha = v === 1 ? 0.95 : 0.8;
+  ctx.strokeStyle = v === 1 ? "rgba(0,0,0,0.85)" : "rgba(20,20,35,0.35)";
+  ctx.lineWidth = Math.max(0.9, r * (v === 1 ? 0.055 : 0.045));
+  ctx.beginPath(); ctx.arc(cx, cy, r - ctx.lineWidth / 2, 0, Math.PI * 2); ctx.stroke();
+
+  ctx.restore();
+}
+
+// Repaint if a future theme toggle changes CSS-driven board colors.
+new MutationObserver(() => redraw()).observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ["data-theme"],
+});
+
+// Block iOS double-tap zoom globally as a fallback (belt and suspenders).
+document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: false });
+
+// Keep canvas bitmap in sync with its actual CSS size × devicePixelRatio.
+// Fixes blurry rendering on hi-DPI screens and stones appearing slightly tall
+// when the CSS box rounds to a non-square pixel size.
+function handleResize() {
+  if (syncCanvasSize()) redraw();
+}
+if (window.ResizeObserver) {
+  new ResizeObserver(handleResize).observe(els.canvas);
+}
+window.addEventListener("resize", handleResize);
+window.addEventListener("orientationchange", handleResize);
+
+// ---- Auto-load bundled default model ----
+async function tryAutoLoadDefault() {
+  if (app.defaultModelLoadStarted || app.evaluator) return;
+  app.defaultModelLoadStarted = true;
+  if (location.protocol === "file:") {
+    console.warn("file:// cannot fetch(); serve via an HTTP server instead.");
+    flashStatus("file:// 에서는 모델을 가져올 수 없습니다 — HTTP 서버로 열어주세요", "error", 8000);
+    return;
+  }
+  setBusy(true);
+  flashStatus(`기본 모델 로딩 중… ${backendLabel(app.backend)}`, "thinking", 120_000);
+  let stage = "다운로드";
+  try {
+    const resp = await fetch(DEFAULT_MODEL_URL, { cache: "force-cache" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} on ${DEFAULT_MODEL_URL}`);
+    stage = "모델 읽기";
+    const buf = await resp.arrayBuffer();
+    const reusable = buf.slice(0);
+    stage = `추론 준비 (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB)`;
+    if (app.evaluator) app.evaluator.terminate();
+    app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend);
+    app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
+    app.modelBuffer = reusable;
+    app.modelName = "best.onnx (기본)";
+    app.modelTitle = "best.onnx (기본 모델)";
+    els.fileName.textContent = "best.onnx (기본)";
+    els.fileName.title = "best.onnx (기본 모델)";
+    app.aiSubtree = null;
+    app.statusOverride = null;
+    setBusy(false);
+    updateInfo();
+    maybeAiMove();
+  } catch (err) {
+    console.error(`[default-model load] failed at stage "${stage}":`, err);
+    setBusy(false);
+    const msg = (err && err.message) ? String(err.message).slice(0, 80) : "알 수 없음";
+    flashStatus(`로드 실패 [${stage}]: ${msg}`, "error", 8000);
+    updateInfo();
   }
 }
 
 // ---- Init ----
 updateInfo();
+syncCanvasSize();
 redraw();
+// Extra sync after first paint — layout/viewport on iOS can settle post-load.
+requestAnimationFrame(() => { if (syncCanvasSize()) redraw(); });
+window.addEventListener("load", handleResize);
+els.btnSheetClose.textContent = "시작";
+openSheet();
+
 </script>
 </body>
 </html>
