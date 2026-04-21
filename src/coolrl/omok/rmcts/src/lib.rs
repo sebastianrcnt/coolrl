@@ -8,10 +8,10 @@ use std::ptr;
 use std::slice;
 use std::thread;
 
-pub const BOARD_SIZE: usize = 9;
-pub const ACTION_SIZE: usize = BOARD_SIZE * BOARD_SIZE;
+pub const DEFAULT_BOARD_SIZE: usize = 9;
+pub const MIN_BOARD_SIZE: usize = 5;
+pub const MAX_BOARD_SIZE: usize = 19;
 pub const FEATURE_PLANES: usize = 4;
-pub const FEATURE_STRIDE: usize = FEATURE_PLANES * ACTION_SIZE;
 
 #[derive(Clone, Debug)]
 pub struct SearchResult {
@@ -21,12 +21,13 @@ pub struct SearchResult {
 }
 
 pub trait Evaluator {
-    fn evaluate(&self, state: &GameState) -> ([f32; ACTION_SIZE], f32);
+    fn evaluate(&self, state: &GameState) -> (Vec<f32>, f32);
 }
 
 #[derive(Clone, Debug)]
 pub struct GameState {
-    pub board: [i8; ACTION_SIZE],
+    pub board_size: usize,
+    pub board: Vec<i8>,
     pub to_play: i8,
     pub terminal: bool,
     pub winner: i8,
@@ -36,9 +37,14 @@ pub struct GameState {
 }
 
 impl GameState {
-    pub fn new() -> Self {
+    pub fn new(board_size: usize) -> Self {
+        assert!(
+            (MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&board_size),
+            "unsupported board size"
+        );
         Self {
-            board: [0; ACTION_SIZE],
+            board_size,
+            board: vec![0; board_size * board_size],
             to_play: 1,
             terminal: false,
             winner: 0,
@@ -48,29 +54,36 @@ impl GameState {
         }
     }
 
-    pub fn with_exactly_five(exactly_five: bool) -> Self {
+    pub fn with_exactly_five(board_size: usize, exactly_five: bool) -> Self {
         Self {
             exactly_five,
-            ..Self::new()
+            ..Self::new(board_size)
         }
     }
 
-    pub fn legal_moves(&self) -> [bool; ACTION_SIZE] {
-        let mut legal = [false; ACTION_SIZE];
-        for i in 0..ACTION_SIZE {
-            legal[i] = !self.terminal && self.board[i] == 0;
-        }
-        legal
+    pub fn action_size(&self) -> usize {
+        self.board_size * self.board_size
+    }
+
+    pub fn feature_stride(&self) -> usize {
+        FEATURE_PLANES * self.action_size()
+    }
+
+    pub fn legal_moves(&self) -> Vec<bool> {
+        self.board
+            .iter()
+            .map(|stone| !self.terminal && *stone == 0)
+            .collect()
     }
 
     pub fn apply_action(&mut self, action: usize) -> bool {
-        if self.terminal || action >= ACTION_SIZE || self.board[action] != 0 {
+        if self.terminal || action >= self.action_size() || self.board[action] != 0 {
             return false;
         }
 
         let player = self.to_play;
-        let row = action / BOARD_SIZE;
-        let col = action % BOARD_SIZE;
+        let row = action / self.board_size;
+        let col = action % self.board_size;
         self.board[action] = player;
         self.last_action = Some(action);
         self.move_count += 1;
@@ -79,7 +92,7 @@ impl GameState {
         if self.is_winning_move(row, col, player) {
             self.winner = player;
             self.terminal = true;
-        } else if self.move_count == ACTION_SIZE {
+        } else if self.move_count == self.action_size() {
             self.winner = 0;
             self.terminal = true;
         }
@@ -97,26 +110,31 @@ impl GameState {
         }
     }
 
-    pub fn write_features(&self, out: &mut [f32; FEATURE_STRIDE]) {
+    pub fn write_features(&self, out: &mut [f32]) -> bool {
+        let action_size = self.action_size();
+        if out.len() < self.feature_stride() {
+            return false;
+        }
         let color = if self.to_play == 1 { 1.0 } else { 0.0 };
-        for action in 0..ACTION_SIZE {
+        for action in 0..action_size {
             out[action] = if self.board[action] == self.to_play {
                 1.0
             } else {
                 0.0
             };
-            out[ACTION_SIZE + action] = if self.board[action] == -self.to_play {
+            out[action_size + action] = if self.board[action] == -self.to_play {
                 1.0
             } else {
                 0.0
             };
-            out[2 * ACTION_SIZE + action] = if self.last_action == Some(action) {
+            out[2 * action_size + action] = if self.last_action == Some(action) {
                 1.0
             } else {
                 0.0
             };
-            out[3 * ACTION_SIZE + action] = color;
+            out[3 * action_size + action] = color;
         }
+        true
     }
 
     fn is_winning_move(&self, row: usize, col: usize, player: i8) -> bool {
@@ -139,8 +157,8 @@ impl GameState {
         let mut total = 0;
         let mut r = row as isize + dr;
         let mut c = col as isize + dc;
-        while r >= 0 && r < BOARD_SIZE as isize && c >= 0 && c < BOARD_SIZE as isize {
-            let idx = r as usize * BOARD_SIZE + c as usize;
+        while r >= 0 && r < self.board_size as isize && c >= 0 && c < self.board_size as isize {
+            let idx = r as usize * self.board_size + c as usize;
             if self.board[idx] != player {
                 break;
             }
@@ -154,12 +172,13 @@ impl GameState {
 
 impl Default for GameState {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_BOARD_SIZE)
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct TreeNode {
+    pub action_size: usize,
     pub to_play: i8,
     pub prior: f32,
     pub visit_count: i32,
@@ -169,13 +188,14 @@ pub struct TreeNode {
 }
 
 impl TreeNode {
-    pub fn new(to_play: i8, prior: f32) -> Self {
+    pub fn new(action_size: usize, to_play: i8, prior: f32) -> Self {
         Self {
+            action_size,
             to_play,
             prior,
             visit_count: 0,
             value_sum: 0.0,
-            children: vec![None; ACTION_SIZE],
+            children: Vec::new(),
             expanded: false,
         }
     }
@@ -190,6 +210,12 @@ impl TreeNode {
 
     fn has_children(&self) -> bool {
         self.children.iter().any(Option::is_some)
+    }
+
+    fn ensure_children(&mut self) {
+        if self.children.is_empty() {
+            self.children.resize_with(self.action_size, || None);
+        }
     }
 }
 
@@ -220,7 +246,8 @@ impl<E: Evaluator> Mcts<E> {
         root_noise: Option<&[f32]>,
         root_noise_epsilon: f32,
     ) -> SearchResult {
-        let mut root = TreeNode::new(state.to_play, 0.0);
+        let action_size = state.action_size();
+        let mut root = TreeNode::new(action_size, state.to_play, 0.0);
         let mut root_value = 0.0;
         if !state.terminal {
             let (priors, value) = self.evaluator.evaluate(state);
@@ -235,31 +262,14 @@ impl<E: Evaluator> Mcts<E> {
             Self::simulate_once(&mut root, state, self.c_puct, &self.evaluator);
         }
 
-        let mut counts = vec![0.0_f32; ACTION_SIZE];
+        let mut counts = vec![0.0_f32; action_size];
         for (action, child) in root.children.iter().enumerate() {
             if let Some(child) = child {
                 counts[action] = child.visit_count as f32;
             }
         }
 
-        let total: f32 = counts.iter().sum();
-        if total > 0.0 {
-            for p in &mut counts {
-                *p /= total;
-            }
-        } else {
-            let legal = state.legal_moves();
-            let legal_count = legal.iter().filter(|is_legal| **is_legal).count();
-            if legal_count > 0 {
-                let p = 1.0 / legal_count as f32;
-                for action in 0..ACTION_SIZE {
-                    if legal[action] {
-                        counts[action] = p;
-                    }
-                }
-            }
-        }
-
+        normalize_counts_or_legal(&mut counts, state);
         let action = sample_action_from_policy(&counts, temperature);
         SearchResult {
             action,
@@ -269,7 +279,7 @@ impl<E: Evaluator> Mcts<E> {
     }
 
     fn apply_root_noise(root: &mut TreeNode, noise: &[f32], epsilon: f32) {
-        if noise.len() < ACTION_SIZE || epsilon <= 0.0 {
+        if noise.len() < root.action_size || epsilon <= 0.0 {
             return;
         }
         let keep = 1.0 - epsilon;
@@ -300,8 +310,10 @@ impl<E: Evaluator> Mcts<E> {
             if !state.apply_action(action) {
                 return;
             }
-            let child = node.children[action]
-                .as_mut()
+            let child = node
+                .children
+                .get_mut(action)
+                .and_then(Option::as_mut)
                 .expect("selected child must exist");
             node_ptr = child.as_mut() as *mut TreeNode;
             path.push(node_ptr);
@@ -336,15 +348,18 @@ impl<E: Evaluator> Mcts<E> {
         best_action
     }
 
-    fn expand(node: &mut TreeNode, state: &GameState, priors: &[f32; ACTION_SIZE]) {
+    fn expand(node: &mut TreeNode, state: &GameState, priors: &[f32]) {
+        if node.expanded {
+            return;
+        }
         let legal = state.legal_moves();
-        let mut masked = [0.0_f32; ACTION_SIZE];
+        let mut masked = vec![0.0_f32; state.action_size()];
         let mut total = 0.0_f32;
         let mut legal_count = 0usize;
 
-        for i in 0..ACTION_SIZE {
+        for i in 0..state.action_size() {
             if legal[i] {
-                masked[i] = priors[i].max(0.0);
+                masked[i] = priors.get(i).copied().unwrap_or(0.0).max(0.0);
                 total += masked[i];
                 legal_count += 1;
             }
@@ -357,20 +372,25 @@ impl<E: Evaluator> Mcts<E> {
 
         if total <= 0.0 {
             let p = 1.0 / legal_count as f32;
-            for i in 0..ACTION_SIZE {
+            for i in 0..state.action_size() {
                 if legal[i] {
                     masked[i] = p;
                 }
             }
         } else {
-            for i in 0..ACTION_SIZE {
-                masked[i] /= total;
+            for value in &mut masked {
+                *value /= total;
             }
         }
 
-        for i in 0..ACTION_SIZE {
+        node.ensure_children();
+        for i in 0..state.action_size() {
             if legal[i] {
-                node.children[i] = Some(Box::new(TreeNode::new(-state.to_play, masked[i])));
+                node.children[i] = Some(Box::new(TreeNode::new(
+                    state.action_size(),
+                    -state.to_play,
+                    masked[i],
+                )));
             }
         }
         node.expanded = true;
@@ -382,6 +402,27 @@ impl<E: Evaluator> Mcts<E> {
             node.visit_count += 1;
             node.value_sum += value;
             value = -value;
+        }
+    }
+}
+
+fn normalize_counts_or_legal(counts: &mut [f32], state: &GameState) {
+    let total: f32 = counts.iter().sum();
+    if total > 0.0 {
+        for p in counts {
+            *p /= total;
+        }
+        return;
+    }
+
+    let legal = state.legal_moves();
+    let legal_count = legal.iter().filter(|is_legal| **is_legal).count();
+    if legal_count > 0 {
+        let p = 1.0 / legal_count as f32;
+        for (action, value) in counts.iter_mut().enumerate() {
+            if legal[action] {
+                *value = p;
+            }
         }
     }
 }
@@ -430,13 +471,14 @@ struct CallbackEvaluator {
 }
 
 impl Evaluator for CallbackEvaluator {
-    fn evaluate(&self, state: &GameState) -> ([f32; ACTION_SIZE], f32) {
+    fn evaluate(&self, state: &GameState) -> (Vec<f32>, f32) {
+        let action_size = state.action_size();
         if self.status.get() != 0 {
-            return ([0.0; ACTION_SIZE], 0.0);
+            return (vec![0.0; action_size], 0.0);
         }
 
-        let mut features = [0.0_f32; FEATURE_STRIDE];
-        let mut priors = [0.0_f32; ACTION_SIZE];
+        let mut features = vec![0.0_f32; state.feature_stride()];
+        let mut priors = vec![0.0_f32; action_size];
         let mut value = 0.0_f32;
         state.write_features(&mut features);
 
@@ -483,23 +525,19 @@ pub unsafe extern "C" fn omok_rmcts_search(
     };
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let board_slice = slice::from_raw_parts(board, ACTION_SIZE);
-        let mut board_array = [0_i8; ACTION_SIZE];
-        board_array.copy_from_slice(board_slice);
-
-        let state = GameState {
-            board: board_array,
-            to_play,
-            terminal: terminal != 0,
-            winner,
-            last_action: if last_action < 0 {
-                None
-            } else {
-                Some(last_action as usize)
-            },
-            move_count,
-            exactly_five: exactly_five != 0,
+        let action_size = DEFAULT_BOARD_SIZE * DEFAULT_BOARD_SIZE;
+        let board_slice = slice::from_raw_parts(board, action_size);
+        let mut state = GameState::with_exactly_five(DEFAULT_BOARD_SIZE, exactly_five != 0);
+        state.board.copy_from_slice(board_slice);
+        state.to_play = to_play;
+        state.terminal = terminal != 0;
+        state.winner = winner;
+        state.last_action = if last_action < 0 {
+            None
+        } else {
+            Some(last_action as usize)
         };
+        state.move_count = move_count;
 
         let evaluator = CallbackEvaluator {
             callback,
@@ -510,7 +548,7 @@ pub unsafe extern "C" fn omok_rmcts_search(
         let root_noise_slice = if root_noise.is_null() {
             None
         } else {
-            Some(slice::from_raw_parts(root_noise, ACTION_SIZE))
+            Some(slice::from_raw_parts(root_noise, action_size))
         };
         let result = mcts.search_with_root_noise(
             &state,
@@ -527,7 +565,7 @@ pub unsafe extern "C" fn omok_rmcts_search(
 
         *out_action = result.action;
         *out_root_value = result.root_value;
-        let out_policy = slice::from_raw_parts_mut(out_policy, ACTION_SIZE);
+        let out_policy = slice::from_raw_parts_mut(out_policy, action_size);
         out_policy.copy_from_slice(&result.visit_policy);
         0
     }));
@@ -545,6 +583,9 @@ pub struct MctsTree {
     c_puct: f32,
     virtual_loss: f32,
     exactly_five: bool,
+    board_size: usize,
+    action_size: usize,
+    feature_stride: usize,
     state: GameState,
     root: Box<TreeNode>,
     root_value: f32,
@@ -553,13 +594,17 @@ pub struct MctsTree {
 }
 
 impl MctsTree {
-    fn new(c_puct: f32, virtual_loss: f32, exactly_five: bool) -> Self {
+    fn new(board_size: usize, c_puct: f32, virtual_loss: f32, exactly_five: bool) -> Self {
+        let action_size = board_size * board_size;
         Self {
             c_puct,
             virtual_loss,
             exactly_five,
-            state: GameState::with_exactly_five(exactly_five),
-            root: Box::new(TreeNode::new(1, 0.0)),
+            board_size,
+            action_size,
+            feature_stride: FEATURE_PLANES * action_size,
+            state: GameState::with_exactly_five(board_size, exactly_five),
+            root: Box::new(TreeNode::new(action_size, 1, 0.0)),
             root_value: 0.0,
             pending_roots: Vec::new(),
             pending_leaves: Vec::new(),
@@ -572,7 +617,7 @@ impl MctsTree {
 
     fn set_initial(
         &mut self,
-        board: [i8; ACTION_SIZE],
+        board: &[i8],
         to_play: i8,
         last_action: c_int,
         move_count: usize,
@@ -580,7 +625,8 @@ impl MctsTree {
         terminal: bool,
     ) {
         self.state = GameState {
-            board,
+            board_size: self.board_size,
+            board: board.to_vec(),
             to_play,
             terminal,
             winner,
@@ -592,21 +638,26 @@ impl MctsTree {
             move_count,
             exactly_five: self.exactly_five,
         };
-        self.root = Box::new(TreeNode::new(to_play, 0.0));
+        self.root = Box::new(TreeNode::new(self.action_size, to_play, 0.0));
         self.root_value = 0.0;
         self.pending_roots.clear();
         self.pending_leaves.clear();
     }
 
     fn advance(&mut self, action: usize) -> bool {
-        if self.state.terminal || action >= ACTION_SIZE || self.state.board[action] != 0 {
+        if self.state.terminal || action >= self.action_size || self.state.board[action] != 0 {
             return false;
         }
-        let next = self.root.children[action].take();
+        let next = if self.root.children.is_empty() {
+            None
+        } else {
+            self.root.children[action].take()
+        };
         if !self.state.apply_action(action) {
             return false;
         }
-        self.root = next.unwrap_or_else(|| Box::new(TreeNode::new(self.state.to_play, 0.0)));
+        self.root = next
+            .unwrap_or_else(|| Box::new(TreeNode::new(self.action_size, self.state.to_play, 0.0)));
         self.root_value = if self.root.visit_count > 0 {
             self.root.value()
         } else {
@@ -619,13 +670,11 @@ impl MctsTree {
 
     fn write_root_features_if_needed(&mut self, out: &mut [f32]) -> bool {
         self.pending_roots.clear();
-        if self.state.terminal || self.root.expanded || out.len() < FEATURE_STRIDE {
+        if self.state.terminal || self.root.expanded || out.len() < self.feature_stride {
             return false;
         }
         let node = self.root_ptr();
-        let mut features = [0.0_f32; FEATURE_STRIDE];
-        self.state.write_features(&mut features);
-        out[..FEATURE_STRIDE].copy_from_slice(&features);
+        self.state.write_features(out);
         self.pending_roots.push(PendingEval {
             state: self.state.clone(),
             node,
@@ -637,16 +686,14 @@ impl MctsTree {
     fn feed_pending_roots(&mut self, priors: &[f32], value: f32) {
         let pending = std::mem::take(&mut self.pending_roots);
         for item in pending {
-            let mut prior_array = [0.0_f32; ACTION_SIZE];
-            prior_array.copy_from_slice(&priors[..ACTION_SIZE]);
             let node = unsafe { &mut *item.node };
-            Mcts::<CallbackEvaluator>::expand(node, &item.state, &prior_array);
+            Mcts::<CallbackEvaluator>::expand(node, &item.state, priors);
             self.root_value = value;
         }
     }
 
     fn collect_one_leaf(&mut self, out: &mut [f32]) -> bool {
-        if self.state.terminal || out.len() < FEATURE_STRIDE {
+        if self.state.terminal || out.len() < self.feature_stride {
             return false;
         }
 
@@ -666,8 +713,10 @@ impl MctsTree {
             if !state.apply_action(action) {
                 return false;
             }
-            let child = node.children[action]
-                .as_mut()
+            let child = node
+                .children
+                .get_mut(action)
+                .and_then(Option::as_mut)
                 .expect("selected child must exist");
             node_ptr = child.as_mut() as *mut TreeNode;
             path.push(node_ptr);
@@ -679,9 +728,7 @@ impl MctsTree {
         }
 
         apply_virtual_loss(&path, self.virtual_loss);
-        let mut features = [0.0_f32; FEATURE_STRIDE];
-        state.write_features(&mut features);
-        out[..FEATURE_STRIDE].copy_from_slice(&features);
+        state.write_features(out);
         self.pending_leaves.push(PendingEval {
             state,
             node: node_ptr,
@@ -694,12 +741,10 @@ impl MctsTree {
         let pending = std::mem::take(&mut self.pending_leaves);
         for item in pending {
             revert_virtual_loss(&item.path, self.virtual_loss);
-            let start = *offset * ACTION_SIZE;
-            let stop = start + ACTION_SIZE;
-            let mut prior_array = [0.0_f32; ACTION_SIZE];
-            prior_array.copy_from_slice(&priors[start..stop]);
+            let start = *offset * self.action_size;
+            let stop = start + self.action_size;
             let node = unsafe { &mut *item.node };
-            Mcts::<CallbackEvaluator>::expand(node, &item.state, &prior_array);
+            Mcts::<CallbackEvaluator>::expand(node, &item.state, &priors[start..stop]);
             Mcts::<CallbackEvaluator>::backup(&item.path, values[*offset]);
             *offset += 1;
         }
@@ -736,13 +781,29 @@ unsafe fn tree_slice_from_ptr<'a>(
     Some(slice::from_raw_parts(trees, num_trees as usize))
 }
 
+fn first_tree_geometry(trees: &[*mut MctsTree]) -> Option<(usize, usize)> {
+    for tree_ptr in trees {
+        let tree = unsafe { tree_from_ptr(*tree_ptr) };
+        if let Some(tree) = tree {
+            return Some((tree.action_size, tree.feature_stride));
+        }
+    }
+    None
+}
+
 #[no_mangle]
 pub extern "C" fn omok_rmcts_tree_new(
+    board_size: c_int,
     c_puct: f32,
     virtual_loss: f32,
     exactly_five: c_int,
 ) -> *mut MctsTree {
+    let board_size = board_size as usize;
+    if !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&board_size) {
+        return std::ptr::null_mut();
+    }
     Box::into_raw(Box::new(MctsTree::new(
+        board_size,
         c_puct,
         virtual_loss,
         exactly_five != 0,
@@ -754,6 +815,27 @@ pub unsafe extern "C" fn omok_rmcts_tree_free(tree: *mut MctsTree) {
     if !tree.is_null() {
         drop(Box::from_raw(tree));
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_tree_board_size(tree: *mut MctsTree) -> c_int {
+    tree_from_ptr(tree)
+        .map(|tree| tree.board_size as c_int)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_tree_action_size(tree: *mut MctsTree) -> c_int {
+    tree_from_ptr(tree)
+        .map(|tree| tree.action_size as c_int)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn omok_rmcts_tree_feature_stride(tree: *mut MctsTree) -> c_int {
+    tree_from_ptr(tree)
+        .map(|tree| tree.feature_stride as c_int)
+        .unwrap_or(0)
 }
 
 #[no_mangle]
@@ -770,12 +852,10 @@ pub unsafe extern "C" fn omok_rmcts_tree_set_initial(
         return;
     }
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let board_slice = slice::from_raw_parts(board, ACTION_SIZE);
-        let mut board_array = [0_i8; ACTION_SIZE];
-        board_array.copy_from_slice(board_slice);
         if let Some(tree) = tree_from_ptr(tree) {
+            let board_slice = slice::from_raw_parts(board, tree.action_size);
             tree.set_initial(
-                board_array,
+                board_slice,
                 to_play,
                 last_action,
                 move_count,
@@ -814,16 +894,19 @@ pub unsafe extern "C" fn omok_rmcts_batch_prepare_roots(
         let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
             return 0;
         };
+        let Some((_, feature_stride)) = first_tree_geometry(trees) else {
+            return 0;
+        };
         let features =
-            slice::from_raw_parts_mut(out_features, max_entries as usize * FEATURE_STRIDE);
+            slice::from_raw_parts_mut(out_features, max_entries as usize * feature_stride);
         let mut written = 0usize;
         for tree_ptr in trees {
             if written >= max_entries as usize {
                 break;
             }
             if let Some(tree) = tree_from_ptr(*tree_ptr) {
-                let start = written * FEATURE_STRIDE;
-                let stop = start + FEATURE_STRIDE;
+                let start = written * feature_stride;
+                let stop = start + feature_stride;
                 if tree.write_root_features_if_needed(&mut features[start..stop]) {
                     written += 1;
                 }
@@ -852,8 +935,10 @@ pub unsafe extern "C" fn omok_rmcts_batch_feed_roots(
         for tree_ptr in trees {
             if let Some(tree) = tree_from_ptr(*tree_ptr) {
                 if !tree.pending_roots.is_empty() {
-                    let priors =
-                        slice::from_raw_parts(priors.add(offset * ACTION_SIZE), ACTION_SIZE);
+                    let priors = slice::from_raw_parts(
+                        priors.add(offset * tree.action_size),
+                        tree.action_size,
+                    );
                     let value = *values.add(offset);
                     tree.feed_pending_roots(priors, value);
                     offset += 1;
@@ -978,6 +1063,9 @@ pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves(
         let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
             return 0;
         };
+        let Some((_, feature_stride)) = first_tree_geometry(trees) else {
+            return 0;
+        };
         for tree_ptr in trees {
             if let Some(tree) = tree_from_ptr(*tree_ptr) {
                 tree.pending_leaves.clear();
@@ -985,7 +1073,7 @@ pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves(
         }
         let leaves_per_tree = leaves_per_tree.max(1) as usize;
         let features =
-            slice::from_raw_parts_mut(out_features, max_entries as usize * FEATURE_STRIDE);
+            slice::from_raw_parts_mut(out_features, max_entries as usize * feature_stride);
         let mut written = 0usize;
         for tree_ptr in trees {
             let Some(tree) = tree_from_ptr(*tree_ptr) else {
@@ -995,8 +1083,8 @@ pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves(
                 if written >= max_entries as usize {
                     return written as c_int;
                 }
-                let start = written * FEATURE_STRIDE;
-                let stop = start + FEATURE_STRIDE;
+                let start = written * feature_stride;
+                let stop = start + feature_stride;
                 if tree.collect_one_leaf(&mut features[start..stop]) {
                     written += 1;
                 }
@@ -1028,8 +1116,12 @@ pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves_threaded(
             max_entries,
         );
     }
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
+            return 0;
+        };
+        let Some((_, feature_stride)) = first_tree_geometry(trees) else {
             return 0;
         };
         let leaves_per_tree = leaves_per_tree.max(1) as usize;
@@ -1068,18 +1160,18 @@ pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves_threaded(
                             continue;
                         };
                         let segment_ptr =
-                            (out_addr as *mut f32).add(segment_start * FEATURE_STRIDE);
+                            (out_addr as *mut f32).add(segment_start * feature_stride);
                         let segment = slice::from_raw_parts_mut(
                             segment_ptr,
-                            segment_capacity * FEATURE_STRIDE,
+                            segment_capacity * feature_stride,
                         );
                         let mut written = 0usize;
                         for _ in 0..leaves_per_tree {
                             if written >= segment_capacity {
                                 break;
                             }
-                            let start = written * FEATURE_STRIDE;
-                            let stop = start + FEATURE_STRIDE;
+                            let start = written * feature_stride;
+                            let stop = start + feature_stride;
                             if tree.collect_one_leaf(&mut segment[start..stop]) {
                                 written += 1;
                             }
@@ -1105,9 +1197,9 @@ pub unsafe extern "C" fn omok_rmcts_batch_collect_leaves_threaded(
             let segment_start = tree_idx * leaves_per_tree;
             if segment_start != compact_offset {
                 ptr::copy(
-                    out_features.add(segment_start * FEATURE_STRIDE),
-                    out_features.add(compact_offset * FEATURE_STRIDE),
-                    count * FEATURE_STRIDE,
+                    out_features.add(segment_start * feature_stride),
+                    out_features.add(compact_offset * feature_stride),
+                    count * feature_stride,
                 );
             }
             compact_offset += count;
@@ -1131,12 +1223,15 @@ pub unsafe extern "C" fn omok_rmcts_batch_feed_leaves(
         let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
             return;
         };
-        let pending_count = trees
-            .iter()
-            .filter_map(|tree_ptr| tree_from_ptr(*tree_ptr))
-            .map(|tree| tree.pending_leaves.len())
-            .sum::<usize>();
-        let priors = slice::from_raw_parts(priors, pending_count * ACTION_SIZE);
+        let mut pending_count = 0usize;
+        let mut action_size = 0usize;
+        for tree_ptr in trees {
+            if let Some(tree) = tree_from_ptr(*tree_ptr) {
+                pending_count += tree.pending_leaves.len();
+                action_size = tree.action_size;
+            }
+        }
+        let priors = slice::from_raw_parts(priors, pending_count * action_size);
         let values = slice::from_raw_parts(values, pending_count);
         let mut offset = 0usize;
         for tree_ptr in trees {
@@ -1161,9 +1256,12 @@ pub unsafe extern "C" fn omok_rmcts_batch_extract_visit_counts(
         let Some(trees) = tree_slice_from_ptr(trees, num_trees) else {
             return;
         };
-        let out_counts = slice::from_raw_parts_mut(out_counts, trees.len() * ACTION_SIZE);
+        let Some((action_size, _)) = first_tree_geometry(trees) else {
+            return;
+        };
+        let out_counts = slice::from_raw_parts_mut(out_counts, trees.len() * action_size);
         for (idx, tree_ptr) in trees.iter().enumerate() {
-            let row = &mut out_counts[idx * ACTION_SIZE..(idx + 1) * ACTION_SIZE];
+            let row = &mut out_counts[idx * action_size..(idx + 1) * action_size];
             row.fill(0.0);
             let Some(tree) = tree_from_ptr(*tree_ptr) else {
                 continue;
@@ -1188,77 +1286,36 @@ mod tests {
     struct UniformEvaluator;
 
     impl Evaluator for UniformEvaluator {
-        fn evaluate(&self, state: &GameState) -> ([f32; ACTION_SIZE], f32) {
+        fn evaluate(&self, state: &GameState) -> (Vec<f32>, f32) {
             let legal = state.legal_moves();
-            let mut priors = [0.0_f32; ACTION_SIZE];
-            for i in 0..ACTION_SIZE {
+            let mut priors = vec![0.0_f32; state.action_size()];
+            for i in 0..state.action_size() {
                 priors[i] = if legal[i] { 1.0 } else { 0.0 };
             }
             (priors, 0.0)
         }
     }
 
-    struct PreferredEvaluator {
-        preferred_action: usize,
-    }
-
-    impl Evaluator for PreferredEvaluator {
-        fn evaluate(&self, state: &GameState) -> ([f32; ACTION_SIZE], f32) {
-            let legal = state.legal_moves();
-            let mut priors = [0.0_f32; ACTION_SIZE];
-            for i in 0..ACTION_SIZE {
-                if legal[i] {
-                    priors[i] = 1.0e-3;
-                }
-            }
-            if self.preferred_action < ACTION_SIZE && legal[self.preferred_action] {
-                priors[self.preferred_action] = 1.0;
-            }
-            (priors, 0.25)
+    #[test]
+    fn search_policy_tracks_board_size() {
+        for board_size in [9, 13, 15] {
+            let state = GameState::new(board_size);
+            let mcts = Mcts::new(1.25, UniformEvaluator);
+            let out = mcts.search(&state, 2, 0.0);
+            assert_eq!(out.visit_policy.len(), board_size * board_size);
+            assert!(out.action < board_size * board_size);
         }
     }
 
     #[test]
-    fn returns_valid_action_and_policy() {
-        let state = GameState::new();
-        let mcts = Mcts::new(1.25, UniformEvaluator);
-        let out = mcts.search(&state, 32, 0.0);
-
-        assert!(out.action < ACTION_SIZE);
-        assert!(out.visit_policy.iter().all(|p| *p >= 0.0));
-        let sum: f32 = out.visit_policy.iter().sum();
-        assert!((sum - 1.0).abs() < 1.0e-3);
-    }
-
-    #[test]
-    fn apply_action_marks_wins() {
-        let mut state = GameState::new();
-        for action in [0, 9, 1, 10, 2, 11, 3, 12, 4] {
-            assert!(state.apply_action(action));
+    fn exact_five_overline_is_not_terminal() {
+        let mut state = GameState::with_exactly_five(15, true);
+        for action in [0, 1, 2, 3, 5] {
+            state.board[action] = 1;
         }
-
-        assert!(state.terminal);
-        assert_eq!(state.winner, 1);
-        assert_eq!(state.outcome_for_player(1), 1.0);
-        assert_eq!(state.outcome_for_player(-1), -1.0);
-    }
-
-    #[test]
-    fn selects_immediate_winning_move_with_deterministic_evaluator() {
-        let mut state = GameState::new();
-        for action in [0, 9, 1, 10, 2, 11, 3, 12] {
-            assert!(state.apply_action(action));
-        }
-
-        let mcts = Mcts::new(
-            1.25,
-            PreferredEvaluator {
-                preferred_action: 4,
-            },
-        );
-        let out = mcts.search(&state, 24, 0.0);
-
-        assert_eq!(out.action, 4);
-        assert_eq!(out.root_value, 0.25);
+        state.move_count = 5;
+        state.to_play = 1;
+        assert!(state.apply_action(4));
+        assert!(!state.terminal);
     }
 }

@@ -18,7 +18,6 @@ from .mcts import MCTS
 from .openings import sample_balanced_openings
 
 
-BOARD_SIZE = 9
 C_PUCT = 1.0
 LEAVES_PER_BATCH = 8
 
@@ -60,6 +59,11 @@ class OnnxEvaluator:
     def evaluate(self, states: list[GameState]) -> tuple[np.ndarray, np.ndarray]:
         features = np.ascontiguousarray(states_to_feature_planes(states))
         logits, values = self.session.run(None, {self.input_name: features})
+        expected_actions = states[0].action_size
+        if logits.shape[-1] != expected_actions:
+            raise ValueError(
+                f"model policy size {logits.shape[-1]} does not match board action size {expected_actions}"
+            )
         return _softmax(logits).astype(np.float32), values.astype(np.float32)
 
 
@@ -69,9 +73,11 @@ class OmokGUI:
         model_path: str | None,
         device: str,
         simulations: int,
+        board_size: int = 9,
         human_color: int = -1,
         seed: int = 0,
     ) -> None:
+        self.board_size = int(board_size)
         self.model_path = model_path
         self.simulations = simulations
         self.evaluator: OnnxEvaluator | None = None
@@ -79,7 +85,7 @@ class OmokGUI:
         if model_path:
             self.evaluator = OnnxEvaluator(model_path, device)
             self.provider = self.evaluator.provider
-        self.state = GameState(BOARD_SIZE, False)
+        self.state = GameState(self.board_size, False)
         self.current_opening: list[int] = []
         self.position_version = 0
         self.ai_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="omok-ai")
@@ -90,7 +96,7 @@ class OmokGUI:
         self.seed = int(seed)
 
         pygame.init()
-        pygame.display.set_caption("coolrl 9x9 Omok")
+        pygame.display.set_caption(f"coolrl {self.board_size}x{self.board_size} Omok")
         flags = pygame.RESIZABLE | pygame.DOUBLEBUF | pygame.SCALED
         self.screen = pygame.display.set_mode(DEFAULT_WINDOW_SIZE, flags, vsync=1)
         self.clock = pygame.time.Clock()
@@ -132,16 +138,16 @@ class OmokGUI:
             sidebar_y = board_y + self.board_px + margin
             self.sidebar_width = max(220, width - margin * 2)
 
-        self.cell = self.board_px / (BOARD_SIZE - 1)
+        self.cell = self.board_px / (self.board_size - 1)
         self.board_origin = (int(board_x), int(board_y))
         self.sidebar_origin = (int(sidebar_x), int(sidebar_y))
 
     def _reset_state(self, apply_opening: bool) -> None:
-        self.state = GameState(BOARD_SIZE, False)
+        self.state = GameState(self.board_size, False)
         self.current_opening = []
         if apply_opening:
             rng = random.Random(self.seed)
-            openings = sample_balanced_openings(BOARD_SIZE, 32, rng)
+            openings = sample_balanced_openings(self.board_size, 32, rng)
             if openings:
                 for action in openings[0]:
                     if self.state.terminal:
@@ -320,14 +326,14 @@ class OmokGUI:
         black = (0, 0, 0)
         white = (245, 245, 245)
 
-        for i in range(BOARD_SIZE):
+        for i in range(self.board_size):
             x = int(ox + i * self.cell)
             y = int(oy + i * self.cell)
             pygame.draw.line(self.screen, white, (ox, y), (board_end_x, y), 1)
             pygame.draw.line(self.screen, white, (x, oy), (x, board_end_y), 1)
 
-        for row in range(BOARD_SIZE):
-            for col in range(BOARD_SIZE):
+        for row in range(self.board_size):
+            for col in range(self.board_size):
                 stone = self.state.board[row, col]
                 if stone == 0:
                     continue
@@ -340,7 +346,7 @@ class OmokGUI:
                     pygame.draw.circle(self.screen, white, (x, y), stone_radius)
 
         if self.state.last_action is not None:
-            row, col = divmod(self.state.last_action, BOARD_SIZE)
+            row, col = divmod(self.state.last_action, self.board_size)
             x = int(ox + col * self.cell)
             y = int(oy + row * self.cell)
             marker = black if self.state.board[row, col] == -1 else white
@@ -355,6 +361,7 @@ class OmokGUI:
             "",
             f"Provider: {self.provider}",
             f"Human: {'Black' if self.human_color == 1 else 'White'}",
+            f"Board: {self.board_size}x{self.board_size}",
             f"Turn: {'Black' if self.state.to_play == 1 else 'White'}",
             f"Moves: {self.state.move_count}",
             f"Simulations: {self.simulations}",
@@ -470,14 +477,14 @@ class OmokGUI:
             return None
         col = round((x - ox) / self.cell)
         row = round((y - oy) / self.cell)
-        if not (0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE):
+        if not (0 <= row < self.board_size and 0 <= col < self.board_size):
             return None
-        return row * BOARD_SIZE + col
+        return row * self.board_size + col
 
 
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="coolrl Omok: play against a trained AI on a 9×9 board.",
+        description="coolrl Omok: play against a trained AI.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -504,6 +511,13 @@ def build_argparser() -> argparse.ArgumentParser:
              "Higher values improve move quality but increase think time.",
     )
     parser.add_argument(
+        "--board-size",
+        type=int,
+        default=9,
+        metavar="N",
+        help="Board size used by the ONNX model and local game state.",
+    )
+    parser.add_argument(
         "--human-color",
         type=str,
         default="white",
@@ -528,6 +542,7 @@ def main() -> None:
         model_path=args.model,
         device=args.device,
         simulations=args.simulations,
+        board_size=args.board_size,
         human_color=human_color,
         seed=args.seed,
     )

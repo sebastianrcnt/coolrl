@@ -25,6 +25,11 @@ omok = [
     "safetensors>=0.4.5",
     "torch>=2.0.0",
 ]
+omok-tensorrt = [
+    "coolrl[omok]",
+    "onnx>=1.16.0; platform_system != 'Darwin'",
+    "tensorrt>=10.0.0; platform_system != 'Darwin'",
+]
 lost-cities = [
     "numpy>=1.26.0",
     "pyyaml>=6.0.3",

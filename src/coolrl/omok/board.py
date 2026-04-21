@@ -20,12 +20,16 @@ class GameState:
     terminal: bool = False
 
     def __post_init__(self) -> None:
-        if self.board_size != 9:
-            raise ValueError("coolrl.omok is intentionally fixed to 9x9")
+        self.board_size = int(self.board_size)
+        if self.board_size < 5:
+            raise ValueError("board_size must be at least 5")
         if self.board is None:
             self.board = np.zeros((self.board_size, self.board_size), dtype=np.int8)
         else:
             self.board = np.asarray(self.board, dtype=np.int8)
+            expected_shape = (self.board_size, self.board_size)
+            if self.board.shape != expected_shape:
+                raise ValueError(f"board shape must be {expected_shape}, got {self.board.shape}")
 
     @property
     def action_size(self) -> int:
@@ -113,4 +117,3 @@ class GameState:
             r += dr
             c += dc
         return total
-

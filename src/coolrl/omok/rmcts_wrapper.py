@@ -11,8 +11,16 @@ from .evaluator import Evaluator
 from .mcts_types import SearchResult
 
 
-ACTION_SIZE = 81
-FEATURE_STRIDE = 4 * ACTION_SIZE
+def _batch_geometry(states: list[GameState]) -> tuple[int, int]:
+    if not states:
+        raise ValueError("states must not be empty")
+    board_size = states[0].board_size
+    for state in states:
+        if state.board_size != board_size:
+            raise ValueError("Rust MCTS backend requires one board_size per search_batch")
+    return board_size, board_size * board_size
+
+
 _TREE_P = ctypes.c_void_p
 _TREE_ARRAY = np.ctypeslib.ndpointer(dtype=np.uintp, ndim=1, flags="C_CONTIGUOUS")
 _FLOAT_ARRAY = np.ctypeslib.ndpointer(dtype=np.float32, flags="C_CONTIGUOUS")
@@ -48,10 +56,16 @@ def _load_library() -> ctypes.CDLL:
 
 
 _LIB = _load_library()
-_LIB.omok_rmcts_tree_new.argtypes = [ctypes.c_float, ctypes.c_float, ctypes.c_int]
+_LIB.omok_rmcts_tree_new.argtypes = [ctypes.c_int, ctypes.c_float, ctypes.c_float, ctypes.c_int]
 _LIB.omok_rmcts_tree_new.restype = _TREE_P
 _LIB.omok_rmcts_tree_free.argtypes = [_TREE_P]
 _LIB.omok_rmcts_tree_free.restype = None
+_LIB.omok_rmcts_tree_board_size.argtypes = [_TREE_P]
+_LIB.omok_rmcts_tree_board_size.restype = ctypes.c_int
+_LIB.omok_rmcts_tree_action_size.argtypes = [_TREE_P]
+_LIB.omok_rmcts_tree_action_size.restype = ctypes.c_int
+_LIB.omok_rmcts_tree_feature_stride.argtypes = [_TREE_P]
+_LIB.omok_rmcts_tree_feature_stride.restype = ctypes.c_int
 _LIB.omok_rmcts_tree_set_initial.argtypes = [
     _TREE_P,
     _INT8_ARRAY,
@@ -122,12 +136,15 @@ class TreeNode:
         if not ptr:
             raise RuntimeError("failed to allocate Rust MCTS tree")
         self.ptr = int(ptr)
+        self.board_size = int(_LIB.omok_rmcts_tree_board_size(self.ptr))
+        self.action_size = int(_LIB.omok_rmcts_tree_action_size(self.ptr))
         self.children = _ChildrenProxy(self)
 
     @classmethod
     def from_state(cls, state: GameState, c_puct: float, virtual_loss: float) -> "TreeNode":
         node = cls(
             _LIB.omok_rmcts_tree_new(
+                int(state.board_size),
                 ctypes.c_float(c_puct),
                 ctypes.c_float(virtual_loss),
                 int(state.exactly_five),
@@ -137,6 +154,11 @@ class TreeNode:
         return node
 
     def reset(self, state: GameState) -> None:
+        if state.board_size != self.board_size:
+            raise ValueError(
+                f"cannot reset {self.board_size}x{self.board_size} Rust tree with "
+                f"{state.board_size}x{state.board_size} state"
+            )
         board = np.ascontiguousarray(state.board.reshape(-1), dtype=np.int8)
         _LIB.omok_rmcts_tree_set_initial(
             self.ptr,
@@ -191,6 +213,7 @@ class MCTS:
         roots: list[TreeNode | None] | None = None,
         leaves_per_batch: int = 1,
     ) -> list[SearchResult]:
+        board_size, action_size = _batch_geometry(states)
         if len(temperature) != len(states):
             raise ValueError("temperature and states must have the same length")
         if roots is None:
@@ -198,13 +221,14 @@ class MCTS:
         if len(roots) != len(states):
             raise ValueError("roots and states must have the same length")
 
-        active_roots = [
-            root if root is not None else TreeNode.from_state(state, self.c_puct, self.virtual_loss)
-            for state, root in zip(states, roots, strict=True)
-        ]
+        active_roots = []
+        for state, root in zip(states, roots, strict=True):
+            if root is not None and root.board_size != state.board_size:
+                raise ValueError("Rust MCTS root board_size does not match state board_size")
+            active_roots.append(root if root is not None else TreeNode.from_state(state, self.c_puct, self.virtual_loss))
         tree_ptrs = np.ascontiguousarray([root.ptr for root in active_roots], dtype=np.uintp)
 
-        root_features = np.empty((len(states), 4, 9, 9), dtype=np.float32)
+        root_features = np.empty((len(states), 4, board_size, board_size), dtype=np.float32)
         root_count = _LIB.omok_rmcts_batch_prepare_roots(
             tree_ptrs,
             len(active_roots),
@@ -213,6 +237,8 @@ class MCTS:
         )
         if root_count:
             priors, values = self.evaluator.evaluate_features(root_features[:root_count])
+            if priors.shape != (root_count, action_size):
+                raise ValueError(f"evaluator priors shape {priors.shape} does not match {(root_count, action_size)}")
             _LIB.omok_rmcts_batch_feed_roots(
                 tree_ptrs,
                 len(active_roots),
@@ -231,7 +257,7 @@ class MCTS:
         while sims_done < num_simulations:
             leaves_this_round = min(leaves_per_batch, num_simulations - sims_done)
             max_leaves = len(active_roots) * leaves_this_round
-            leaf_features = np.empty((max_leaves, 4, 9, 9), dtype=np.float32)
+            leaf_features = np.empty((max_leaves, 4, board_size, board_size), dtype=np.float32)
             if self.search_threads > 1:
                 leaf_count = _LIB.omok_rmcts_batch_collect_leaves_threaded(
                     tree_ptrs,
@@ -253,6 +279,8 @@ class MCTS:
             if not leaf_count:
                 continue
             priors, values = self.evaluator.evaluate_features(leaf_features[:leaf_count])
+            if priors.shape != (leaf_count, action_size):
+                raise ValueError(f"evaluator priors shape {priors.shape} does not match {(leaf_count, action_size)}")
             _LIB.omok_rmcts_batch_feed_leaves(
                 tree_ptrs,
                 len(active_roots),
@@ -260,7 +288,7 @@ class MCTS:
                 np.ascontiguousarray(values, dtype=np.float32),
             )
 
-        counts = np.empty((len(active_roots), ACTION_SIZE), dtype=np.float32)
+        counts = np.empty((len(active_roots), action_size), dtype=np.float32)
         _LIB.omok_rmcts_batch_extract_visit_counts(tree_ptrs, len(active_roots), counts)
         results: list[SearchResult] = []
         for idx, (state, root, temp) in enumerate(zip(states, active_roots, temperature, strict=True)):

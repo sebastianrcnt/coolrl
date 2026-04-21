@@ -1,3 +1,4 @@
+# 15x15 preset for the unified coolrl.omok trainer.
 experiment_name: omok15_smoke
 seed: 3
 max_iterations: 1

@@ -6,7 +6,10 @@
 #include <stddef.h>
 
 typedef struct {
-  int8_t board[CMCTS_ACTION_SIZE];
+  int board_size;
+  int action_size;
+  int feature_stride;
+  int8_t board[CMCTS_MAX_ACTION_SIZE];
   int to_play;
   int last_action;
   int move_count;
@@ -16,12 +19,13 @@ typedef struct {
 } CmctsState;
 
 typedef struct Node {
+  int action_size;
   int to_play;
   float prior;
   int visit_count;
   float value_sum;
   int expanded;
-  struct Node *children[CMCTS_ACTION_SIZE];
+  struct Node **children;
 } Node;
 
 typedef struct NodeBlock NodeBlock;
@@ -29,7 +33,7 @@ typedef struct NodeBlock NodeBlock;
 typedef struct {
   CmctsState state;
   Node *node;
-  Node *path[CMCTS_ACTION_SIZE + 1];
+  Node *path[CMCTS_MAX_ACTION_SIZE + 1];
   int path_len;
 } PendingEval;
 
@@ -37,6 +41,9 @@ struct MctsTree {
   float c_puct;
   float virtual_loss;
   int exactly_five;
+  int board_size;
+  int action_size;
+  int feature_stride;
   CmctsState state;
   Node *root;
   float root_value;
@@ -51,14 +58,15 @@ struct MctsTree {
   int next_node_block_capacity;
 };
 
-void state_init(CmctsState *state, const int8_t *board, int to_play, int last_action,
-                int move_count, int winner, int terminal, int exactly_five);
+int state_init(CmctsState *state, int board_size, const int8_t *board, int to_play, int last_action,
+               int move_count, int winner, int terminal, int exactly_five);
 int state_apply_action(CmctsState *state, int action);
 int state_legal_count(const CmctsState *state);
 void state_write_features(const CmctsState *state, float *out);
 float state_outcome_for_player(const CmctsState *state, int player);
 
 Node *tree_node_new(MctsTree *tree, int to_play, float prior);
+Node *tree_clone_subtree_to_new_arena(MctsTree *tree, const Node *source);
 void tree_reset_nodes(MctsTree *tree);
 void tree_free_nodes(MctsTree *tree);
 int node_child_count(const Node *node);

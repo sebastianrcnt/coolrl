@@ -10,9 +10,6 @@ import matplotlib.ticker as ticker
 import numpy as np
 
 
-UNIFORM_POLICY_ENTROPY_9X9 = float(np.log(81))
-
-
 def load_metrics(path: Path) -> list[dict]:
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -38,6 +35,29 @@ def normalized_iteration_rows(rows: list[dict]) -> list[dict]:
             without_iteration.append(row)
 
     return without_iteration + [by_iteration[i] for i in sorted(by_iteration)]
+
+
+def infer_board_size(rows: Sequence[dict], metrics_path: Path) -> int:
+    for row in reversed(rows):
+        raw = row.get("board_size")
+        if raw is not None:
+            return int(raw)
+
+    for sidecar_name in ("latest.json", "best.json", "iter_0000.json"):
+        sidecar_path = metrics_path.parent / sidecar_name
+        if not sidecar_path.exists():
+            continue
+        try:
+            payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        config = payload.get("config", {})
+        rules = config.get("rules", {})
+        raw = rules.get("board_size")
+        if raw is not None:
+            return int(raw)
+
+    return 9
 
 
 def field(rows: Sequence[dict], key: str, default: float = float("nan")) -> list[float]:
@@ -101,13 +121,15 @@ def plot_curve(ax, x_values: Sequence[float], y_values: Sequence[float], **kwarg
     ax.plot(x, y, **kwargs)
 
 
-def iteration_tick_steps(axes: Sequence) -> tuple[int, int]:
+def iteration_tick_steps(axes: Sequence) -> tuple[float, float]:
     max_iter = 0.0
     for ax in axes:
         right = ax.get_xlim()[1]
         if np.isfinite(right):
             max_iter = max(max_iter, right)
 
+    if max_iter <= 20:
+        return 1, 0.5
     if max_iter <= 100:
         return 10, 2
     if max_iter <= 300:
@@ -124,7 +146,7 @@ def finish_figure(fig, axes: Sequence, output_path: Path | None, show: bool) -> 
         ax.xaxis.set_minor_locator(ticker.MultipleLocator(minor_step))
         ax.tick_params(axis="x", which="both", labelbottom=True)
         ax.grid(True, which="minor", axis="x", alpha=0.12)
-    plt.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
 
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,6 +164,8 @@ def plot_overview(rows: list[dict], metrics_path: Path, output_path: Path | None
     iters = field(rows, "iteration")
     elapsed = field(rows, "elapsed_hours", 0.0)
     t_iters = field(trained, "iteration")
+    board_size = infer_board_size(rows, metrics_path)
+    uniform_policy_entropy = float(np.log(board_size * board_size))
 
     best_iter = rows[-1].get("best_iteration", 0)
     best_win_rate = rows[-1].get("best_arena_win_rate", 0.0)
@@ -163,7 +187,13 @@ def plot_overview(rows: list[dict], metrics_path: Path, output_path: Path | None
 
     ax = axes[1]
     plot_curve(ax, t_iters, field(trained, "policy_loss"), color="darkorange", linewidth=1.5, label="policy")
-    ax.axhline(UNIFORM_POLICY_ENTROPY_9X9, color="gray", linestyle="--", linewidth=0.8, label="uniform ln(81)")
+    ax.axhline(
+        uniform_policy_entropy,
+        color="gray",
+        linestyle="--",
+        linewidth=0.8,
+        label=f"uniform ln({board_size * board_size})",
+    )
     ax.set_title("Policy Loss")
     ax.set_xlabel("iteration")
     ax.legend(fontsize=8)

@@ -51,9 +51,12 @@ class TorchResidualBlock(torch_nn.Module):
 class PolicyValueNet(torch_nn.Module):
     def __init__(self, board_size: int, cfg: NetworkConfig) -> None:
         super().__init__()
-        if board_size != 9:
-            raise ValueError("PolicyValueNet is fixed to 9x9")
+        board_size = int(board_size)
+        if board_size < 5:
+            raise ValueError("board_size must be at least 5")
+        self.board_size = board_size
         action_size = board_size * board_size
+        self.action_size = action_size
         channels = cfg.channels
 
         self.stem_conv = torch_nn.Conv2d(cfg.input_planes, channels, kernel_size=3, padding=1, bias=False)
@@ -72,6 +75,18 @@ class PolicyValueNet(torch_nn.Module):
         self.value_fc2 = torch_nn.Linear(cfg.value_hidden, 1)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # ONNX/TensorRT export traces this method with a fixed board size, and
+        # tracing a Python shape comparison emits a noisy TracerWarning. Keep
+        # the runtime guard for normal eager calls, but skip it during export.
+        if (
+            not torch.jit.is_tracing()
+            and not torch.onnx.is_in_onnx_export()
+            and x.shape[-2:] != (self.board_size, self.board_size)
+        ):
+            raise ValueError(
+                f"expected input spatial shape {(self.board_size, self.board_size)}, "
+                f"got {tuple(x.shape[-2:])}"
+            )
         x = torch_f.relu(self.stem_bn(self.stem_conv(x)))
         for block in self.tower:
             x = block(x)

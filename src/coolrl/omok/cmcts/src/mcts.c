@@ -9,7 +9,7 @@
 static void collect_one_leaf(MctsTree *tree, float *out_features, int *written, int max_entries) {
   CmctsState state = tree->state;
   Node *node = tree->root;
-  Node *path[CMCTS_ACTION_SIZE + 1];
+  Node *path[CMCTS_MAX_ACTION_SIZE + 1];
   int path_len = 0;
   path[path_len++] = node;
 
@@ -18,6 +18,7 @@ static void collect_one_leaf(MctsTree *tree, float *out_features, int *written, 
     node = node_select_child(node, tree->c_puct, &action);
     if (!node || action < 0) return;
     if (!state_apply_action(&state, action)) return;
+    if (path_len >= CMCTS_MAX_ACTION_SIZE + 1) return;
     path[path_len++] = node;
   }
 
@@ -31,7 +32,7 @@ static void collect_one_leaf(MctsTree *tree, float *out_features, int *written, 
     revert_virtual_loss(path, path_len, tree->virtual_loss);
     return;
   }
-  state_write_features(&state, out_features + (size_t)(*written) * CMCTS_FEATURE_STRIDE);
+  state_write_features(&state, out_features + (size_t)(*written) * tree->feature_stride);
   *written += 1;
 }
 
@@ -78,7 +79,7 @@ static void collect_tree_range(CollectWorkerArgs *args) {
     }
 
     int written = 0;
-    float *segment = args->out_features + (size_t)segment_start * CMCTS_FEATURE_STRIDE;
+    float *segment = args->out_features + (size_t)segment_start * tree->feature_stride;
     for (int leaf = 0; leaf < args->leaves_per_tree; leaf++) {
       collect_one_leaf(tree, segment, &written, segment_capacity);
     }
@@ -154,14 +155,21 @@ int mcts_batch_collect_leaves_threaded(MctsTree *const *trees,
   }
 
   int compact_offset = 0;
+  int feature_stride = 0;
+  for (int i = 0; i < num_trees; i++) {
+    if (trees[i]) {
+      feature_stride = trees[i]->feature_stride;
+      break;
+    }
+  }
   for (int tree_idx = 0; tree_idx < num_trees; tree_idx++) {
     int count = counts[tree_idx];
     if (count <= 0) continue;
     int segment_start = tree_idx * leaves_per_tree;
     if (segment_start != compact_offset) {
-      memmove(out_features + (size_t)compact_offset * CMCTS_FEATURE_STRIDE,
-              out_features + (size_t)segment_start * CMCTS_FEATURE_STRIDE,
-              (size_t)count * CMCTS_FEATURE_STRIDE * sizeof(float));
+      memmove(out_features + (size_t)compact_offset * feature_stride,
+              out_features + (size_t)segment_start * feature_stride,
+              (size_t)count * feature_stride * sizeof(float));
     }
     compact_offset += count;
   }
@@ -184,7 +192,7 @@ void mcts_batch_feed_leaves(MctsTree *const *trees,
     for (int j = 0; j < tree->pending_leaf_count; j++) {
       PendingEval *pending = &tree->pending_leaves[j];
       revert_virtual_loss(pending->path, pending->path_len, tree->virtual_loss);
-      node_expand(tree, pending->node, &pending->state, priors + (size_t)offset * CMCTS_ACTION_SIZE);
+      node_expand(tree, pending->node, &pending->state, priors + (size_t)offset * tree->action_size);
       backup(pending->path, pending->path_len, values[offset]);
       offset += 1;
     }

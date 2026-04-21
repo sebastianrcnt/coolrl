@@ -84,6 +84,54 @@ Backend kernel behavior, JIT behavior, and search-quality tradeoffs differ.
 For non-CUDA profiles, sweep 8/16/32/64 and compare duration plus arena
 quality metrics.
 
+## Optional TensorRT Evaluator
+
+The TensorRT evaluator accelerates only neural network inference inside
+self-play and arena MCTS. It does not replace PyTorch training, optimizer
+updates, replay sampling, or MCTS tree traversal.
+
+Enable it explicitly on NVIDIA CUDA systems with:
+
+```yaml
+selfplay:
+  evaluator_backend: tensorrt
+```
+
+Or allow CUDA-only auto-selection when TensorRT is installed:
+
+```yaml
+selfplay:
+  evaluator_backend: auto
+```
+
+`auto` falls back to the torch evaluator when CUDA or TensorRT is unavailable.
+Apple Silicon and Metal/MPS runs should keep using the torch evaluator; TensorRT
+is not a Metal backend and is not imported on non-CUDA paths.
+
+Install the optional dependencies with:
+
+```bash
+uv sync --extra omok-tensorrt
+```
+
+NVIDIA's pip package defaults to the latest CUDA major variant supported by
+TensorRT. If a machine needs a specific CUDA major version, install the matching
+NVIDIA package manually, for example `tensorrt-cu12` or `tensorrt-cu13`.
+
+Useful environment knobs:
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `COOLRL_TENSORRT_MAX_BATCH` | `4096` | maximum dynamic profile batch |
+| `COOLRL_TENSORRT_OPT_BATCH` | `384` | optimization profile batch |
+| `COOLRL_TENSORRT_FP16` | `1` | enable FP16 tactics when the GPU supports them |
+| `COOLRL_TENSORRT_WORKSPACE_MB` | `2048` | TensorRT builder workspace limit |
+| `COOLRL_TENSORRT_CACHE` | `~/.cache/coolrl/tensorrt` | engine cache directory; set `0` for a temp cache |
+
+Candidate-model engines can be expensive because the candidate weights change
+after every optimizer phase. Best-model engines amortize better because the best
+model changes only on promotion.
+
 ## Why Not `num_workers: auto`
 
 Short benchmark configs compared CUDA single-process self-play against

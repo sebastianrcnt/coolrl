@@ -1,5 +1,8 @@
-# 15x15 CUDA preset for the unified coolrl.omok trainer.
-experiment_name: omok15_full_cuda
+# 15x15 CUDA training profile using the unified coolrl.omok trainer.
+#
+# Based on the 9x9 configs/omok_full_cuda.yaml profile, scaled for the larger
+# 15x15 action space and writing checkpoints to the external HDD.
+experiment_name: omok15_full_cuda_hdd
 seed: 29
 max_hours: null
 device: CUDA
@@ -67,7 +70,7 @@ arena:
   bootstrap_min_white_win_rate: 0.1667
 
 checkpoint:
-  directory: checkpoints/omok15_full_cuda
+  directory: /mnt/2tbhdd/coolrl-checkpoints/omok15_full_cuda_hdd
   save_every_iteration: true
   save_iteration_interval: 1
   progress_interval_batches: 2

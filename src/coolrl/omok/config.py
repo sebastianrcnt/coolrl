@@ -14,8 +14,9 @@ class RulesConfig:
     exactly_five: bool = False
 
     def __post_init__(self) -> None:
-        if self.board_size != 9:
-            raise ValueError("only 9x9 Omok is supported in coolrl.omok")
+        self.board_size = int(self.board_size)
+        if self.board_size < 5:
+            raise ValueError("rules.board_size must be at least 5")
 
 
 @dataclass(slots=True)
@@ -115,7 +116,7 @@ class CheckpointConfig:
 
 @dataclass(slots=True)
 class RunConfig:
-    experiment_name: str = "omok_9x9"
+    experiment_name: str = "omok"
     seed: int = 17
     max_hours: float | None = None
     max_iterations: int | None = None
@@ -150,7 +151,7 @@ def _to_dataclass(cfg: dict[str, Any]) -> RunConfig:
     raw_max_hours = cfg.get("max_hours", None)
     raw_max_iterations = cfg.get("max_iterations", None)
     return RunConfig(
-        experiment_name=str(cfg.get("experiment_name", "omok_9x9")),
+        experiment_name=str(cfg.get("experiment_name", "omok")),
         seed=int(cfg.get("seed", 17)),
         max_hours=None if raw_max_hours is None else float(raw_max_hours),
         max_iterations=None if raw_max_iterations is None else int(raw_max_iterations),
