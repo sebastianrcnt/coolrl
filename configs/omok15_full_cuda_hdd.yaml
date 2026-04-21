@@ -19,7 +19,7 @@ network:
   se_reduction: 8
 
 selfplay:
-  mcts_backend: c
+  mcts_backend: rust
   evaluator_backend: torch
   games_per_iteration: 48
   batch_size: 48

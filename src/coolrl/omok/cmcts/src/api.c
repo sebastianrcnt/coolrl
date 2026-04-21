@@ -58,20 +58,24 @@ void mcts_tree_set_initial(MctsTree *tree,
 int mcts_tree_advance(MctsTree *tree, int action) {
   if (!tree || tree->state.terminal || !tree->root) return 0;
   if (action < 0 || action >= tree->action_size || tree->state.board[action] != 0) return 0;
-  Node *next = NULL;
-  next = tree->root->children[action];
-  tree->root->children[action] = NULL;
-  if (!state_apply_action(&tree->state, action)) {
-    tree->root = next ? next : tree_node_new(tree, tree->state.to_play, 0.0f);
-    return 0;
+  Node *next = tree->root->children ? tree->root->children[action] : NULL;
+  if (!state_apply_action(&tree->state, action)) return 0;
+  if (next) {
+    tree->root = tree_clone_subtree_to_new_arena(tree, next);
+    if (!tree->root) {
+      tree_reset_nodes(tree);
+      tree->root = tree_node_new(tree, tree->state.to_play, 0.0f);
+    }
+  } else {
+    tree_reset_nodes(tree);
+    tree->root = tree_node_new(tree, tree->state.to_play, 0.0f);
   }
-  tree->root = next ? next : tree_node_new(tree, tree->state.to_play, 0.0f);
   tree->root_value = tree->root && tree->root->visit_count > 0
                          ? tree->root->value_sum / (float)tree->root->visit_count
                          : 0.0f;
   tree_clear_pending_roots(tree);
   tree_clear_pending_leaves(tree);
-  return 1;
+  return tree->root != NULL;
 }
 
 int mcts_batch_prepare_roots(MctsTree *const *trees,
@@ -118,6 +122,7 @@ void mcts_batch_apply_root_noise(MctsTree *const *trees,
   for (int i = 0; i < num_trees; i++) {
     MctsTree *tree = trees[i];
     if (!tree || tree->state.terminal || !tree->root) continue;
+    if (!tree->root->children) continue;
     int offset = offsets[i];
     int local = 0;
     for (int action = 0; action < tree->action_size; action++) {
@@ -162,6 +167,7 @@ void mcts_batch_extract_visit_counts(MctsTree *const *trees, int num_trees, floa
     float *row = out_counts + (size_t)i * action_size;
     for (int action = 0; action < action_size; action++) row[action] = 0.0f;
     if (!tree || tree->state.terminal || !tree->root) continue;
+    if (!tree->root->children) continue;
     for (int action = 0; action < tree->action_size; action++) {
       Node *child = tree->root->children[action];
       if (child) row[action] = (float)child->visit_count;

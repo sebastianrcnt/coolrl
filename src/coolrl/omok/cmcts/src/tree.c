@@ -47,9 +47,61 @@ Node *tree_node_new(MctsTree *tree, int to_play, float prior) {
   node->action_size = tree->action_size;
   node->to_play = to_play;
   node->prior = prior;
+  return node;
+}
+
+static Node *tree_clone_subtree(MctsTree *tree, const Node *source) {
+  if (!tree || !source) return NULL;
+  Node *node = tree_node_new(tree, source->to_play, source->prior);
+  if (!node) return NULL;
+  node->visit_count = source->visit_count;
+  node->value_sum = source->value_sum;
+  node->expanded = source->expanded;
+  if (!source->children) return node;
+
   node->children = (Node **)calloc((size_t)tree->action_size, sizeof(Node *));
   if (!node->children) return NULL;
+  for (int action = 0; action < source->action_size; action++) {
+    if (!source->children[action]) continue;
+    node->children[action] = tree_clone_subtree(tree, source->children[action]);
+    if (!node->children[action]) return NULL;
+  }
   return node;
+}
+
+Node *tree_clone_subtree_to_new_arena(MctsTree *tree, const Node *source) {
+  if (!tree || !source) return NULL;
+
+  NodeBlock *old_node_blocks = tree->node_blocks;
+  NodeBlock *old_active_node_block = tree->active_node_block;
+  int old_next_node_block_capacity = tree->next_node_block_capacity;
+
+  tree->node_blocks = NULL;
+  tree->active_node_block = NULL;
+  tree->next_node_block_capacity = INITIAL_NODE_BLOCK_CAPACITY;
+
+  Node *cloned = tree_clone_subtree(tree, source);
+  NodeBlock *new_node_blocks = tree->node_blocks;
+  NodeBlock *new_active_node_block = tree->active_node_block;
+  int new_next_node_block_capacity = tree->next_node_block_capacity;
+
+  if (!cloned) {
+    tree_reset_nodes(tree);
+    tree->node_blocks = old_node_blocks;
+    tree->active_node_block = old_active_node_block;
+    tree->next_node_block_capacity = old_next_node_block_capacity;
+    return NULL;
+  }
+
+  tree->node_blocks = old_node_blocks;
+  tree->active_node_block = old_active_node_block;
+  tree->next_node_block_capacity = old_next_node_block_capacity;
+  tree_reset_nodes(tree);
+
+  tree->node_blocks = new_node_blocks;
+  tree->active_node_block = new_active_node_block;
+  tree->next_node_block_capacity = new_next_node_block_capacity;
+  return cloned;
 }
 
 void tree_reset_nodes(MctsTree *tree) {
@@ -75,7 +127,7 @@ void tree_free_nodes(MctsTree *tree) {
 
 int node_child_count(const Node *node) {
   int count = 0;
-  if (!node) return 0;
+  if (!node || !node->children) return 0;
   for (int i = 0; i < node->action_size; i++) {
     if (node->children[i]) count += 1;
   }
@@ -84,7 +136,7 @@ int node_child_count(const Node *node) {
 
 int node_legal_actions(const Node *node, int32_t *out_actions) {
   int count = 0;
-  if (!node) return 0;
+  if (!node || !node->children) return 0;
   for (int i = 0; i < node->action_size; i++) {
     if (node->children[i]) {
       if (out_actions) out_actions[count] = i;
@@ -95,6 +147,7 @@ int node_legal_actions(const Node *node, int32_t *out_actions) {
 }
 
 Node *node_select_child(const Node *node, float c_puct, int *out_action) {
+  if (!node || !node->children) return NULL;
   float sqrt_visits = sqrtf((float)(node->visit_count > 1 ? node->visit_count : 1));
   float best_score = -INFINITY;
   Node *best_child = NULL;
@@ -129,6 +182,10 @@ void node_expand(MctsTree *tree, Node *node, const CmctsState *state, const floa
   if (legal_count == 0) {
     node->expanded = 1;
     return;
+  }
+  if (!node->children) {
+    node->children = (Node **)calloc((size_t)tree->action_size, sizeof(Node *));
+    if (!node->children) return;
   }
   for (int i = 0; i < state->action_size; i++) {
     if (state->board[i] != 0) continue;

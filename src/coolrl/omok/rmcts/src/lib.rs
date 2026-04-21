@@ -195,7 +195,7 @@ impl TreeNode {
             prior,
             visit_count: 0,
             value_sum: 0.0,
-            children: vec![None; action_size],
+            children: Vec::new(),
             expanded: false,
         }
     }
@@ -210,6 +210,12 @@ impl TreeNode {
 
     fn has_children(&self) -> bool {
         self.children.iter().any(Option::is_some)
+    }
+
+    fn ensure_children(&mut self) {
+        if self.children.is_empty() {
+            self.children.resize_with(self.action_size, || None);
+        }
     }
 }
 
@@ -304,8 +310,10 @@ impl<E: Evaluator> Mcts<E> {
             if !state.apply_action(action) {
                 return;
             }
-            let child = node.children[action]
-                .as_mut()
+            let child = node
+                .children
+                .get_mut(action)
+                .and_then(Option::as_mut)
                 .expect("selected child must exist");
             node_ptr = child.as_mut() as *mut TreeNode;
             path.push(node_ptr);
@@ -341,6 +349,9 @@ impl<E: Evaluator> Mcts<E> {
     }
 
     fn expand(node: &mut TreeNode, state: &GameState, priors: &[f32]) {
+        if node.expanded {
+            return;
+        }
         let legal = state.legal_moves();
         let mut masked = vec![0.0_f32; state.action_size()];
         let mut total = 0.0_f32;
@@ -372,6 +383,7 @@ impl<E: Evaluator> Mcts<E> {
             }
         }
 
+        node.ensure_children();
         for i in 0..state.action_size() {
             if legal[i] {
                 node.children[i] = Some(Box::new(TreeNode::new(
@@ -636,11 +648,16 @@ impl MctsTree {
         if self.state.terminal || action >= self.action_size || self.state.board[action] != 0 {
             return false;
         }
-        let next = self.root.children[action].take();
+        let next = if self.root.children.is_empty() {
+            None
+        } else {
+            self.root.children[action].take()
+        };
         if !self.state.apply_action(action) {
             return false;
         }
-        self.root = next.unwrap_or_else(|| Box::new(TreeNode::new(self.action_size, self.state.to_play, 0.0)));
+        self.root = next
+            .unwrap_or_else(|| Box::new(TreeNode::new(self.action_size, self.state.to_play, 0.0)));
         self.root_value = if self.root.visit_count > 0 {
             self.root.value()
         } else {
@@ -696,8 +713,10 @@ impl MctsTree {
             if !state.apply_action(action) {
                 return false;
             }
-            let child = node.children[action]
-                .as_mut()
+            let child = node
+                .children
+                .get_mut(action)
+                .and_then(Option::as_mut)
                 .expect("selected child must exist");
             node_ptr = child.as_mut() as *mut TreeNode;
             path.push(node_ptr);
@@ -916,7 +935,10 @@ pub unsafe extern "C" fn omok_rmcts_batch_feed_roots(
         for tree_ptr in trees {
             if let Some(tree) = tree_from_ptr(*tree_ptr) {
                 if !tree.pending_roots.is_empty() {
-                    let priors = slice::from_raw_parts(priors.add(offset * tree.action_size), tree.action_size);
+                    let priors = slice::from_raw_parts(
+                        priors.add(offset * tree.action_size),
+                        tree.action_size,
+                    );
                     let value = *values.add(offset);
                     tree.feed_pending_roots(priors, value);
                     offset += 1;

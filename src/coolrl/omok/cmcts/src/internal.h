@@ -66,6 +66,7 @@ void state_write_features(const CmctsState *state, float *out);
 float state_outcome_for_player(const CmctsState *state, int player);
 
 Node *tree_node_new(MctsTree *tree, int to_play, float prior);
+Node *tree_clone_subtree_to_new_arena(MctsTree *tree, const Node *source);
 void tree_reset_nodes(MctsTree *tree);
 void tree_free_nodes(MctsTree *tree);
 int node_child_count(const Node *node);
