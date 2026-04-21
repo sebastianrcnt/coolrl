@@ -472,23 +472,12 @@ def build_figure(
             "lower is better",
         ),
     ]
-    sidebar_x0 = 0.55
-    sidebar_x1 = 1.0
     # Right-edge anchors for each column (flush with chart right edge).
-    col_right_xs = (0.78, sidebar_x1)
+    col_right_xs = (0.78, 1.0)
     row_positions = (
         # (label_y, value_y, descriptor_y)
         (0.93, 0.70, 0.52),
         (0.36, 0.13, -0.05),
-    )
-    divider_y = 0.43
-    ax_h.plot(
-        [sidebar_x0, sidebar_x1],
-        [divider_y, divider_y],
-        color=theme.grid,
-        linewidth=0.7,
-        transform=ax_h.transAxes,
-        zorder=3,
     )
     for i, (label, val, _accent, desc) in enumerate(kpis):
         col = i % 2
