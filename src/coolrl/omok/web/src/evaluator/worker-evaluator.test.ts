@@ -25,6 +25,17 @@ vi.mock("./worker?worker", () => {
           this.onmessage?.({
             data: { id: message.id, ok: true, backend: message.backend ?? "wasm" },
           } as MessageEvent);
+        } else if (message.type === "evaluate") {
+          this.onmessage?.({
+            data: {
+              id: message.id,
+              ok: true,
+              policy: new Float32Array([1]).buffer,
+              values: new Float32Array([0]).buffer,
+              batch: 1,
+              actionSize: 1,
+            },
+          } as MessageEvent);
         } else if (message.type === "dispose") {
           this.onmessage?.({
             data: { id: message.id, ok: true, disposed: true },
@@ -82,5 +93,20 @@ describe("WorkerEvaluator.dispose", () => {
     sent.length = 0;
     await expect(evaluator.dispose()).resolves.toBeUndefined();
     expect(sent.filter((m) => m.type === "dispose")).toHaveLength(0);
+  });
+});
+
+describe("WorkerEvaluator.healthCheck", () => {
+  it("sends a lightweight evaluate request", async () => {
+    sent.length = 0;
+    const { WorkerEvaluator } = await import("./worker-evaluator");
+    const buf = new ArrayBuffer(16);
+    const evaluator = await WorkerEvaluator.fromArrayBuffer(buf, 15);
+
+    sent.length = 0;
+    await evaluator.healthCheck();
+
+    expect(sent.filter((m) => m.type === "evaluate")).toHaveLength(1);
+    await evaluator.dispose();
   });
 });
