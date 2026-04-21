@@ -21,3 +21,5 @@ exports
 
 # Rust-generated files
 **/target/
+src/coolrl/omok/web/dist/
+src/coolrl/omok/web/node_modules/
