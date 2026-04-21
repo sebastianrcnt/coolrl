@@ -75,7 +75,14 @@ class PolicyValueNet(torch_nn.Module):
         self.value_fc2 = torch_nn.Linear(cfg.value_hidden, 1)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        if x.shape[-2:] != (self.board_size, self.board_size):
+        # ONNX/TensorRT export traces this method with a fixed board size, and
+        # tracing a Python shape comparison emits a noisy TracerWarning. Keep
+        # the runtime guard for normal eager calls, but skip it during export.
+        if (
+            not torch.jit.is_tracing()
+            and not torch.onnx.is_in_onnx_export()
+            and x.shape[-2:] != (self.board_size, self.board_size)
+        ):
             raise ValueError(
                 f"expected input spatial shape {(self.board_size, self.board_size)}, "
                 f"got {tuple(x.shape[-2:])}"
