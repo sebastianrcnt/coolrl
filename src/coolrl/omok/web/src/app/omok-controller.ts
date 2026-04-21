@@ -75,6 +75,17 @@ export interface OmokControllerOptions {
 
 type Cleanup = () => void;
 
+// Turn a thrown value into a short suffix suitable for a status-chip error
+// message. Empty string if the error has nothing useful to say. We cap the
+// length aggressively because status chips get squeezed on narrow phones.
+function errorChipDetail(err: unknown, maxChars = 50): string {
+  const raw = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const trimmed = raw.trim().replace(/\s+/g, " ");
+  if (!trimmed) return "";
+  const clipped = trimmed.length > maxChars ? `${trimmed.slice(0, maxChars - 1)}…` : trimmed;
+  return ` · ${clipped}`;
+}
+
 export class OmokController {
   private readonly dom: DomRefs;
   private readonly boardSize: number;
@@ -340,7 +351,7 @@ export class OmokController {
       logError("OmokController", "ensureEvaluatorReady.failed", err);
       this.setBusy(false);
       this.statusPresenter.flash(
-        `${backendChoiceLabel(this.backendChoice)} 준비 실패`,
+        `${backendChoiceLabel(this.backendChoice)} 준비 실패${errorChipDetail(err)}`,
         "error",
         8000
       );
@@ -353,6 +364,17 @@ export class OmokController {
     logDebug("OmokController", "releaseEvaluatorForIdle.try");
     if (!this.env.isLowMemoryMode || !this.evaluator || this.busy) return;
     if (!this.initialSetup && !this.isHumanTurn() && !this.game.terminal) return;
+    // WebGPU/WebNN sessions are far more expensive to recreate (shader
+    // pipeline compilation + model weight re-upload) than they are to keep
+    // alive. Terminating every idle turn was designed for WASM heap relief
+    // and is net-harmful on GPU backends — each churn temporarily doubles
+    // the GPU footprint and iOS Safari has been observed to OOM-kill the
+    // tab partway through a game under this pattern.
+    const backend = this.evaluator.backend;
+    if (backend === "webgpu" || backend === "webnn") {
+      logDebug("OmokController", "releaseEvaluatorForIdle.skipGpu", { backend });
+      return;
+    }
     this.terminateEvaluator();
     this.mcts = null;
     this.aiSubtree = null;
@@ -411,7 +433,7 @@ export class OmokController {
       });
     } catch (err) {
       logError("OmokController", "fileInput.load.failed", err);
-      this.statusPresenter.flash("로드 실패", "error");
+      this.statusPresenter.flash(`로드 실패${errorChipDetail(err)}`, "error");
       this.setBusy(false);
       this.updateInfo();
     }
@@ -452,7 +474,7 @@ export class OmokController {
       logError("OmokController", "reloadModelForBackend.failed", err);
       this.setBusy(false);
       this.statusPresenter.flash(
-        `${backendChoiceLabel(this.backendChoice)} 사용 불가`,
+        `${backendChoiceLabel(this.backendChoice)} 사용 불가${errorChipDetail(err)}`,
         "error",
         8000
       );
@@ -677,7 +699,7 @@ export class OmokController {
       this.aiProgress = null;
       this.statusPresenter.clearOverride();
       this.thinkingGhosts.stop(false);
-      this.statusPresenter.flash("쿨파고 오류", "error");
+      this.statusPresenter.flash(`쿨파고 오류${errorChipDetail(err)}`, "error");
     }
     this.setBusy(false);
     this.updateInfo();
@@ -728,7 +750,7 @@ export class OmokController {
       this.statusPresenter.clearOverride();
       this.thinkingGhosts.stop(false);
       this.setBusy(false);
-      this.statusPresenter.flash("힌트 계산 실패", "error");
+      this.statusPresenter.flash(`힌트 계산 실패${errorChipDetail(err)}`, "error");
       this.scheduleEvaluatorIdleRelease();
     }
   }

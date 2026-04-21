@@ -11,6 +11,7 @@ Relevant commits:
 
 - `5687c62` — Stabilize Omok web UI for iOS Safari (WASM era, compositor pressure)
 - `d7fd988` — Reduce WebGPU memory pressure for iOS Safari (WebGPU era, inference pressure)
+- Phase 3 — Skip idle-release on WebGPU/WebNN sessions (see below)
 
 ## Phase 1 — WASM era: WebContent/compositor GPU pressure
 
@@ -175,7 +176,74 @@ Session-resident state (item 3 in the cause list) isn't addressed here
 because nothing at the app layer can. The existing idle-release path
 (`releaseEvaluatorForIdle` → `terminateEvaluator` on mobile) already
 handles this by terminating the worker when the user's turn is
-prolonged or the game ends.
+prolonged or the game ends — but see phase 3 below for why that help
+turns into harm on GPU backends.
+
+## Phase 3 — WebGPU era, revisited: idle-release churn
+
+After the phase 2 mitigations shipped, users on iOS Safari who
+explicitly selected WebGPU still reported a mid-game failure: some
+number of searches in, a red "모델 로드 실패"-class chip would appear
+and the tab would die a few seconds later. The pattern was distinct
+from phase 2 (which was a smooth cumulative death); this one hit a
+sharp cliff.
+
+### Root cause
+
+The phase 1 idle-release (`releaseEvaluatorForIdle` → `terminateEvaluator`
+on mobile, 400 ms after every AI move ends) was designed around WASM.
+Its goal was to drop retained Float32Array buffers and the worker's JS
+heap while the user thinks. Harmless for WASM, but **actively harmful
+for WebGPU**:
+
+1. Every AI turn ends with `scheduleEvaluatorIdleRelease()` queuing a
+   400 ms timer. On mobile the timer fires `worker.terminate()` — a
+   hard kill with no `session.release()` call, so ORT's GPU resource
+   cleanup falls on the driver's lazy GC path (slow on iOS Safari).
+2. On the human's next move → AI turn → `ensureEvaluatorReady`
+   rebuilds the worker from scratch. That means:
+   - Refetching the 12 MB default model via `force-cache` (which can
+     miss under iOS memory pressure, producing a "로드 실패" chip from
+     `fetchBufferFor`).
+   - Re-creating the WebGPU device and reuploading all model weights
+     to new GPUBuffers.
+   - Recompiling every operator's compute shader pipeline.
+3. Brief window where the old session's GPU state hasn't finalized and
+   the new session's is already allocated — **peak GPU footprint
+   roughly doubles** for ~100 ms per turn.
+4. Repeat 20+ times per game. iOS Safari's WebContent process loses
+   the race somewhere between turn 5 and turn 20.
+
+The chip ("WebGPU 준비 실패", "로드 실패 [...]" — phrasing varies with
+where in the reinit pipeline the failure lands) is only the first
+visible symptom. The tab death that follows is the WebContent process
+being jettisoned by the OS a few seconds later, once memory pressure
+is already past the limit.
+
+### Fix
+
+- `releaseEvaluatorForIdle` now **early-returns on WebGPU/WebNN
+  sessions**. WASM idle release still runs — that path is still net
+  positive. For GPU sessions the evaluator is kept alive across turns,
+  so the per-turn churn goes away and iOS only has to survive **one**
+  session lifetime, not twenty. Session-resident state doesn't grow
+  across turns (phase 2 dispose hooks handle that), so keeping the
+  session alive has a bounded footprint.
+
+- Error chips now append the first ~50 chars of the underlying error
+  (helper `errorChipDetail`), so future iOS incidents leave a crumb
+  trail instead of a generic "WebGPU 준비 실패" that hides the actual
+  failure mode.
+
+### Residual: clean session teardown
+
+When the user manually changes the backend (or picks a new ONNX file),
+we still call `worker.terminate()` without a preceding
+`session.release()`. That's acceptable because those are rare
+user-initiated events, not per-turn, but the cleanest fix would be a
+new `dispose` message on the worker protocol that awaits
+`InferenceSession.release()` before the worker exits. Filed as a
+follow-up.
 
 ## Layered mitigations — what is active where
 
@@ -189,7 +257,9 @@ prolonged or the game ends.
 | WebGPU/WebNN option clickable | yes | **no** | **no** |
 | Tensor dispose on run | yes (no-op on WASM) | yes | yes |
 | preferredOutputLocation=cpu | WebGPU/WebNN only | n/a (WASM) | n/a (WASM) |
-| Evaluator idle release | off | on | on |
+| Evaluator idle release (WASM session) | off | on | on |
+| Evaluator idle release (WebGPU/WebNN session) | off | **off** | **off** |
+| Error chip includes exception detail | yes | yes | yes |
 
 ## Residual risks / open items
 
