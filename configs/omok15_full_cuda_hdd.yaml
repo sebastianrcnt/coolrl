@@ -21,13 +21,13 @@ network:
 selfplay:
   mcts_backend: rust
   evaluator_backend: tensorrt
-  games_per_iteration: 48
-  batch_size: 48
+  games_per_iteration: 64
+  batch_size: 64
   num_workers: 0
   search_threads: auto
   inference_batch_size: 384
   inference_wait_ms: 2.0
-  temperature_moves: 15
+  temperature_moves: 20
   temperature_end: 0.1
   dirichlet_alpha: 0.15
   dirichlet_epsilon: 0.25
@@ -47,24 +47,24 @@ selfplay:
 
 optimization:
   batch_size: 256
-  updates_per_iteration: 128
+  updates_per_iteration: 96
   learning_rate: 0.0005
-  min_learning_rate: 0.0005
+  min_learning_rate: 0.0001
   weight_decay: 0.0001
   grad_clip: 1.0
   replay_capacity: 200000
-  warmup_games: 256
+  warmup_games: 512
   policy_loss_weight: 1.0
   value_loss_weight: 1.5
-  value_discount: 0.98
+  value_discount: 1.0
   recency_temperature: 3.0e-5
 
 arena:
-  games: 32
+  games: 48
   simulations: 400
   accept_win_rate: 0.55
   min_white_win_rate: 0.1667
-  bootstrap_games: 16
+  bootstrap_games: 24
   bootstrap_simulations: 200
   bootstrap_accept_win_rate: 0.5
   bootstrap_min_white_win_rate: 0.1667
