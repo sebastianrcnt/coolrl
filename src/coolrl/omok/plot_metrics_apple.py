@@ -394,7 +394,7 @@ def build_figure(
         moves = _easing_smooth(moves)
 
     # Layout
-    fig = plt.figure(figsize=(13, 17), facecolor=theme.bg)
+    fig = plt.figure(figsize=(13, 20.5), facecolor=theme.bg)
     gs = fig.add_gridspec(
         nrows=6,
         ncols=4,
