@@ -1,95 +1,88 @@
-# Omok Dynamic Board Size
+# 오목 다이나믹보드 사이즈
 
-`coolrl.omok` is the single Omok implementation for supported square board
-sizes. The old duplicated `coolrl.omok15` package has been retired; 15x15 runs
-now use the same trainer, feature encoder, network, checkpointing, plotting,
-web UI, GUI, Python MCTS, C MCTS, and Rust MCTS paths as 9x9.
+`coolrl.omok`은 지원되는 사각형 보드에 대한 단일 Omok 구현입니다.
+크기. 이전에 복제된 `coolrl.omok15` 패키지는 폐기되었습니다. 15x15 실행
+이제 동일한 트레이너, 기능 인코더, 네트워크, 체크포인트, 플로팅,
+웹 UI, GUI, Python MCTS, C MCTS 및 Rust MCTS 경로는 9x9입니다.
 
-## Design
+## 디자인
 
-Board size comes from `rules.board_size` and is carried through each runtime
-surface:
-
+보드 크기는 `rules.board_size`에서 가져오며 각 런타임을 통해 전달됩니다.
+표면:
 ```text
 action = row * board_size + col
 row, col = divmod(action, board_size)
 action_size = board_size * board_size
 feature_stride = 4 * action_size
 ```
+Python 게임 상태는 `board_size >= 5`인 정사각형 보드를 허용합니다. 네이티브 C
+Rust 백엔드는 현재 5부터 19까지의 크기를 허용합니다.
+다른 컴파일 타임 포크 없이 9x9, 13x13 및 15x15를 다룹니다.
 
-The Python game state accepts square boards with `board_size >= 5`. The native C
-and Rust backends currently accept sizes from 5 through 19 inclusive, which
-covers 9x9, 13x13, and 15x15 without another compile-time fork.
+한 번의 MCTS `search_batch` 호출은 단일 보드 크기를 사용해야 합니다. 9x9와 15x15 혼합
+한 배치의 상태는 정책과
+기능 텐서 모양이 다릅니다.
 
-One MCTS `search_batch` call must use a single board size. Mixing 9x9 and 15x15
-states in one batch fails early with a clear error because the policy and
-feature tensor shapes differ.
+## MCTS 백엔드
 
-## MCTS Backends
+세 가지 백엔드 모두 동일한 Python 관련 검색 계약을 공유합니다.
 
-All three backends share the same Python-facing search contract:
+- Python MCTS는 `GameState.action_size`에서 `action_size`를 파생합니다.
+- C MCTS는 각 트리 생성 시 `board_size`를 받아 자식을 할당하고,
+  기능 및 런타임 `action_size`의 방문 횟수 저장.
+- Rust MCTS는 동일한 런타임 크기의 트리 API를 미러링하고 보드/액션을 노출합니다.
+  FFI 게터를 통한 메타데이터.
 
-- Python MCTS derives `action_size` from `GameState.action_size`.
-- C MCTS receives `board_size` when creating each tree and allocates child,
-  feature, and visit-count storage from the runtime `action_size`.
-- Rust MCTS mirrors the same runtime-sized tree API and exposes board/action
-  metadata through FFI getters.
+C 및 Rust 래퍼는 다음을 검증합니다.
 
-The C and Rust wrappers validate:
+- 배치의 모든 상태는 동일한 보드 크기를 갖습니다.
+- 재사용된 루트는 들어오는 상태 보드 크기와 일치합니다.
+- 평가자 우선 순위는 `[batch,board_size *board_size]` 형태를 갖습니다.
 
-- every state in a batch has the same board size;
-- reused roots match the incoming state board size;
-- evaluator priors have shape `[batch, board_size * board_size]`.
+이유를 밝힌 15x15 메모리 사고는 `docs/omok-mcts-memory.md`를 참조하세요.
+기본 MCTS 노드 수명 및 밀도가 높은 하위 스토리지는 확장 시 특별한 주의가 필요합니다.
+9x9에서 더 큰 보드까지.
 
-See `docs/omok-mcts-memory.md` for the 15x15 memory incident that exposed why
-native MCTS node lifetime and dense child storage need extra care when scaling
-from 9x9 to larger boards.
+## 구성
 
-## Configs
+기본 9x9 사전 설정은 그대로 유지됩니다.
 
-The default 9x9 presets remain:
+-`configs/omok_smoke.yaml`
+-`configs/omok_quick.yaml`
+-`configs/omok_full_cuda.yaml`
+-`configs/omok_full_metal.yaml`
 
-- `configs/omok_smoke.yaml`
-- `configs/omok_quick.yaml`
-- `configs/omok_full_cuda.yaml`
-- `configs/omok_full_metal.yaml`
+15x15 사전 설정은 이제 일반적인 `coolrl.omok` 구성입니다.
 
-The 15x15 presets are now ordinary `coolrl.omok` configs:
-
-- `configs/omok15_smoke.yaml`
+-`configs/omok15_smoke.yaml`
 - `configs/omok15_quick.yaml`
 - `configs/omok15_full_cuda.yaml`
 
-Run them with:
-
+다음을 사용하여 실행하세요.
 ```bash
 uv run python -m coolrl.omok.train --config configs/omok15_smoke.yaml --device CPU
 uv run python -m coolrl.omok.train --config configs/omok15_full_cuda.yaml
 ```
+체크포인트 디렉토리는 보드 크기에 따라 별도로 유지되어야 합니다. 9x9 체크포인트에는
+정책 헤드의 길이는 81이고, 15x15 체크포인트의 길이는 225입니다. 로드 중
+보드 크기가 다른 네트워크에 대한 체크포인트는 실패할 것으로 예상됩니다.
 
-Checkpoint directories must remain separate by board size. A 9x9 checkpoint has
-a policy head of length 81, while a 15x15 checkpoint has length 225; loading a
-checkpoint into a network with a different board size is expected to fail.
+## 툴링
 
-## Tooling
+ONNX 내보내기는 `cfg.rules.board_size`에서 더미 입력을 빌드합니다. 파이게임 GUI
+`--board-size`를 허용하며 브라우저 UI에는 보드 크기 선택기가 있습니다. 둘 다
+인터페이스는 로드된 모델의 정책 출력 길이가
+선택한 보드 크기.
 
-ONNX export builds the dummy input from `cfg.rules.board_size`. The Pygame GUI
-accepts `--board-size`, and the browser UI has a board-size selector. Both
-interfaces validate that the loaded model's policy output length matches the
-selected board size.
-
-Training metrics now record `board_size`. `omok-plot` uses that value, or the
-checkpoint sidecar config when needed, to draw the correct uniform policy
-entropy reference:
-
+훈련 측정항목은 이제 'board_size'를 기록합니다. 'omok-plot'은 해당 값을 사용하거나
+필요한 경우 올바른 유니폼 정책을 그리기 위한 체크포인트 사이드카 구성
+엔트로피 참조:
 ```python
 uniform_policy_entropy = np.log(board_size * board_size)
 ```
+## 다른 크기 추가
 
-## Adding Another Size
-
-For a standard square size such as 13x13, add a config with:
-
+13x13과 같은 표준 정사각형 크기의 경우 다음을 사용하여 구성을 추가하세요.
 ```yaml
 rules:
   board_size: 13
@@ -97,7 +90,6 @@ rules:
 checkpoint:
   directory: checkpoints/omok13_quick
 ```
-
-No new package or native backend fork should be needed as long as the size stays
-within the native backend limits. Add parity coverage for the new size if it
-becomes an officially maintained preset rather than an ad-hoc experiment.
+크기가 유지되는 한 새 패키지나 기본 백엔드 포크가 필요하지 않습니다.
+기본 백엔드 한도 내에서. 새 크기에 대한 패리티 적용 범위를 추가합니다.
+임시 실험이 아닌 공식적으로 유지되는 사전 설정이 됩니다.
