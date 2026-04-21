@@ -778,6 +778,19 @@ export class OmokController {
     if (this.env.isMobile && this.dom.simsSelect.value === String(DEFAULT_SIMS)) {
       this.dom.simsSelect.value = String(MOBILE_DEFAULT_SIMS);
     }
+    if (this.env.isMobile) {
+      // WebGPU/WebNN on iOS Safari OOM-kills the tab under sustained MCTS
+      // load; keep the options visible for transparency but block selection.
+      for (const option of Array.from(this.dom.backendSelect.options)) {
+        if (option.value === "webgpu" || option.value === "webnn") {
+          option.disabled = true;
+          option.title = "모바일 브라우저에서는 불안정";
+          if (!option.textContent?.includes("(모바일 불안정)")) {
+            option.textContent = `${option.textContent} (모바일 불안정)`;
+          }
+        }
+      }
+    }
   }
 
   private readSimsValue(): number {

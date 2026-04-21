@@ -77,27 +77,38 @@ class EvaluatorSession {
       featureLength: features.length,
     });
     const tensor = new ort.Tensor("float32", features, [batch, 4, this.boardSize, this.boardSize]);
-    const output = await this.session.run({ input: tensor });
-    const logits = output.policy_logits?.data;
-    const values = output.value?.data;
-    if (!logits || !values) throw new Error("missing policy_logits or value output");
-    if (logits.length !== batch * this.actionSize) {
-      throw new Error(
-        `policy size ${logits.length / batch} != action size ${this.actionSize}`
-      );
+    let output: Record<string, OrtTensor> | null = null;
+    try {
+      output = await this.session.run({ input: tensor });
+      const logits = output.policy_logits?.data;
+      const values = output.value?.data;
+      if (!logits || !values) throw new Error("missing policy_logits or value output");
+      if (logits.length !== batch * this.actionSize) {
+        throw new Error(
+          `policy size ${logits.length / batch} != action size ${this.actionSize}`
+        );
+      }
+      const policy = new Float32Array(logits.length);
+      policy.set(logits);
+      for (let b = 0; b < batch; b++) {
+        softmaxInPlace(policy, b * this.actionSize, this.actionSize);
+      }
+      const valuesOut = new Float32Array(values);
+      return {
+        policy: policy.buffer,
+        values: valuesOut.buffer,
+        batch,
+        actionSize: this.actionSize,
+      };
+    } finally {
+      // Explicitly release GPU-backed buffers on each run. On WASM these are
+      // no-ops, but iOS Safari's WebGPU EP holds tensor resources much longer
+      // than desktop Chrome and accumulated inputs/outputs cause tab death.
+      tensor.dispose?.();
+      if (output) {
+        for (const key of Object.keys(output)) output[key]?.dispose?.();
+      }
     }
-    const policy = new Float32Array(logits.length);
-    policy.set(logits);
-    for (let b = 0; b < batch; b++) {
-      softmaxInPlace(policy, b * this.actionSize, this.actionSize);
-    }
-    const valuesOut = new Float32Array(values);
-    return {
-      policy: policy.buffer,
-      values: valuesOut.buffer,
-      batch,
-      actionSize: this.actionSize,
-    };
   }
 
   private setSize(n: number): void {
@@ -130,12 +141,19 @@ class EvaluatorSession {
       executionProviders: [backend],
       graphOptimizationLevel: lowMemory ? ("basic" as const) : ("all" as const),
     };
-    if (backend !== "wasm") return options;
+    if (backend === "wasm") {
+      return {
+        ...options,
+        enableCpuMemArena: !lowMemory,
+        enableMemPattern: !lowMemory,
+        executionMode: "sequential" as const,
+      };
+    }
+    // For WebGPU/WebNN, ask ORT to copy outputs back to CPU so the GPU-side
+    // output buffers are eligible for release the moment run() resolves.
     return {
       ...options,
-      enableCpuMemArena: !lowMemory,
-      enableMemPattern: !lowMemory,
-      executionMode: "sequential" as const,
+      preferredOutputLocation: "cpu" as const,
     };
   }
 
@@ -145,7 +163,15 @@ class EvaluatorSession {
     // Color plane set to 1 so the warm-up shape matches what evaluate() feeds.
     for (let i = 0; i < this.planeSize; i++) emptyFeat[3 * this.planeSize + i] = 1.0;
     const warm = new ort.Tensor("float32", emptyFeat, [1, 4, this.boardSize, this.boardSize]);
-    await this.session!.run({ input: warm });
+    let warmOut: Record<string, OrtTensor> | null = null;
+    try {
+      warmOut = await this.session!.run({ input: warm });
+    } finally {
+      warm.dispose?.();
+      if (warmOut) {
+        for (const key of Object.keys(warmOut)) warmOut[key]?.dispose?.();
+      }
+    }
     logDebug("EvaluatorWorker", "warmUp.done");
   }
 

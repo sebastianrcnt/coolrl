@@ -1,6 +1,7 @@
 export interface OrtTensor {
   readonly data: Float32Array;
   readonly dims: readonly number[];
+  dispose?(): void;
 }
 
 export interface OrtTensorConstructor {
@@ -17,6 +18,7 @@ export interface OrtSessionOptions {
   enableCpuMemArena?: boolean;
   enableMemPattern?: boolean;
   executionMode?: "sequential" | "parallel";
+  preferredOutputLocation?: "cpu" | "gpu-buffer" | Record<string, "cpu" | "gpu-buffer">;
 }
 
 export interface OrtInferenceSessionConstructor {
