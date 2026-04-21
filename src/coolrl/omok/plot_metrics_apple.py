@@ -210,53 +210,32 @@ def gradient_fill(ax, x, y, c0: str, c1: str, alpha: float = 0.18) -> None:
     img.set_clip_path(Polygon(poly_xy, closed=True, transform=ax.transData))
 
 
-def rounded_card(
-    ax,
-    xy,
-    w,
-    h,
-    *,
-    accent: str | None = None,
-    dot_cx: float | None = None,
-    dot_cy: float | None = None,
-) -> None:
-    card = FancyBboxPatch(
-        xy,
-        w,
-        h,
-        boxstyle="round,pad=0.002,rounding_size=0.020",
-        transform=ax.transAxes,
-        facecolor="#141418",
-        edgecolor="#2d2d30",
-        linewidth=0.8,
-    )
-    ax.add_patch(card)
-    # Faint inset highlight gives the liquid-glass edge.
-    inset = FancyBboxPatch(
-        (xy[0] + 0.0015, xy[1] + 0.003),
-        w - 0.003,
-        h - 0.006,
-        boxstyle="round,pad=0,rounding_size=0.018",
-        transform=ax.transAxes,
-        facecolor="none",
-        edgecolor="#3a3a3f",
-        linewidth=0.5,
-        alpha=0.55,
-    )
-    ax.add_patch(inset)
-    if accent:
-        cx = dot_cx if dot_cx is not None else xy[0] + 0.022
-        cy = dot_cy if dot_cy is not None else xy[1] + h * 0.78
-        ax.scatter(
-            [cx],
-            [cy],
-            s=30,
-            c=accent,
-            marker="o",
-            edgecolors="none",
-            transform=ax.transAxes,
-            zorder=5,
+def _easing_smooth(y: np.ndarray, window: int = 5) -> np.ndarray:
+    """Moving-average easing for noisy curves. Preserves NaN positions."""
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+    if n < 3:
+        return y
+    w = min(window, n)
+    if w % 2 == 0:
+        w -= 1
+    if w < 3:
+        return y
+    finite_mask = np.isfinite(y)
+    if not finite_mask.any():
+        return y
+    idx = np.arange(n)
+    y_clean = y.copy()
+    if (~finite_mask).any():
+        y_clean[~finite_mask] = np.interp(
+            idx[~finite_mask], idx[finite_mask], y[finite_mask]
         )
+    pad = w // 2
+    padded = np.concatenate([y_clean[:pad][::-1], y_clean, y_clean[-pad:][::-1]])
+    kernel = np.ones(w) / w
+    smoothed = np.convolve(padded, kernel, mode="valid")
+    smoothed[~finite_mask] = np.nan
+    return smoothed
 
 
 def _format_lr(v: float, _pos: int) -> str:
@@ -280,20 +259,20 @@ def _format_lr(v: float, _pos: int) -> str:
 def panel_title(ax, title: str, subtitle: str = "") -> None:
     ax.text(
         0.0,
-        1.18,
+        1.34,
         title,
         transform=ax.transAxes,
-        fontsize=12.5,
+        fontsize=14,
         color=TEXT_PRIMARY,
         fontweight=900,
     )
     if subtitle:
         ax.text(
             0.0,
-            1.05,
+            1.18,
             subtitle,
             transform=ax.transAxes,
-            fontsize=8.5,
+            fontsize=10,
             color=TEXT_SECONDARY,
         )
 
@@ -301,7 +280,9 @@ def panel_title(ax, title: str, subtitle: str = "") -> None:
 # ---------------------------------------------------------------------------
 # Figure builder
 # ---------------------------------------------------------------------------
-def build_figure(rows: list[dict], metrics_path: Path) -> plt.Figure:
+def build_figure(
+    rows: list[dict], metrics_path: Path, *, smooth: bool = True
+) -> plt.Figure:
     configure_fonts()
 
     rows = normalize_rows(rows)
@@ -349,17 +330,26 @@ def build_figure(rows: list[dict], metrics_path: Path) -> plt.Figure:
 
     avg_iter_sec = (cur_elapsed * 3600 / cur_iter) if cur_iter else 0
 
+    if smooth:
+        # Apply easing only to noisy series; leave lr/buffer/elapsed untouched.
+        policy = _easing_smooth(policy)
+        value = _easing_smooth(value)
+        total = _easing_smooth(total)
+        arena = _easing_smooth(arena, window=7)
+        white = _easing_smooth(white, window=7)
+        moves = _easing_smooth(moves)
+
     # Layout
     fig = plt.figure(figsize=(13, 17), facecolor=BG)
     gs = fig.add_gridspec(
         nrows=6,
         ncols=4,
-        height_ratios=[0.55, 1.0, 1.0, 1.05, 1.0, 0.85],
-        hspace=0.80,
+        height_ratios=[0.85, 1.0, 1.0, 1.05, 1.0, 0.85],
+        hspace=1.0,
         wspace=0.32,
         left=0.055,
         right=0.97,
-        top=0.96,
+        top=0.97,
         bottom=0.04,
     )
 
@@ -400,49 +390,81 @@ def build_figure(rows: list[dict], metrics_path: Path) -> plt.Figure:
         transform=ax_h.transAxes,
     )
 
-    # KPI cards — liquid-glass style: soft translucent panel + tiny accent dot.
+    # KPI sidebar on the right — Apple keynote style: small qualifier, accent
+    # value, one-line descriptor. 2x2 grid with a hairline divider between rows.
     kpis = [
-        ("BEST ITER", f"{best_iter}", ACCENTS["winrate"][0]),
-        ("BEST WIN RATE", f"{best_wr * 100:.1f}%", ACCENTS["white"][0]),
-        ("POLICY LOSS", f"{cur_policy:.2f}", ACCENTS["policy"][0]),
-        ("VALUE LOSS", f"{cur_value:.2f}", ACCENTS["value"][0]),
+        (
+            "BEST ITER",
+            f"{best_iter}",
+            ACCENTS["winrate"][0],
+            f"of {cur_iter}",
+        ),
+        (
+            "BEST WIN RATE",
+            f"{best_wr * 100:.1f}%",
+            ACCENTS["white"][0],
+            "peak arena",
+        ),
+        (
+            "POLICY LOSS",
+            f"{cur_policy:.2f}",
+            ACCENTS["policy"][0],
+            f"uniform {uniform_entropy:.2f}",
+        ),
+        (
+            "VALUE LOSS",
+            f"{cur_value:.2f}",
+            ACCENTS["value"][0],
+            "lower is better",
+        ),
     ]
-    card_w = 0.165
-    card_gap = 0.014
-    card_h = 0.78
-    card_y = 0.12
-    total_w = card_w * len(kpis) + card_gap * (len(kpis) - 1)
-    start_x = 1.0 - total_w
-    for i, (label, val, accent) in enumerate(kpis):
-        x0 = start_x + i * (card_w + card_gap)
-        label_y = card_y + card_h * 0.80
-        dot_cx = x0 + 0.020
-        rounded_card(
-            ax_h,
-            (x0, card_y),
-            card_w,
-            card_h,
-            accent=accent,
-            dot_cx=dot_cx,
-            dot_cy=label_y,
-        )
+    sidebar_x0 = 0.60
+    col_xs = (sidebar_x0, (sidebar_x0 + 1.0) / 2)
+    row_positions = (
+        # (label_y, value_y, descriptor_y)
+        (0.92, 0.72, 0.55),
+        (0.38, 0.18, 0.01),
+    )
+    divider_y = 0.48
+    ax_h.plot(
+        [sidebar_x0, 1.0],
+        [divider_y, divider_y],
+        color=GRID,
+        linewidth=0.7,
+        transform=ax_h.transAxes,
+        zorder=3,
+    )
+    for i, (label, val, accent, desc) in enumerate(kpis):
+        col = i % 2
+        row = i // 2
+        cx = col_xs[col]
+        label_y, val_y, desc_y = row_positions[row]
         ax_h.text(
-            x0 + 0.036,
+            cx,
             label_y,
             label,
-            fontsize=8,
-            color=TEXT_SECONDARY,
+            fontsize=9,
+            color=TEXT_TERTIARY,
             fontweight="semibold",
             transform=ax_h.transAxes,
             va="center",
         )
         ax_h.text(
-            x0 + 0.036,
-            card_y + card_h * 0.32,
+            cx,
+            val_y,
             val,
             fontsize=22,
-            color=TEXT_PRIMARY,
+            color=accent,
             fontweight=900,
+            transform=ax_h.transAxes,
+            va="center",
+        )
+        ax_h.text(
+            cx,
+            desc_y,
+            desc,
+            fontsize=9,
+            color=TEXT_SECONDARY,
             transform=ax_h.transAxes,
             va="center",
         )
@@ -637,6 +659,13 @@ def main() -> None:
     parser.add_argument(
         "--show", action="store_true", help="Open interactive matplotlib window"
     )
+    parser.add_argument(
+        "--no-smooth",
+        dest="smooth",
+        action="store_false",
+        help="Disable easing/smoothing on curves (on by default)",
+    )
+    parser.set_defaults(smooth=True)
     args = parser.parse_args()
 
     p = Path(args.metrics)
@@ -652,7 +681,7 @@ def main() -> None:
         print(f"No data in {metrics_path}")
         return
 
-    fig = build_figure(rows, metrics_path)
+    fig = build_figure(rows, metrics_path, smooth=args.smooth)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=180, facecolor=BG, bbox_inches="tight", pad_inches=0.3)
     print(f"Saved: {out}")
