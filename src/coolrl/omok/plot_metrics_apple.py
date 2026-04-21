@@ -49,16 +49,17 @@ DARK = Theme(
     text_primary="#f5f5f7",
     text_secondary="#a1a1a6",
     text_tertiary="#6e6e73",
+    # Rainbow by row: red → orange → yellow → green → blue.
     accents={
-        "policy": ("#ff453a", "#ff9f0a"),
-        "value": ("#30d158", "#64d2ff"),
-        "total": ("#5e5ce6", "#bf5af2"),
-        "lr": ("#ff375f", "#ff9f0a"),
-        "winrate": ("#bf5af2", "#ff375f"),
-        "white": ("#ff9f0a", "#ffd60a"),
-        "moves": ("#ff6482", "#ff2d55"),
-        "buffer": ("#64d2ff", "#0a84ff"),
-        "elapsed": ("#8e8e93", "#c7c7cc"),
+        "policy": ("#ff3b30", "#ff6961"),
+        "value": ("#ff3b30", "#ff6961"),
+        "total": ("#ff9500", "#ffb347"),
+        "lr": ("#ff9500", "#ffb347"),
+        "winrate": ("#ffcc00", "#ffe066"),
+        "white": ("#34c759", "#5ce07c"),
+        "moves": ("#34c759", "#5ce07c"),
+        "buffer": ("#0a84ff", "#64d2ff"),
+        "elapsed": ("#0a84ff", "#64d2ff"),
     },
 )
 
@@ -70,17 +71,17 @@ LIGHT = Theme(
     text_primary="#1d1d1f",
     text_secondary="#424245",
     text_tertiary="#6e6e73",
-    # Apple HIG light-mode system colors: deeper, less saturated than dark.
+    # Rainbow by row, muted for white background.
     accents={
-        "policy": ("#d70015", "#c93400"),
-        "value": ("#248a3d", "#0071a4"),
-        "total": ("#3634a3", "#8944ab"),
-        "lr": ("#d30f45", "#c93400"),
-        "winrate": ("#8944ab", "#d30f45"),
-        "white": ("#c93400", "#b25000"),
-        "moves": ("#d30f45", "#b30039"),
-        "buffer": ("#0071a4", "#0040dd"),
-        "elapsed": ("#6e6e73", "#8e8e93"),
+        "policy": ("#d70015", "#ff3b30"),
+        "value": ("#d70015", "#ff3b30"),
+        "total": ("#c93400", "#ff9500"),
+        "lr": ("#c93400", "#ff9500"),
+        "winrate": ("#946200", "#d2a200"),
+        "white": ("#248a3d", "#34c759"),
+        "moves": ("#248a3d", "#34c759"),
+        "buffer": ("#0040dd", "#007aff"),
+        "elapsed": ("#0040dd", "#007aff"),
     },
     line_alpha=0.85,
 )
@@ -612,7 +613,7 @@ def build_figure(
             t_iters[accepted],
             arena[accepted],
             s=22,
-            color=theme.accents["white"][1],
+            color=theme.text_primary,
             zorder=6,
             edgecolors="none",
         )
@@ -631,7 +632,7 @@ def build_figure(
     style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
     ax.set_ylim(0, 100)
-    ax.axhspan(30, 70, color=theme.accents["value"][0], alpha=0.05, zorder=0)
+    ax.axhspan(30, 70, color=theme.text_tertiary, alpha=0.10, zorder=0)
     ax.axhline(
         white_thresh,
         color=theme.text_tertiary,
