@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -25,26 +26,64 @@ from matplotlib.patches import FancyBboxPatch, Polygon
 
 
 # ---------------------------------------------------------------------------
-# Apple-inspired palette (dark mode, keynote-style)
+# Apple-inspired palettes (dark + light, keynote-style)
 # ---------------------------------------------------------------------------
-BG = "#000000"
-PANEL_BG = "#0e0e10"
-GRID = "#1c1c1e"
-TEXT_PRIMARY = "#f5f5f7"
-TEXT_SECONDARY = "#a1a1a6"
-TEXT_TERTIARY = "#6e6e73"
+@dataclass
+class Theme:
+    name: str
+    bg: str
+    panel_bg: str
+    grid: str
+    text_primary: str
+    text_secondary: str
+    text_tertiary: str
+    accents: dict  # name -> (gradient_start, gradient_end)
 
-ACCENTS = {
-    "policy": ("#ff453a", "#ff9f0a"),  # red to orange
-    "value": ("#30d158", "#64d2ff"),  # green to cyan
-    "total": ("#5e5ce6", "#bf5af2"),  # indigo to purple
-    "lr": ("#ff375f", "#ff9f0a"),
-    "winrate": ("#bf5af2", "#ff375f"),  # purple to pink
-    "white": ("#ff9f0a", "#ffd60a"),  # orange to yellow
-    "moves": ("#ff6482", "#ff2d55"),  # pink shades
-    "buffer": ("#64d2ff", "#0a84ff"),  # cyan to blue
-    "elapsed": ("#8e8e93", "#c7c7cc"),
-}
+
+DARK = Theme(
+    name="dark",
+    bg="#000000",
+    panel_bg="#0e0e10",
+    grid="#1c1c1e",
+    text_primary="#f5f5f7",
+    text_secondary="#a1a1a6",
+    text_tertiary="#6e6e73",
+    accents={
+        "policy": ("#ff453a", "#ff9f0a"),
+        "value": ("#30d158", "#64d2ff"),
+        "total": ("#5e5ce6", "#bf5af2"),
+        "lr": ("#ff375f", "#ff9f0a"),
+        "winrate": ("#bf5af2", "#ff375f"),
+        "white": ("#ff9f0a", "#ffd60a"),
+        "moves": ("#ff6482", "#ff2d55"),
+        "buffer": ("#64d2ff", "#0a84ff"),
+        "elapsed": ("#8e8e93", "#c7c7cc"),
+    },
+)
+
+LIGHT = Theme(
+    name="light",
+    bg="#ffffff",
+    panel_bg="#f5f5f7",
+    grid="#d2d2d7",
+    text_primary="#1d1d1f",
+    text_secondary="#424245",
+    text_tertiary="#6e6e73",
+    # Apple HIG light-mode system colors: deeper, less saturated than dark.
+    accents={
+        "policy": ("#d70015", "#c93400"),
+        "value": ("#248a3d", "#0071a4"),
+        "total": ("#3634a3", "#8944ab"),
+        "lr": ("#d30f45", "#c93400"),
+        "winrate": ("#8944ab", "#d30f45"),
+        "white": ("#c93400", "#b25000"),
+        "moves": ("#d30f45", "#b30039"),
+        "buffer": ("#0071a4", "#0040dd"),
+        "elapsed": ("#6e6e73", "#8e8e93"),
+    },
+)
+
+THEMES: dict[str, Theme] = {"dark": DARK, "light": LIGHT}
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
@@ -137,12 +176,14 @@ def make_cmap(c0: str, c1: str) -> LinearSegmentedColormap:
     return LinearSegmentedColormap.from_list("g", [c0, c1], N=256)
 
 
-def style_axis(ax, *, percent: bool = False, hours: bool = False) -> None:
-    ax.set_facecolor(BG)
+def style_axis(
+    ax, theme: Theme, *, percent: bool = False, hours: bool = False
+) -> None:
+    ax.set_facecolor(theme.bg)
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.tick_params(colors=TEXT_SECONDARY, length=0, labelsize=8.5, pad=5)
-    ax.grid(True, axis="y", color=GRID, linewidth=0.6, zorder=0)
+    ax.tick_params(colors=theme.text_secondary, length=0, labelsize=8.5, pad=5)
+    ax.grid(True, axis="y", color=theme.grid, linewidth=0.6, zorder=0)
     ax.grid(False, axis="x")
     ax.set_axisbelow(True)
     if percent:
@@ -256,14 +297,14 @@ def _format_lr(v: float, _pos: int) -> str:
     )
 
 
-def panel_title(ax, title: str, subtitle: str = "") -> None:
+def panel_title(ax, theme: Theme, title: str, subtitle: str = "") -> None:
     ax.text(
         0.0,
         1.34,
         title,
         transform=ax.transAxes,
         fontsize=14,
-        color=TEXT_PRIMARY,
+        color=theme.text_primary,
         fontweight=900,
     )
     if subtitle:
@@ -273,7 +314,7 @@ def panel_title(ax, title: str, subtitle: str = "") -> None:
             subtitle,
             transform=ax.transAxes,
             fontsize=10,
-            color=TEXT_SECONDARY,
+            color=theme.text_secondary,
         )
 
 
@@ -281,7 +322,11 @@ def panel_title(ax, title: str, subtitle: str = "") -> None:
 # Figure builder
 # ---------------------------------------------------------------------------
 def build_figure(
-    rows: list[dict], metrics_path: Path, *, smooth: bool = True
+    rows: list[dict],
+    metrics_path: Path,
+    *,
+    smooth: bool = True,
+    theme: Theme = DARK,
 ) -> plt.Figure:
     configure_fonts()
 
@@ -340,7 +385,7 @@ def build_figure(
         moves = _easing_smooth(moves)
 
     # Layout
-    fig = plt.figure(figsize=(13, 17), facecolor=BG)
+    fig = plt.figure(figsize=(13, 17), facecolor=theme.bg)
     gs = fig.add_gridspec(
         nrows=6,
         ncols=4,
@@ -355,7 +400,7 @@ def build_figure(
 
     # ============================== Header row ==============================
     ax_h = fig.add_subplot(gs[0, :])
-    ax_h.set_facecolor(BG)
+    ax_h.set_facecolor(theme.bg)
     ax_h.axis("off")
     ax_h.set_xlim(0, 1)
     ax_h.set_ylim(0, 1)
@@ -366,7 +411,7 @@ def build_figure(
         0.92,
         run_name.upper(),
         fontsize=10,
-        color=TEXT_TERTIARY,
+        color=theme.text_tertiary,
         fontweight="semibold",
         transform=ax_h.transAxes,
     )
@@ -375,7 +420,7 @@ def build_figure(
         0.62,
         f"Iteration {cur_iter:,}",
         fontsize=30,
-        color=TEXT_PRIMARY,
+        color=theme.text_primary,
         fontweight=900,
         transform=ax_h.transAxes,
         va="center",
@@ -386,7 +431,7 @@ def build_figure(
         f"{cur_elapsed:.1f}h  ·  {avg_iter_sec:.0f}s/iter  ·  "
         f"{accepted_count} accepted",
         fontsize=11,
-        color=TEXT_SECONDARY,
+        color=theme.text_secondary,
         transform=ax_h.transAxes,
     )
 
@@ -396,25 +441,25 @@ def build_figure(
         (
             "BEST ITER",
             f"{best_iter}",
-            ACCENTS["winrate"][0],
+            theme.accents["winrate"][0],
             f"of {cur_iter}",
         ),
         (
             "BEST WIN RATE",
             f"{best_wr * 100:.1f}%",
-            ACCENTS["white"][0],
+            theme.accents["white"][0],
             "peak arena",
         ),
         (
             "POLICY LOSS",
             f"{cur_policy:.2f}",
-            ACCENTS["policy"][0],
+            theme.accents["policy"][0],
             f"uniform {uniform_entropy:.2f}",
         ),
         (
             "VALUE LOSS",
             f"{cur_value:.2f}",
-            ACCENTS["value"][0],
+            theme.accents["value"][0],
             "lower is better",
         ),
     ]
@@ -429,7 +474,7 @@ def build_figure(
     ax_h.plot(
         [sidebar_x0, 1.0],
         [divider_y, divider_y],
-        color=GRID,
+        color=theme.grid,
         linewidth=0.7,
         transform=ax_h.transAxes,
         zorder=3,
@@ -454,7 +499,7 @@ def build_figure(
             label_y,
             label,
             fontsize=9,
-            color=TEXT_TERTIARY,
+            color=theme.text_tertiary,
             fontweight="semibold",
             transform=ax_h.transAxes,
             va="center",
@@ -464,7 +509,7 @@ def build_figure(
             val_y,
             val,
             fontsize=22,
-            color=TEXT_PRIMARY,
+            color=theme.text_primary,
             fontweight=900,
             transform=ax_h.transAxes,
             va="center",
@@ -474,7 +519,7 @@ def build_figure(
             desc_y,
             desc,
             fontsize=9,
-            color=TEXT_SECONDARY,
+            color=theme.text_secondary,
             transform=ax_h.transAxes,
             va="center",
         )
@@ -482,7 +527,7 @@ def build_figure(
     # ============================== Charts ==============================
     def add_chart(slot):
         ax = fig.add_subplot(slot)
-        ax.set_facecolor(BG)
+        ax.set_facecolor(theme.bg)
         return ax
 
     n_max = cur_iter + max(5, cur_iter // 50)
@@ -491,10 +536,11 @@ def build_figure(
     ax = add_chart(gs[1, :2])
     panel_title(
         ax,
+        theme,
         "Policy Loss",
         f"Now {cur_policy:.2f}  ·  Uniform ln({board_size * board_size}) = {uniform_entropy:.2f}",
     )
-    style_axis(ax)
+    style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(policy):
         ymin = float(np.nanmin(policy)) - 0.15
@@ -502,69 +548,70 @@ def build_figure(
         ax.set_ylim(ymin, ymax)
     ax.axhline(
         uniform_entropy,
-        color=TEXT_TERTIARY,
+        color=theme.text_tertiary,
         linewidth=0.8,
         linestyle=(0, (4, 4)),
         alpha=0.7,
         zorder=2,
     )
-    cs, ce = ACCENTS["policy"]
+    cs, ce = theme.accents["policy"]
     gradient_fill(ax, t_iters, policy, cs, ce, alpha=0.16)
     gradient_line(ax, t_iters, policy, cs, ce, lw=2.4)
 
     # ---- Value Loss (wide right) ----
     ax = add_chart(gs[1, 2:])
-    panel_title(ax, "Value Loss", f"Now {cur_value:.2f}  ·  Lower is better")
-    style_axis(ax)
+    panel_title(ax, theme, "Value Loss", f"Now {cur_value:.2f}  ·  Lower is better")
+    style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(value):
         ax.set_ylim(0, max(float(np.nanmax(value)) * 1.12, 1.0))
-    cs, ce = ACCENTS["value"]
+    cs, ce = theme.accents["value"]
     gradient_fill(ax, t_iters, value, cs, ce, alpha=0.16)
     gradient_line(ax, t_iters, value, cs, ce, lw=2.4)
 
     # ---- Total Loss + Learning Rate ----
     ax = add_chart(gs[2, :2])
-    panel_title(ax, "Total Loss", f"Now {cur_total:.2f}  ·  policy + 1.5 × value")
-    style_axis(ax)
+    panel_title(ax, theme, "Total Loss", f"Now {cur_total:.2f}  ·  policy + 1.5 × value")
+    style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(total):
         ax.set_ylim(float(np.nanmin(total)) - 0.3, float(np.nanmax(total)) * 1.05)
-    cs, ce = ACCENTS["total"]
+    cs, ce = theme.accents["total"]
     gradient_fill(ax, t_iters, total, cs, ce, alpha=0.16)
     gradient_line(ax, t_iters, total, cs, ce, lw=2.4)
 
     ax = add_chart(gs[2, 2:])
     cur_lr = float(lr[-1]) if len(lr) and np.isfinite(lr[-1]) else 0.0
-    panel_title(ax, "Learning Rate", f"Constant {cur_lr:.0e}")
-    style_axis(ax)
+    panel_title(ax, theme, "Learning Rate", f"Constant {cur_lr:.0e}")
+    style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(lr):
         ax.set_ylim(0, float(np.nanmax(lr)) * 1.35)
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(_format_lr))
     ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
-    cs, ce = ACCENTS["lr"]
+    cs, ce = theme.accents["lr"]
     gradient_line(ax, t_iters, lr, cs, ce, lw=2.4, glow=False)
 
     # ---- Arena Win Rate (full width) ----
     ax = add_chart(gs[3, :])
     panel_title(
         ax,
+        theme,
         "Arena Win Rate",
         f"{accepted_count} candidates accepted  ·  Threshold {accept_thresh:.0f}%",
     )
-    style_axis(ax, percent=True)
+    style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
     ax.set_ylim(0, 100)
     ax.axhline(
         accept_thresh,
-        color=TEXT_TERTIARY,
+        color=theme.text_tertiary,
         linewidth=0.8,
         linestyle=(0, (4, 4)),
         alpha=0.7,
         zorder=2,
     )
-    cs, ce = ACCENTS["winrate"]
+    cs, ce = theme.accents["winrate"]
     gradient_fill(ax, t_iters, arena, cs, ce, alpha=0.13)
     gradient_line(ax, t_iters, arena, cs, ce, lw=1.9)
     if accepted.any():
@@ -572,7 +619,7 @@ def build_figure(
             t_iters[accepted],
             arena[accepted],
             s=22,
-            color=ACCENTS["white"][1],
+            color=theme.accents["white"][1],
             zorder=6,
             edgecolors="none",
         )
@@ -584,44 +631,46 @@ def build_figure(
     )
     panel_title(
         ax,
+        theme,
         "Candidate White Win Rate",
         f"Now {cur_white:.0f}%  ·  Healthy band 30-70%  ·  Floor {white_thresh:.0f}%",
     )
-    style_axis(ax, percent=True)
+    style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
     ax.set_ylim(0, 100)
-    ax.axhspan(30, 70, color=ACCENTS["value"][0], alpha=0.05, zorder=0)
+    ax.axhspan(30, 70, color=theme.accents["value"][0], alpha=0.05, zorder=0)
     ax.axhline(
         white_thresh,
-        color=TEXT_TERTIARY,
+        color=theme.text_tertiary,
         linewidth=0.8,
         linestyle=(0, (4, 4)),
         alpha=0.7,
         zorder=2,
     )
-    cs, ce = ACCENTS["white"]
+    cs, ce = theme.accents["white"]
     gradient_line(ax, t_iters, white, cs, ce, lw=2.0)
 
     ax = add_chart(gs[4, 2:])
     panel_title(
         ax,
+        theme,
         "Selfplay Avg Moves",
         f"Now {cur_moves:.1f} moves per game"
         if np.isfinite(cur_moves)
         else "Selfplay length",
     )
-    style_axis(ax)
+    style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     if len(moves):
         ax.set_ylim(0, max(float(np.nanmax(moves)) * 1.1, 30))
-    cs, ce = ACCENTS["moves"]
+    cs, ce = theme.accents["moves"]
     gradient_fill(ax, iters, moves, cs, ce, alpha=0.12)
     gradient_line(ax, iters, moves, cs, ce, lw=2.0)
 
     # ---- Replay Buffer + Elapsed ----
     ax = add_chart(gs[5, :2])
-    panel_title(ax, "Replay Buffer", f"{cur_buffer:,} games  ·  Capacity 200,000")
-    style_axis(ax)
+    panel_title(ax, theme, "Replay Buffer", f"{cur_buffer:,} games  ·  Capacity 200,000")
+    style_axis(ax, theme)
     ax.set_xlim(0, n_max)
     ax.set_ylim(0, max(cur_buffer * 1.12, 1000))
     ax.yaxis.set_major_formatter(
@@ -629,20 +678,21 @@ def build_figure(
             lambda v, _: f"{int(v / 1000)}k" if v >= 1000 else f"{int(v)}"
         )
     )
-    cs, ce = ACCENTS["buffer"]
+    cs, ce = theme.accents["buffer"]
     gradient_fill(ax, iters, buffer, cs, ce, alpha=0.16)
     gradient_line(ax, iters, buffer, cs, ce, lw=2.0)
 
     ax = add_chart(gs[5, 2:])
     panel_title(
         ax,
+        theme,
         "Elapsed",
         f"{cur_elapsed:.2f} hours total  ·  {avg_iter_sec:.0f}s per iteration",
     )
-    style_axis(ax, hours=True)
+    style_axis(ax, theme, hours=True)
     ax.set_xlim(0, n_max)
     ax.set_ylim(0, max(cur_elapsed * 1.1, 1.0))
-    cs, ce = ACCENTS["elapsed"]
+    cs, ce = theme.accents["elapsed"]
     gradient_fill(ax, iters, elapsed, cs, ce, alpha=0.10)
     gradient_line(ax, iters, elapsed, cs, ce, lw=2.0)
 
@@ -675,8 +725,16 @@ def main() -> None:
         action="store_false",
         help="Disable easing/smoothing on curves (on by default)",
     )
+    parser.add_argument(
+        "--theme",
+        choices=sorted(THEMES),
+        default="dark",
+        help="Color theme (default: dark)",
+    )
     parser.set_defaults(smooth=True)
     args = parser.parse_args()
+
+    theme = THEMES[args.theme]
 
     p = Path(args.metrics)
     metrics_path = p / "metrics.jsonl" if p.is_dir() else p
@@ -691,9 +749,9 @@ def main() -> None:
         print(f"No data in {metrics_path}")
         return
 
-    fig = build_figure(rows, metrics_path, smooth=args.smooth)
+    fig = build_figure(rows, metrics_path, smooth=args.smooth, theme=theme)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=180, facecolor=BG, bbox_inches="tight", pad_inches=0.3)
+    fig.savefig(out, dpi=180, facecolor=theme.bg, bbox_inches="tight", pad_inches=0.3)
     print(f"Saved: {out}")
     if args.show:
         plt.show()
