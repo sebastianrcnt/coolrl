@@ -10,10 +10,13 @@ checkpoints/
 
 # Virtual environments
 .venv
+node_modules/
+*.tsbuildinfo
 
 exports
 
 *.onnx
+!src/coolrl/omok/web/public/best.onnx
 .claude/
 
 # Rust-generated files
