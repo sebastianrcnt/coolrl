@@ -11,7 +11,9 @@ Relevant commits:
 
 - `5687c62` — Stabilize Omok web UI for iOS Safari (WASM era, compositor pressure)
 - `d7fd988` — Reduce WebGPU memory pressure for iOS Safari (WebGPU era, inference pressure)
-- Phase 3 — Skip idle-release on WebGPU/WebNN sessions (see below)
+- Phase 3 — Graceful session teardown before worker.terminate on every
+  idle release (the "skip idle-release on GPU" piece of the first
+  attempt was rolled back — see below)
 
 ## Phase 1 — WASM era: WebContent/compositor GPU pressure
 
@@ -220,20 +222,69 @@ visible symptom. The tab death that follows is the WebContent process
 being jettisoned by the OS a few seconds later, once memory pressure
 is already past the limit.
 
-### Fix
+### Fix (first attempt, rolled back — see below)
 
-- `releaseEvaluatorForIdle` now **early-returns on WebGPU/WebNN
-  sessions**. WASM idle release still runs — that path is still net
-  positive. For GPU sessions the evaluator is kept alive across turns,
-  so the per-turn churn goes away and iOS only has to survive **one**
-  session lifetime, not twenty. Session-resident state doesn't grow
-  across turns (phase 2 dispose hooks handle that), so keeping the
-  session alive has a bounded footprint.
+- `releaseEvaluatorForIdle` early-returned on WebGPU/WebNN sessions so
+  the evaluator was kept alive across turns and iOS only had to
+  survive **one** session lifetime, not twenty. This did stop the
+  mid-game crash pattern.
 
 - Error chips now append the first ~50 chars of the underlying error
   (helper `errorChipDetail`), so future iOS incidents leave a crumb
   trail instead of a generic "WebGPU 준비 실패" that hides the actual
-  failure mode.
+  failure mode. (Kept.)
+
+### Follow-up rollback — alive WebGPU session burns CPU on iOS
+
+Shortly after the fix shipped, iOS profiles showed a new problem:
+while the user was thinking after an AI move, the tab stayed at
+close-to-100% CPU and the DevTools timeline showed *continuous*
+`Styles recalculated` → `Layout` → `Composite` → `Paint` with
+microtask/timer events firing every few milliseconds. WASM sessions
+were unaffected; the symptom was unique to backends that held a live
+WebGPU session. Net result: "WebGPU 가 오히려 느려졌어."
+
+Best-fit hypothesis (not in our code to fix): iOS Safari's
+WebGPU-to-Metal path treats an alive `GPUDevice` as a reason to keep
+the compositor/paint pipeline hot every vsync. Some of that keepalive
+leaks through as DOM style-recalc too. Desktop Chrome doesn't do this;
+WASM doesn't trigger it (no `GPUDevice`). The single trigger under our
+control is "WebGPU session stays alive across turns" — i.e. exactly
+the fix above.
+
+Traded-off: crash on the far tail vs. perpetual CPU burn for every
+user of WebGPU. The latter hits everyone, every turn. We rolled back
+the skip.
+
+### Fix (current)
+
+- `releaseEvaluatorForIdle` once again tears down the evaluator 400 ms
+  after every AI move on mobile, **including WebGPU/WebNN sessions**.
+  So between turns the GPUDevice dies, iOS's hot pipeline quiets, and
+  the CPU burn goes away.
+
+- The teardown now goes through the **graceful dispose path** from the
+  follow-up section below. That is the actually-substantive part of
+  phase 3 and is kept. The worker awaits `InferenceSession.release()`
+  before terminating, so GPU buffers are freed deterministically
+  instead of getting stranded in the driver's lazy GC. This shortens
+  the "old session's GPU state is still around while the new session
+  is being allocated" window that caused the original phase 3 crash
+  — the phase 3 crash mode is less likely to recur on top of this
+  cleaner teardown, even without the skip.
+
+- Error chip improvements (`errorChipDetail`) are retained.
+
+### Residual cost
+
+Every AI turn still pays a WebGPU re-init cost (~500 ms on iOS: model
+weights back to GPU, shader pipelines recompiled). Mitigations from
+earlier phases (small MCTS `maxChildren`, short per-search simulation
+count, per-run tensor dispose) cap the per-turn GPU peak so the
+re-init cost doesn't stack. If consecutive fast turns ever become a
+real UX problem, the right follow-up is a **longer idle-release
+delay** (e.g. 5-10 s) so quick consecutive moves reuse the session
+but genuine long-thinking moves still release. Not implemented today.
 
 ### Follow-up: graceful session teardown
 
@@ -263,8 +314,8 @@ teardown on a release() that might never answer.
 | WebGPU/WebNN option clickable | yes | **no** | **no** |
 | Tensor dispose on run | yes (no-op on WASM) | yes | yes |
 | preferredOutputLocation=cpu | WebGPU/WebNN only | n/a (WASM) | n/a (WASM) |
-| Evaluator idle release (WASM session) | off | on | on |
-| Evaluator idle release (WebGPU/WebNN session) | off | **off** | **off** |
+| Evaluator idle release (WASM session) | off | on (400 ms after AI move) | on (400 ms after AI move) |
+| Evaluator idle release (WebGPU/WebNN session) | off | **on** (400 ms after AI move, via graceful dispose) | **on** (400 ms after AI move, via graceful dispose) |
 | Error chip includes exception detail | yes | yes | yes |
 | Graceful `session.release()` on teardown | yes (async paths only) | yes (async paths only) | yes (async paths only) |
 

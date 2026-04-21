@@ -360,22 +360,19 @@ export class OmokController {
     }
   }
 
-  private releaseEvaluatorForIdle(): void {
+  private async releaseEvaluatorForIdle(): Promise<void> {
     logDebug("OmokController", "releaseEvaluatorForIdle.try");
     if (!this.env.isLowMemoryMode || !this.evaluator || this.busy) return;
     if (!this.initialSetup && !this.isHumanTurn() && !this.game.terminal) return;
-    // WebGPU/WebNN sessions are far more expensive to recreate (shader
-    // pipeline compilation + model weight re-upload) than they are to keep
-    // alive. Terminating every idle turn was designed for WASM heap relief
-    // and is net-harmful on GPU backends — each churn temporarily doubles
-    // the GPU footprint and iOS Safari has been observed to OOM-kill the
-    // tab partway through a game under this pattern.
-    const backend = this.evaluator.backend;
-    if (backend === "webgpu" || backend === "webnn") {
-      logDebug("OmokController", "releaseEvaluatorForIdle.skipGpu", { backend });
-      return;
-    }
-    this.terminateEvaluator();
+    // Release the session gracefully (worker awaits InferenceSession.release
+    // before terminate) so GPU buffers aren't stranded in the driver's lazy
+    // GC path. For WASM sessions release is effectively a no-op but still
+    // safe to call.
+    await this.disposeEvaluatorAsync();
+    // State may have shifted during the dispose await (user clicked, a new
+    // evaluator was created). Only clear downstream state if nobody took
+    // over while we were waiting.
+    if (this.evaluator !== null) return;
     this.mcts = null;
     this.aiSubtree = null;
     this.updateInfo();
@@ -409,7 +406,11 @@ export class OmokController {
     if (!this.env.isLowMemoryMode) return;
     this.idleReleaseTimer = setTimeout(() => {
       this.idleReleaseTimer = null;
-      this.releaseEvaluatorForIdle();
+      void this.releaseEvaluatorForIdle().catch((err) => {
+        logWarn("OmokController", "releaseEvaluatorForIdle.failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }, 400);
   }
 
