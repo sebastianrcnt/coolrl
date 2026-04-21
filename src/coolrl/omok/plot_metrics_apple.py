@@ -474,13 +474,8 @@ def build_figure(
     ]
     sidebar_x0 = 0.55
     sidebar_x1 = 1.0
-    inner_pad_x = 0.022
-    col_width = (sidebar_x1 - sidebar_x0) / 2
-    # Left-edge of each column's content area (after inner padding).
-    col_text_xs = (
-        sidebar_x0 + inner_pad_x,
-        sidebar_x0 + col_width + inner_pad_x,
-    )
+    # Right-edge anchors for each column (flush with chart right edge).
+    col_right_xs = (0.78, sidebar_x1)
     row_positions = (
         # (label_y, value_y, descriptor_y)
         (0.93, 0.70, 0.52),
@@ -495,23 +490,11 @@ def build_figure(
         transform=ax_h.transAxes,
         zorder=3,
     )
-    dot_offset = 0.016
-    for i, (label, val, accent, desc) in enumerate(kpis):
+    for i, (label, val, _accent, desc) in enumerate(kpis):
         col = i % 2
         row = i // 2
-        text_x = col_text_xs[col]
-        dot_x = text_x - dot_offset
+        text_x = col_right_xs[col]
         label_y, val_y, desc_y = row_positions[row]
-        ax_h.scatter(
-            [dot_x],
-            [label_y],
-            s=30,
-            c=accent,
-            marker="o",
-            edgecolors="none",
-            transform=ax_h.transAxes,
-            zorder=4,
-        )
         ax_h.text(
             text_x,
             label_y,
@@ -521,6 +504,7 @@ def build_figure(
             fontweight="semibold",
             transform=ax_h.transAxes,
             va="center",
+            ha="right",
         )
         ax_h.text(
             text_x,
@@ -531,6 +515,7 @@ def build_figure(
             fontweight=900,
             transform=ax_h.transAxes,
             va="center",
+            ha="right",
         )
         ax_h.text(
             text_x,
@@ -540,6 +525,7 @@ def build_figure(
             color=theme.text_secondary,
             transform=ax_h.transAxes,
             va="center",
+            ha="right",
         )
 
     # ============================== Charts ==============================
