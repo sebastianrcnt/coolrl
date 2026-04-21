@@ -15,6 +15,7 @@ from .features import states_to_feature_planes
 from .torch_evaluator import _coerce_torch_model, _require_torch, _torch_device, torch
 
 _TorchModuleBase = object if torch is None else torch.nn.Module
+_TRT_LOGGER: Any | None = None
 
 
 def tensorrt_is_available() -> bool:
@@ -31,6 +32,15 @@ def _require_tensorrt() -> Any:
     import tensorrt as trt
 
     return trt
+
+
+def _tensorrt_logger(trt: Any) -> Any:
+    global _TRT_LOGGER
+    if _TRT_LOGGER is None:
+        # TensorRT keeps one process-wide logger. Reuse the same Python logger
+        # for builders/runtimes so creating multiple evaluators stays quiet.
+        _TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+    return _TRT_LOGGER
 
 
 def _env_int(name: str, default: int) -> int:
@@ -117,7 +127,7 @@ class TensorRTModelEvaluator(Evaluator):
         self.opt_batch_size = min(self.max_batch_size, _env_int("COOLRL_TENSORRT_OPT_BATCH", 384))
         self.fp16 = _env_bool("COOLRL_TENSORRT_FP16", True)
         self.workspace_bytes = _env_int("COOLRL_TENSORRT_WORKSPACE_MB", 2048) * 1024 * 1024
-        self.logger = self.trt.Logger(self.trt.Logger.WARNING)
+        self.logger = _tensorrt_logger(self.trt)
         self.engine = self._load_or_build_engine()
         self.context = self.engine.create_execution_context()
         self.input_name, self.output_names = self._io_names()
