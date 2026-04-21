@@ -572,7 +572,7 @@ def build_figure(
         theme,
         "Policy Loss",
         f"Now {cur_policy:.2f}  ·  Uniform ln({board_size * board_size}) = {uniform_entropy:.2f}",
-        caption="정책 네트워크와 MCTS 탐색 분포의 교차엔트로피. 낮을수록 수 예측이 정확.",
+        caption="Cross-entropy between the policy network and MCTS search distribution. Lower means sharper move prediction.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -599,7 +599,7 @@ def build_figure(
         theme,
         "Value Loss",
         f"Now {cur_value:.2f}  ·  Lower is better",
-        caption="현재 포지션의 승패 예측 MSE. 낮을수록 실제 결과에 근접.",
+        caption="MSE of the value head's win/loss prediction. Lower means closer to the actual game outcome.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -616,7 +616,7 @@ def build_figure(
         theme,
         "Total Loss",
         f"Now {cur_total:.2f}  ·  policy + 1.5 × value",
-        caption="정책 손실과 가치 손실의 가중합 — 전체 수렴도 지표.",
+        caption="Weighted sum of the policy and value losses — overall convergence signal.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -633,7 +633,7 @@ def build_figure(
         theme,
         "Learning Rate",
         f"Constant {cur_lr:.0e}",
-        caption="Adam 옵티마이저 학습률. 현재는 상수로 고정되어 있음.",
+        caption="Adam optimizer learning rate — currently held constant.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -651,7 +651,7 @@ def build_figure(
         theme,
         "Arena Win Rate",
         f"{accepted_count} candidates accepted  ·  Threshold {accept_thresh:.0f}%",
-        caption="새 후보 모델이 현재 best 모델과 대국 시 얻는 승률. 임계값을 넘으면 새 best로 채택됩니다.",
+        caption="Win rate of each new candidate model against the current best. Candidates above the threshold are promoted to the new best.",
     )
     style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
@@ -688,7 +688,7 @@ def build_figure(
         theme,
         "Candidate White Win Rate",
         f"Now {cur_white:.0f}%  ·  Healthy band 30-70%  ·  Floor {white_thresh:.0f}%",
-        caption="후보 모델이 흑돌을 잡았을 때의 승률. 30-70% 구간을 크게 벗어나면 편향 의심.",
+        caption="Candidate's win rate when playing black. Drifting far outside the 30–70% band suggests color bias.",
     )
     style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
@@ -713,7 +713,7 @@ def build_figure(
         f"Now {cur_moves:.1f} moves per game"
         if np.isfinite(cur_moves)
         else "Selfplay length",
-        caption="자기대국 한 판당 평균 착수 수. 실력이 오르면 길어지는 경향.",
+        caption="Average number of moves per selfplay game — tends to grow as the model gets stronger.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -730,7 +730,7 @@ def build_figure(
         theme,
         "Replay Buffer",
         f"{cur_buffer:,} games  ·  Capacity 200,000",
-        caption="최근 자기대국 게임을 쌓아둔 학습 데이터 풀. 최대 20만 게임 보관.",
+        caption="Rolling pool of recent selfplay games used for training — capped at 200k games.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -750,7 +750,7 @@ def build_figure(
         theme,
         "Elapsed",
         f"{cur_elapsed:.2f} hours total  ·  {avg_iter_sec:.0f}s per iteration",
-        caption="학습 시작부터의 누적 경과 시간.",
+        caption="Cumulative wall-clock time since training began.",
     )
     style_axis(ax, theme, hours=True)
     ax.set_xlim(0, n_max)
