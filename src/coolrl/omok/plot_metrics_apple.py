@@ -572,7 +572,7 @@ def build_figure(
         theme,
         "Policy Loss",
         f"Now {cur_policy:.2f}  ·  Uniform ln({board_size * board_size}) = {uniform_entropy:.2f}",
-        caption="Cross-entropy between the policy network and MCTS search distribution. Lower means sharper move prediction.",
+        caption="Cross-entropy vs MCTS visits — lower = sharper predictions.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -599,7 +599,7 @@ def build_figure(
         theme,
         "Value Loss",
         f"Now {cur_value:.2f}  ·  Lower is better",
-        caption="MSE of the value head's win/loss prediction. Lower means closer to the actual game outcome.",
+        caption="MSE of the value head — lower means closer to real outcomes.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -616,7 +616,7 @@ def build_figure(
         theme,
         "Total Loss",
         f"Now {cur_total:.2f}  ·  policy + 1.5 × value",
-        caption="Weighted sum of the policy and value losses — overall convergence signal.",
+        caption="Policy + value losses — overall convergence signal.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -633,7 +633,7 @@ def build_figure(
         theme,
         "Learning Rate",
         f"Constant {cur_lr:.0e}",
-        caption="Adam optimizer learning rate — currently held constant.",
+        caption="Adam optimizer learning rate — held constant.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -651,7 +651,7 @@ def build_figure(
         theme,
         "Arena Win Rate",
         f"{accepted_count} candidates accepted  ·  Threshold {accept_thresh:.0f}%",
-        caption="Win rate of each new candidate model against the current best. Candidates above the threshold are promoted to the new best.",
+        caption="Each candidate plays the current best. Above the threshold, it gets promoted.",
     )
     style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
@@ -688,7 +688,7 @@ def build_figure(
         theme,
         "Candidate White Win Rate",
         f"Now {cur_white:.0f}%  ·  Healthy band 30-70%  ·  Floor {white_thresh:.0f}%",
-        caption="Candidate's win rate when playing black. Drifting far outside the 30–70% band suggests color bias.",
+        caption="Candidate's win rate as black — 30–70% is the healthy band.",
     )
     style_axis(ax, theme, percent=True)
     ax.set_xlim(0, n_max)
@@ -713,7 +713,7 @@ def build_figure(
         f"Now {cur_moves:.1f} moves per game"
         if np.isfinite(cur_moves)
         else "Selfplay length",
-        caption="Average number of moves per selfplay game — tends to grow as the model gets stronger.",
+        caption="Average moves per selfplay game — grows with strength.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
@@ -730,7 +730,7 @@ def build_figure(
         theme,
         "Replay Buffer",
         f"{cur_buffer:,} games  ·  Capacity 200,000",
-        caption="Rolling pool of recent selfplay games used for training — capped at 200k games.",
+        caption="Rolling pool of recent selfplay games — capped at 200k.",
     )
     style_axis(ax, theme)
     ax.set_xlim(0, n_max)
