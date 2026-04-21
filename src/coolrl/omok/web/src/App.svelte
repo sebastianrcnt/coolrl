@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { OmokController, type DomRefs } from "./app/omok-controller";
+  import { logDebug, logInfo } from "./util/logger";
 
   let canvas: HTMLCanvasElement;
   let boardCard: HTMLElement;
@@ -29,6 +30,7 @@
   let debugGrid: HTMLElement;
 
   onMount(() => {
+    logInfo("OmokApp", "onMount");
     const dom: DomRefs = {
       canvas,
       boardCard,
@@ -58,7 +60,11 @@
     };
     const controller = new OmokController({ dom });
     controller.start();
-    return () => controller.dispose();
+    logDebug("OmokApp", "controllerStarted");
+    return () => {
+      logDebug("OmokApp", "controllerDisposed");
+      controller.dispose();
+    };
   });
 </script>
 

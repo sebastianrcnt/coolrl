@@ -30,6 +30,7 @@ import {
   type ModelSourceState,
 } from "./model-source";
 import { DebugPanel, type DebugMetricsSource } from "./debug-panel";
+import { logDebug, logError, logInfo, logWarn } from "../util/logger";
 
 const BOARD_SIZE = 15;
 const DEFAULT_MODEL_URL = "./best.onnx";
@@ -135,9 +136,20 @@ export class OmokController {
       startedAt: this.startedAt,
       source: this.makeDebugMetricsSource(),
     });
+    logInfo("OmokController", "constructed", {
+      boardSize: this.boardSize,
+      defaultModelUrl: this.defaultModelUrl,
+      lowMemory: this.env.isLowMemoryMode,
+      isMobile: this.env.isMobile,
+      isIos: this.env.isIos,
+    });
   }
 
   start(): void {
+    logInfo("OmokController", "start", {
+      isIos: this.env.isIos,
+      initialBoardSize: this.boardSize,
+    });
     if (this.env.isIos) {
       document.documentElement.classList.add("ios-low-memory");
     }
@@ -156,9 +168,13 @@ export class OmokController {
 
     this.dom.btnSheetClose.textContent = "시작";
     this.openSheet();
+    logInfo("OmokController", "sheetOpened", {
+      initialSetup: this.initialSetup,
+    });
   }
 
   dispose(): void {
+    logInfo("OmokController", "dispose");
     for (const cleanup of this.cleanups) cleanup();
     this.cleanups.length = 0;
     this.stoneAnimations.clear();
@@ -180,6 +196,7 @@ export class OmokController {
   // -------------------------------------------------------------------------
 
   private bindEvents(): void {
+    logDebug("OmokController", "bindEvents");
     const on = (
       el: EventTarget,
       type: string,
@@ -248,6 +265,11 @@ export class OmokController {
   }
 
   private async createEvaluator(buf: ArrayBuffer): Promise<WorkerEvaluator> {
+    logDebug("OmokController", "createEvaluator.start", {
+      boardSize: this.boardSize,
+      backendChoice: this.backendChoice,
+      hasLowMemory: this.env.isLowMemoryMode,
+    });
     const webgpuSupported =
       typeof navigator !== "undefined" &&
       !!(navigator as { gpu?: unknown }).gpu;
@@ -255,6 +277,7 @@ export class OmokController {
     let lastError: unknown = null;
     for (const backend of attempts) {
       try {
+        logDebug("OmokController", "createEvaluator.try", { backend });
         return await WorkerEvaluator.fromArrayBuffer(
           buf,
           this.boardSize,
@@ -263,7 +286,10 @@ export class OmokController {
         );
       } catch (err) {
         lastError = err;
-        console.warn(`[evaluator] ${backend} backend failed`, err);
+        logWarn("OmokController", `createEvaluator.backendFailed`, {
+          backend,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     throw lastError ?? new Error("no backend available");
@@ -283,6 +309,7 @@ export class OmokController {
   }
 
   private async ensureEvaluatorReady(statusText = "쿨파고 준비 중"): Promise<boolean> {
+    logDebug("OmokController", "ensureEvaluatorReady.start", { statusText });
     if (this.evaluator && this.mcts) return true;
     if (!this.hasModel()) return false;
 
@@ -303,9 +330,10 @@ export class OmokController {
       this.setBusy(false);
       this.updateInfo();
       this.debugPanel.render();
+      logInfo("OmokController", "ensureEvaluatorReady.ok");
       return true;
     } catch (err) {
-      console.error(err);
+      logError("OmokController", "ensureEvaluatorReady.failed", err);
       this.setBusy(false);
       this.statusPresenter.flash(
         `${backendChoiceLabel(this.backendChoice)} 준비 실패`,
@@ -318,6 +346,7 @@ export class OmokController {
   }
 
   private releaseEvaluatorForIdle(): void {
+    logDebug("OmokController", "releaseEvaluatorForIdle.try");
     if (!this.env.isLowMemoryMode || !this.evaluator || this.busy) return;
     if (!this.initialSetup && !this.isHumanTurn() && !this.game.terminal) return;
     this.terminateEvaluator();
@@ -328,12 +357,16 @@ export class OmokController {
   }
 
   private terminateEvaluator(): void {
+    logDebug("OmokController", "terminateEvaluator");
     const ev = this.evaluator;
     if (ev) ev.terminate();
     this.evaluator = null;
   }
 
   private scheduleEvaluatorIdleRelease(): void {
+    logDebug("OmokController", "scheduleEvaluatorIdleRelease", {
+      isLowMemoryMode: this.env.isLowMemoryMode,
+    });
     if (this.idleReleaseTimer !== null) clearTimeout(this.idleReleaseTimer);
     this.idleReleaseTimer = null;
     if (!this.env.isLowMemoryMode) return;
@@ -346,6 +379,7 @@ export class OmokController {
   private async handleFileInput(e: Event & { target: HTMLInputElement }): Promise<void> {
     const file = e.target.files?.[0];
     if (!file) return;
+    logInfo("OmokController", "fileInput.selected", { fileName: file.name, size: file.size });
     this.setBusy(true);
     this.statusPresenter.flash(
       `모델 로딩 중… ${backendChoiceLabel(this.backendChoice)}`,
@@ -367,8 +401,12 @@ export class OmokController {
       this.updateInfo();
       this.maybeAiMove();
       this.scheduleEvaluatorIdleRelease();
+      logInfo("OmokController", "fileInput.loaded", {
+        fileName: file.name,
+        bufferBytes: buf.byteLength,
+      });
     } catch (err) {
-      console.error(err);
+      logError("OmokController", "fileInput.load.failed", err);
       this.statusPresenter.flash("로드 실패", "error");
       this.setBusy(false);
       this.updateInfo();
@@ -376,6 +414,9 @@ export class OmokController {
   }
 
   private async reloadModelForBackend(): Promise<void> {
+    logInfo("OmokController", "reloadModelForBackend.start", {
+      backendChoice: this.backendChoice,
+    });
     if (this.busy) return;
     if (!this.hasModel()) {
       this.defaultModelLoadStarted = false;
@@ -400,8 +441,11 @@ export class OmokController {
       this.updateInfo();
       this.maybeAiMove();
       this.scheduleEvaluatorIdleRelease();
+      logInfo("OmokController", "reloadModelForBackend.ok", {
+        backendChoice: this.backendChoice,
+      });
     } catch (err) {
-      console.error(err);
+      logError("OmokController", "reloadModelForBackend.failed", err);
       this.setBusy(false);
       this.statusPresenter.flash(
         `${backendChoiceLabel(this.backendChoice)} 사용 불가`,
@@ -414,9 +458,10 @@ export class OmokController {
 
   private async tryAutoLoadDefault(): Promise<void> {
     if (this.defaultModelLoadStarted || this.evaluator) return;
+    logInfo("OmokController", "autoLoadDefault.start");
     this.defaultModelLoadStarted = true;
     if (location.protocol === "file:") {
-      console.warn("file:// cannot fetch(); serve via an HTTP server instead.");
+      logWarn("OmokController", "autoLoadDefault.fileProtocol");
       this.statusPresenter.flash(
         "file:// 에서는 모델을 가져올 수 없습니다 — HTTP 서버로 열어주세요",
         "error",
@@ -452,8 +497,12 @@ export class OmokController {
       this.updateInfo();
       this.maybeAiMove();
       this.scheduleEvaluatorIdleRelease();
+      logInfo("OmokController", "autoLoadDefault.ok", {
+        modelUrl: this.defaultModelUrl,
+        sizeMB: Number((buf.byteLength / 1024 / 1024).toFixed(1)),
+      });
     } catch (err) {
-      console.error(`[default-model load] failed at stage "${stage}":`, err);
+      logError("OmokController", `autoLoadDefault.failed@${stage}`, err);
       this.setBusy(false);
       const msg =
         err instanceof Error ? err.message.slice(0, 80) : "알 수 없음";
@@ -473,6 +522,7 @@ export class OmokController {
   }
 
   private resetGame(): void {
+    logInfo("OmokController", "resetGame");
     this.thinkingGhosts.stop(false);
     this.game = new GameState(this.boardSize);
     this.history = [];
@@ -489,6 +539,10 @@ export class OmokController {
   }
 
   private undo(): void {
+    logInfo("OmokController", "undo", {
+      historyLength: this.history.length,
+      pendingAction: this.pendingAction,
+    });
     if (this.busy) return;
     this.thinkingGhosts.stop(false);
     if (this.pendingAction !== null) {
@@ -510,6 +564,12 @@ export class OmokController {
   }
 
   private handleCanvasClick(e: MouseEvent): void {
+    logDebug("OmokController", "canvasClick", {
+      x: e.clientX,
+      y: e.clientY,
+      busy: this.busy,
+      terminal: this.game.terminal,
+    });
     if (this.busy || this.game.terminal) return;
     if (!this.isHumanTurn()) return;
     const rect = this.dom.canvas.getBoundingClientRect();
@@ -527,6 +587,7 @@ export class OmokController {
   }
 
   private confirmPending(): void {
+    logDebug("OmokController", "confirmPending");
     if (this.busy || this.pendingAction === null) return;
     const action = this.pendingAction;
     this.pendingAction = null;
@@ -534,6 +595,11 @@ export class OmokController {
   }
 
   private playMove(action: number): void {
+    logInfo("OmokController", "playMove", {
+      action,
+      move: this.game.moveCount + 1,
+      toPlay: this.game.toPlay,
+    });
     this.game.applyAction(action);
     this.history.push(action);
     this.stoneAnimations.start(action);
@@ -548,12 +614,21 @@ export class OmokController {
   }
 
   private maybeAiMove(): void {
+    logDebug("OmokController", "maybeAiMove.check", {
+      initialSetup: this.initialSetup,
+      hasModel: this.hasModel(),
+      busy: this.busy,
+      terminal: this.game.terminal,
+      toPlay: this.game.toPlay,
+      human: this.humanPlayer,
+    });
     if (this.initialSetup) return;
     if (!this.hasModel() || this.busy || this.game.terminal) return;
     if (this.game.toPlay !== this.humanPlayer) this.aiMove();
   }
 
   private async aiMove(): Promise<void> {
+    logInfo("OmokController", "aiMove.start");
     if (this.game.terminal || this.busy) return;
     if (!(await this.ensureEvaluatorReady("쿨파고 깨우는 중"))) return;
     if (this.game.terminal || this.game.toPlay === this.humanPlayer) {
@@ -586,10 +661,15 @@ export class OmokController {
       this.history.push(result.action);
       this.stoneAnimations.start(result.action);
       this.aiSubtree = this.reuseSearchTree() ? result.nextRoot : null;
+      logInfo("OmokController", "aiMove.done", {
+        action: result.action,
+        rootValue: result.rootValue,
+        thinkMs: this.aiTimeMs,
+      });
       this.updateInfo();
       this.redraw();
     } catch (err) {
-      console.error(err);
+      logError("OmokController", "aiMove.failed", err);
       this.aiProgress = null;
       this.statusPresenter.clearOverride();
       this.thinkingGhosts.stop(false);
@@ -601,6 +681,7 @@ export class OmokController {
   }
 
   private async showHint(): Promise<void> {
+    logInfo("OmokController", "hint.start");
     if (this.game.terminal || this.busy || !this.isHumanTurn()) return;
     if (!(await this.ensureEvaluatorReady("훈수 준비 중"))) return;
     if (this.game.terminal || !this.isHumanTurn()) {
@@ -627,6 +708,11 @@ export class OmokController {
       this.setBusy(false);
       this.redraw();
       const elapsed = performance.now() - t0;
+      logInfo("OmokController", "hint.done", {
+        action: result.action,
+        rootValue: result.rootValue,
+        thinkMs: elapsed,
+      });
       this.statusPresenter.flash(
         `추천 수 표시 · 형세 ${formatSignedValue(result.rootValue)} · ${formatDuration(elapsed)}`,
         "thinking",
@@ -634,7 +720,7 @@ export class OmokController {
       );
       this.scheduleEvaluatorIdleRelease();
     } catch (err) {
-      console.error(err);
+      logError("OmokController", "hint.failed", err);
       this.statusPresenter.clearOverride();
       this.thinkingGhosts.stop(false);
       this.setBusy(false);
@@ -648,6 +734,7 @@ export class OmokController {
   // -------------------------------------------------------------------------
 
   private setBusy(busy: boolean): void {
+    logDebug("OmokController", "setBusy", { busy });
     this.busy = busy;
     this.dom.btnReset.disabled = busy;
     this.dom.btnSettings.disabled = busy;

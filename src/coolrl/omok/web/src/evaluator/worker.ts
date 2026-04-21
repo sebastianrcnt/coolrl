@@ -10,6 +10,7 @@
 // and imports the main-thread glue via typed messages.
 //
 import { normalizeBackend, type InferenceBackend } from "../util/backend";
+import { logDebug, logError, logInfo, logWarn } from "../util/logger";
 import type {
   EvaluateRequest,
   InitRequest,
@@ -41,10 +42,20 @@ class EvaluatorSession {
   async init(request: InitRequest): Promise<void> {
     this.setSize(request.boardSize);
     this.activeBackend = normalizeBackend(request.backend);
+    logInfo("EvaluatorWorker", "init.start", {
+      boardSize: request.boardSize,
+      backend: request.backend,
+      lowMemory: request.lowMemory,
+      bufBytes: request.buf.byteLength,
+    });
     this.loadOrt(this.activeBackend);
     const sessionOptions = this.buildSessionOptions(this.activeBackend, request.lowMemory);
     this.session = await ort.InferenceSession.create(request.buf, sessionOptions);
     await this.warmUp();
+    logInfo("EvaluatorWorker", "init.done", {
+      boardSize: this.boardSize,
+      backend: this.activeBackend,
+    });
   }
 
   async evaluate(request: EvaluateRequest): Promise<{
@@ -54,8 +65,17 @@ class EvaluatorSession {
     actionSize: number;
   }> {
     if (!this.session) throw new Error("evaluator not initialized");
+    const t0 = performance.now();
+    logDebug("EvaluatorWorker", "evaluate.start", {
+      batch: request.states.length,
+      boardSize: this.boardSize,
+    });
     const batch = request.states.length;
     const features = this.encodeFeatures(request.states);
+    logDebug("EvaluatorWorker", "evaluate.featuresPrepared", {
+      batch,
+      featureLength: features.length,
+    });
     const tensor = new ort.Tensor("float32", features, [batch, 4, this.boardSize, this.boardSize]);
     const output = await this.session.run({ input: tensor });
     const logits = output.policy_logits?.data;
@@ -81,12 +101,17 @@ class EvaluatorSession {
   }
 
   private setSize(n: number): void {
+    const prev = this.boardSize;
     this.boardSize = n;
     this.planeSize = n * n;
     this.actionSize = n * n;
+    if (prev !== n) {
+      logDebug("EvaluatorWorker", "setSize", { prev, next: n });
+    }
   }
 
   private loadOrt(backend: InferenceBackend): void {
+    logDebug("EvaluatorWorker", "loadOrt", { backend, alreadyLoaded: this.ortLoaded });
     if (this.ortLoaded) return;
     const useWebGpuLoader = backend === "webgpu" || backend === "webnn";
     importScripts(ORT_CDN_BASE + (useWebGpuLoader ? "ort.webgpu.min.js" : "ort.wasm.min.js"));
@@ -111,14 +136,17 @@ class EvaluatorSession {
   }
 
   private async warmUp(): Promise<void> {
+    logDebug("EvaluatorWorker", "warmUp.start");
     const emptyFeat = new Float32Array(4 * this.planeSize);
     // Color plane set to 1 so the warm-up shape matches what evaluate() feeds.
     for (let i = 0; i < this.planeSize; i++) emptyFeat[3 * this.planeSize + i] = 1.0;
     const warm = new ort.Tensor("float32", emptyFeat, [1, 4, this.boardSize, this.boardSize]);
     await this.session!.run({ input: warm });
+    logDebug("EvaluatorWorker", "warmUp.done");
   }
 
   private encodeFeatures(states: StateSnapshot[]): Float32Array {
+    logDebug("EvaluatorWorker", "encodeFeatures", { batch: states.length });
     const needed = states.length * 4 * this.planeSize;
     if (!this.featureBuffer || this.featureBuffer.length !== needed) {
       this.featureBuffer = new Float32Array(needed);
@@ -173,22 +201,35 @@ function softmaxInPlace(arr: Float32Array, offset: number, len: number): void {
   }
 }
 
-const evaluator = new EvaluatorSession();
+    const evaluator = new EvaluatorSession();
 
 function post(response: WorkerResponse, transfer?: Transferable[]): void {
+  logDebug("EvaluatorWorker", "post", {
+    id: response.id,
+    ok: response.ok,
+  });
   self.postMessage(response, transfer ?? []);
 }
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const msg = event.data;
+  logDebug("EvaluatorWorker", "onmessage", {
+    type: msg?.type,
+    id: msg?.id,
+  });
   try {
     if (msg.type === "init") {
       await evaluator.init(msg);
+      logDebug("EvaluatorWorker", "onmessage.initDone", { id: msg.id });
       post({ id: msg.id, ok: true, backend: evaluator.backend });
       return;
     }
     if (msg.type === "evaluate") {
       const result = await evaluator.evaluate(msg);
+      logDebug("EvaluatorWorker", "onmessage.evaluateDone", {
+        id: msg.id,
+        batch: result.batch,
+      });
       post(
         {
           id: msg.id,
@@ -203,6 +244,10 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       return;
     }
   } catch (err) {
+    logError("EvaluatorWorker", "onmessage.error", {
+      id: msg?.id,
+      message: err instanceof Error ? err.message : String(err),
+    });
     const error = err instanceof Error ? err.message : String(err);
     post({ id: msg.id, ok: false, error });
   }

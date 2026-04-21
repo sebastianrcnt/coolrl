@@ -1,4 +1,5 @@
 import type { GameState, Player } from "./game-state";
+import { logDebug, logInfo, logWarn } from "../util/logger";
 
 export interface PolicyValue {
   policy: ReadonlyArray<Float32Array>;
@@ -103,11 +104,24 @@ export class MCTS {
 
   async run(state: GameState, numSims: number, options: RunOptions = {}): Promise<RunResult> {
     const { reuseRoot = null, onProgress = null } = options;
+    const startedAt = performance.now();
     const currentKey = stateKey(state);
     const root =
       reuseRoot && reuseRoot.toPlay === state.toPlay && reuseRoot.stateKey === currentKey
         ? reuseRoot
         : new TreeNode(state.toPlay, 0, currentKey);
+    logInfo("MCTS", "run.start", {
+      reuseRoot: reuseRoot !== null && root === reuseRoot,
+      moveCount: state.moveCount,
+      toPlay: state.toPlay,
+      numSims,
+      currentBoardSize: state.boardSize,
+    });
+    if (root === reuseRoot) {
+      logDebug("MCTS", "run.reusedRoot");
+    } else {
+      logDebug("MCTS", "run.newRoot");
+    }
 
     if (!root.expanded && !state.terminal) {
       const { policy, value } = await this.evaluator.evaluate([state]);
@@ -115,9 +129,14 @@ export class MCTS {
       root.rootValue = value[0]!;
       onProgress?.(1, numSims, this.candidateHints(root, state));
       await yieldToBrowser();
+      logDebug("MCTS", "run.rootExpanded", {
+        actionCount: root.children.size,
+        rootValue: root.rootValue,
+      });
     }
 
     let yieldClock = performance.now();
+    const progressStride = Math.max(1, Math.ceil(numSims / 20));
 
     for (let sim = 0; sim < numSims; sim++) {
       let node = root;
@@ -129,6 +148,10 @@ export class MCTS {
         simState.applyAction(action);
         const childKey = stateKey(simState);
         if (child.stateKey !== undefined && child.stateKey !== childKey) {
+          logWarn("MCTS", "run.detectedStaleChild", {
+            expected: child.stateKey,
+            actual: childKey,
+          });
           child.children.clear();
           child.expanded = false;
           child.visitCount = 0;
@@ -153,12 +176,26 @@ export class MCTS {
       const now = performance.now();
       if (now - yieldClock >= this.yieldEveryMs) {
         onProgress?.(sim + 1, numSims, this.candidateHints(root, state));
+        if ((sim + 1) % progressStride === 0 || sim + 1 === numSims) {
+          logDebug("MCTS", "run.progress", {
+            done: sim + 1,
+            total: numSims,
+            nodes: path.length,
+          });
+        }
         await yieldToBrowser();
         yieldClock = performance.now();
       }
     }
     onProgress?.(numSims, numSims, this.candidateHints(root, state));
-    return this.chooseAction(root, state);
+    const result = this.chooseAction(root, state);
+    logInfo("MCTS", "run.done", {
+      action: result.action,
+      rootValue: result.rootValue,
+      elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
+      totalChildren: root.children.size,
+    });
+    return result;
   }
 
   private selectChild(node: TreeNode): [number, TreeNode] {

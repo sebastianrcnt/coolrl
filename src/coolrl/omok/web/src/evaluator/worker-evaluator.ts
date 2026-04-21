@@ -2,6 +2,7 @@ import EvaluatorWorker from "./worker?worker";
 import type { Evaluator, PolicyValue } from "../core/mcts";
 import type { GameState } from "../core/game-state";
 import type { InferenceBackend } from "../util/backend";
+import { logDebug, logError, logInfo, logWarn } from "../util/logger";
 import type {
   EvaluateSuccess,
   InitSuccess,
@@ -48,22 +49,36 @@ export class WorkerEvaluator implements Evaluator {
     backend: InferenceBackend = "wasm",
     lowMemory = false
   ): Promise<WorkerEvaluator> {
+    const started = performance.now();
     const evaluator = new WorkerEvaluator(boardSize, backend, lowMemory);
     const worker = new EvaluatorWorker();
     evaluator.worker = worker;
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => evaluator.onMessage(event);
     worker.onerror = (event) => evaluator.onError(event);
     const workerBuffer = buf.slice(0);
+    logDebug("WorkerEvaluator", "fromArrayBuffer.send", {
+      boardSize,
+      backend,
+      lowMemory,
+      bytes: buf.byteLength,
+    });
     const response = (await evaluator.send(
       { type: "init", buf: workerBuffer, boardSize, backend, lowMemory },
       [workerBuffer]
     )) as InitSuccess;
     evaluator.backend = response.backend ?? backend;
+    logInfo("WorkerEvaluator", "fromArrayBuffer.ready", {
+      backend: evaluator.backend,
+      elapsedMs: Number((performance.now() - started).toFixed(1)),
+    });
     return evaluator;
   }
 
   terminate(): void {
     if (this.worker) {
+      logWarn("WorkerEvaluator", "terminate", {
+        pending: this.pending.size,
+      });
       this.worker.terminate();
       this.worker = null;
     }
@@ -75,6 +90,8 @@ export class WorkerEvaluator implements Evaluator {
 
   async evaluate(states: GameState[]): Promise<PolicyValue> {
     if (!this.worker) throw new Error("evaluator not initialized");
+    const t0 = performance.now();
+    logDebug("WorkerEvaluator", "evaluate.start", { batch: states.length });
     const snapshots = states.map(toSnapshot);
     const response = (await this.send({
       type: "evaluate",
@@ -89,6 +106,11 @@ export class WorkerEvaluator implements Evaluator {
       policy.push(policyArr.subarray(b * actionSize, (b + 1) * actionSize));
       value.push(valuesArr[b]!);
     }
+    logDebug("WorkerEvaluator", "evaluate.done", {
+      batch,
+      actionSize,
+      elapsedMs: Number((performance.now() - t0).toFixed(1)),
+    });
     return { policy, value };
   }
 
@@ -100,6 +122,11 @@ export class WorkerEvaluator implements Evaluator {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       this.pending.set(id, { resolve, reject });
+      logDebug("WorkerEvaluator", "send", {
+        id,
+        type: request.type,
+        hasTransfer: transfer.length > 0,
+      });
       this.worker!.postMessage({ ...request, id }, transfer);
     });
   }
@@ -109,6 +136,10 @@ export class WorkerEvaluator implements Evaluator {
     const pending = this.pending.get(data.id);
     if (!pending) return;
     this.pending.delete(data.id);
+    logDebug("WorkerEvaluator", "onMessage", {
+      id: data.id,
+      ok: data.ok,
+    });
     if (data.ok) {
       pending.resolve(data);
     } else {
@@ -118,6 +149,7 @@ export class WorkerEvaluator implements Evaluator {
 
   private onError(event: ErrorEvent): void {
     const message = (event && event.message) || "worker crashed";
+    logError("WorkerEvaluator", "onError", message);
     for (const pending of this.pending.values()) {
       pending.reject(new Error(message));
     }
