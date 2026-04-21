@@ -24,13 +24,19 @@ This project defines extras in `[project.optional-dependencies]`:
 
 - `poker`: `inquirer`
 - `omok`: `torch`, `numpy`, `pygame`, `pyyaml`, `safetensors`
-- `all`: installs both `poker` and `omok`
+- `omok-tui`: `omok` plus `onnxruntime` and `textual`
+- `omok-tui-cuda`: `omok` plus CUDA ONNX Runtime and `textual`
+- `omok-tui-tensorrt`: `omok` plus CUDA ONNX Runtime, TensorRT, and `textual`
+- `all`: installs `poker`, `omok`, `omok-tui`, and `lost-cities`
 
 Install one or more extras as needed:
 
 ```bash
 uv sync --extra poker
 uv sync --extra omok
+uv sync --extra omok-tui
+uv sync --extra omok-tui-cuda
+uv sync --extra omok-tui-tensorrt
 uv sync --extra omok-tensorrt
 uv sync --extra all
 uv sync --extra poker --extra omok

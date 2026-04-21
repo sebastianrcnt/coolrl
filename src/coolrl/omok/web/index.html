@@ -548,6 +548,96 @@
       border: 0.5px solid var(--glass-border);
     }
 
+    /* ---------- Runtime debug overlay ---------- */
+    .debug-panel {
+      position: fixed;
+      left: max(8px, calc(50% - 280px + 8px));
+      bottom: max(86px, calc(env(safe-area-inset-bottom) + 86px));
+      width: min(360px, calc(100vw - 16px));
+      max-height: min(32dvh, 210px);
+      overflow: auto;
+      z-index: 8;
+      border-radius: var(--radius-md);
+      padding: 9px 10px 10px;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      border: 0.5px solid rgba(220, 224, 232, 0.9);
+      box-shadow:
+        0 1px 2px rgba(28, 32, 46, 0.06),
+        0 8px 24px rgba(28, 32, 46, 0.10);
+      color: var(--muted);
+      font-size: 0.68rem;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .debug-panel summary {
+      position: sticky;
+      top: -9px;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      list-style: none;
+      cursor: pointer;
+      color: var(--text);
+      font-weight: 700;
+      margin: -9px -10px 7px;
+      padding: 9px 10px 7px;
+      background: rgba(255, 255, 255, 0.96);
+      border-bottom: 0.5px solid rgba(220, 224, 232, 0.72);
+    }
+
+    .debug-panel summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .debug-panel summary::after {
+      content: "접기";
+      color: var(--muted);
+      font-size: 0.62rem;
+      font-weight: 400;
+    }
+
+    .debug-panel:not([open]) {
+      width: auto;
+      max-height: none;
+      padding: 8px 10px;
+      overflow: visible;
+    }
+
+    .debug-panel:not([open]) summary {
+      position: static;
+      margin: -8px -10px;
+      padding: 8px 10px;
+      border-bottom: none;
+    }
+
+    .debug-panel:not([open]) summary::after {
+      content: "열기";
+    }
+
+    .debug-grid {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 3px 9px;
+    }
+
+    .debug-k {
+      color: var(--subtle);
+      white-space: nowrap;
+    }
+
+    .debug-v {
+      min-width: 0;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     /* ---------- Settings sheet ---------- */
     .sheet-backdrop {
       position: fixed;
@@ -911,6 +1001,11 @@
         가즈아
       </button>
     </div>
+
+    <details class="debug-panel glass-subtle" id="debug-panel" open>
+      <summary>디버그</summary>
+      <div class="debug-grid" id="debug-grid"></div>
+    </details>
   </div>
 
   <div class="sheet-backdrop" id="sheet-backdrop"></div>
@@ -1055,18 +1150,35 @@
     const WORKER_SRC = `
 "use strict";
 const ORT_CDN_BASE = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/";
-importScripts(ORT_CDN_BASE + "ort.webgpu.min.js");
-ort.env.wasm.wasmPaths = ORT_CDN_BASE;
-ort.env.wasm.numThreads = 1;
 
 let session = null;
 let activeBackend = "wasm";
+let ortLoaded = false;
 let boardSize = 9;
 let planeSize = 81;
 let actionSize = 81;
 
 function normalizeBackend(value) {
   return value === "webgpu" || value === "webnn" ? value : "wasm";
+}
+
+function wasmPaths(backend) {
+  const useJsep = backend === "webgpu" || backend === "webnn";
+  const suffix = useJsep ? ".jsep" : "";
+  return {
+    wasm: ORT_CDN_BASE + "ort-wasm-simd-threaded" + suffix + ".wasm",
+    mjs: ORT_CDN_BASE + "ort-wasm-simd-threaded" + suffix + ".mjs",
+  };
+}
+
+function loadOrt(backend) {
+  if (ortLoaded) return;
+  const useJsep = backend === "webgpu" || backend === "webnn";
+  importScripts(ORT_CDN_BASE + (useJsep ? "ort.webgpu.min.js" : "ort.wasm.min.js"));
+  ort.env.wasm.wasmPaths = wasmPaths(backend);
+  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.proxy = false;
+  ortLoaded = true;
 }
 
 function setSize(n) {
@@ -1112,10 +1224,18 @@ self.onmessage = async (e) => {
     if (msg.type === "init") {
       setSize(msg.boardSize);
       activeBackend = normalizeBackend(msg.backend);
-      session = await ort.InferenceSession.create(msg.buf, {
+      loadOrt(activeBackend);
+      const lowMemory = !!msg.lowMemory;
+      const sessionOptions = {
         executionProviders: [activeBackend],
-        graphOptimizationLevel: "all",
-      });
+        graphOptimizationLevel: lowMemory ? "basic" : "all",
+      };
+      if (activeBackend === "wasm") {
+        sessionOptions.enableCpuMemArena = !lowMemory;
+        sessionOptions.enableMemPattern = !lowMemory;
+        sessionOptions.executionMode = "sequential";
+      }
+      session = await ort.InferenceSession.create(msg.buf, sessionOptions);
       // Warm-up pass to amortize first-run WASM JIT costs
       const emptyFeat = new Float32Array(4 * planeSize);
       for (let i = 0; i < planeSize; i++) emptyFeat[3 * planeSize + i] = 1.0;
@@ -1156,22 +1276,23 @@ self.onmessage = async (e) => {
     }
 
     class WorkerEvaluator {
-      constructor(boardSize, backend) {
+      constructor(boardSize, backend, lowMemory = false) {
         this.boardSize = boardSize;
         this.actionSize = boardSize * boardSize;
         this.backend = backend;
+        this.lowMemory = lowMemory;
         this.worker = null;
         this.pending = new Map();
         this.nextId = 1;
       }
 
-      static async fromArrayBuffer(buf, boardSize, backend = "wasm") {
-        const ev = new WorkerEvaluator(boardSize, backend);
+      static async fromArrayBuffer(buf, boardSize, backend = "wasm", lowMemory = false) {
+        const ev = new WorkerEvaluator(boardSize, backend, lowMemory);
         ev.worker = new Worker(workerUrl());
         ev.worker.onmessage = (e) => ev._onMessage(e);
         ev.worker.onerror = (e) => ev._onError(e);
         // Transfer the model buffer to the worker so we don't pay the copy cost
-        const init = await ev._send({ type: "init", buf, boardSize, backend }, [buf]);
+        const init = await ev._send({ type: "init", buf, boardSize, backend, lowMemory }, [buf]);
         ev.backend = init.backend || backend;
         return ev;
       }
@@ -1261,10 +1382,11 @@ self.onmessage = async (e) => {
     }
 
     class MCTS {
-      constructor({ cPuct = 1.6, evaluator, yieldEveryMs = 14 }) {
+      constructor({ cPuct = 1.6, evaluator, yieldEveryMs = 14, maxChildren = Infinity }) {
         this.cPuct = cPuct;
         this.evaluator = evaluator;
         this.yieldEveryMs = yieldEveryMs;
+        this.maxChildren = maxChildren;
       }
 
       async run(state, numSims, { reuseRoot = null, onProgress = null } = {}) {
@@ -1329,7 +1451,7 @@ self.onmessage = async (e) => {
       }
 
       _expand(node, state, priors) {
-        const legal = state.legalIndices();
+        const legal = this._limitedLegalActions(state.legalIndices(), priors);
         let total = 0;
         for (const a of legal) total += priors[a];
         node.children.clear();
@@ -1340,6 +1462,15 @@ self.onmessage = async (e) => {
           for (const a of legal) node.children.set(a, new TreeNode(-state.toPlay, priors[a] / total));
         }
         node.expanded = true;
+      }
+
+      _limitedLegalActions(legal, priors) {
+        if (!Number.isFinite(this.maxChildren) || legal.length <= this.maxChildren) return legal;
+        return legal
+          .map((action) => [action, Number.isFinite(priors[action]) ? priors[action] : -Infinity])
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, this.maxChildren)
+          .map(([action]) => action);
       }
 
       _backup(path, value) {
@@ -1388,6 +1519,9 @@ self.onmessage = async (e) => {
     const BOARD_SIZE = 15;
     const DEFAULT_MODEL_URL = "./best.onnx";
     const DEFAULT_BACKEND = "wasm";
+    const DEBUG_STARTED_AT = performance.now();
+    const MAX_MOBILE_CANVAS_DPR = 2;
+    const MOBILE_MCTS_MAX_CHILDREN = 48;
 
     const BACKEND_LABELS = {
       wasm: "WASM",
@@ -1436,6 +1570,8 @@ self.onmessage = async (e) => {
       turnText: document.getElementById("turn-text"),
       sheet: document.getElementById("sheet"),
       sheetBackdrop: document.getElementById("sheet-backdrop"),
+      debugPanel: document.getElementById("debug-panel"),
+      debugGrid: document.getElementById("debug-grid"),
     };
 
     const app = {
@@ -1453,24 +1589,24 @@ self.onmessage = async (e) => {
       aiSubtree: null,
       pendingAction: null,
       aiValue: null,
-  aiTimeMs: null,
-  aiProgress: null,
-  thinkingGhostPlayer: 0,
-  thinkingGhostCandidates: [],
-  thinkingGhostSlots: [],
-  thinkingGhostLastSpawn: 0,
-  thinkingGhostRaf: 0,
-  statusOverride: null,
-  initialSetup: true,
+      aiTimeMs: null,
+      aiProgress: null,
+      thinkingGhostPlayer: 0,
+      thinkingGhostCandidates: [],
+      thinkingGhostSlots: [],
+      thinkingGhostLastSpawn: 0,
+      thinkingGhostRaf: 0,
+      statusOverride: null,
+      initialSetup: true,
       defaultModelLoadStarted: false,
       anims: new Map(), // action -> { start: performance.now() }
       animRaf: 0,
     };
 
-const STONE_ANIM_MS = 280;
-const THINKING_GHOST_INTERVAL_MS = 110;
-const THINKING_GHOST_LIFE_MS = 360;
-const THINKING_GHOST_MAX = 5;
+    const STONE_ANIM_MS = 280;
+    const THINKING_GHOST_INTERVAL_MS = 110;
+    const THINKING_GHOST_LIFE_MS = 360;
+    const THINKING_GHOST_MAX = 5;
 
     function easeOutBack(t) {
       const c = 1.70158, s = c + 1;
@@ -1570,9 +1706,66 @@ function tickThinkingGhosts(now) {
   app.thinkingGhostRaf = requestAnimationFrame(tickThinkingGhosts);
 }
 
+    function hasAiModel() {
+      return !!(app.evaluator || app.modelBuffer);
+    }
+
+    function makeMcts() {
+      return new MCTS({
+        cPuct: 1.6,
+        evaluator: app.evaluator,
+        maxChildren: mctsMaxChildren(),
+      });
+    }
+
+    function releaseEvaluatorForIdle() {
+      if (!lowMemoryMode() || !app.evaluator || app.busy) return;
+      if (!app.initialSetup && !isHumansTurn() && !app.game.terminal) return;
+      app.evaluator.terminate();
+      app.evaluator = null;
+      app.mcts = null;
+      app.aiSubtree = null;
+      updateInfo();
+      updateDebugPanel();
+    }
+
+    function scheduleEvaluatorIdleRelease() {
+      clearTimeout(scheduleEvaluatorIdleRelease._timer);
+      if (!lowMemoryMode()) return;
+      scheduleEvaluatorIdleRelease._timer = setTimeout(releaseEvaluatorForIdle, 400);
+    }
+
+    async function ensureEvaluatorReady(statusText = "쿨파고 준비 중") {
+      if (app.evaluator && app.mcts) return true;
+      if (!app.modelBuffer) return false;
+
+      setBusy(true);
+      flashStatus(`${statusText}… ${backendLabel(app.backend)}`, "thinking", 60_000);
+      if (app.evaluator) app.evaluator.terminate();
+      app.evaluator = null;
+      app.mcts = null;
+      try {
+        const buf = app.modelBuffer.slice(0);
+        app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend, lowMemoryMode());
+        app.mcts = makeMcts();
+        app.aiSubtree = null;
+        app.statusOverride = null;
+        setBusy(false);
+        updateInfo();
+        updateDebugPanel();
+        return true;
+      } catch (err) {
+        console.error(err);
+        setBusy(false);
+        flashStatus(`${backendLabel(app.backend)} 준비 실패`, "error", 8000);
+        updateInfo();
+        return false;
+      }
+    }
+
     function isHumansTurn() {
       if (app.game.terminal) return false;
-      if (!app.evaluator) return true;
+      if (!hasAiModel()) return true;
       return app.game.toPlay === app.humanPlayer;
     }
 
@@ -1582,7 +1775,7 @@ function tickThinkingGhosts(now) {
       els.btnSettings.disabled = b;
       els.backendSelect.disabled = b;
       els.btnUndo.disabled = b || app.history.length === 0;
-      els.btnAi.disabled = b || !app.evaluator || app.game.terminal || !isHumansTurn();
+      els.btnAi.disabled = b || !hasAiModel() || app.game.terminal || !isHumansTurn();
       updateConfirmEnabled();
     }
 
@@ -1598,6 +1791,112 @@ function tickThinkingGhosts(now) {
     function fmtDuration(ms) {
       if (ms === null || ms === undefined) return "";
       return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}초`;
+    }
+
+    function isMobileDevice() {
+      const mm = window.matchMedia ? window.matchMedia.bind(window) : null;
+      const narrow = mm ? mm("(max-width: 719px)").matches : window.innerWidth < 720;
+      const coarse = mm ? mm("(pointer: coarse)").matches : false;
+      return narrow || coarse;
+    }
+
+    function canvasPixelRatio() {
+      const dpr = window.devicePixelRatio || 1;
+      return isMobileDevice() ? Math.min(dpr, MAX_MOBILE_CANVAS_DPR) : dpr;
+    }
+
+    function lowMemoryMode() {
+      return isMobileDevice();
+    }
+
+    function mctsMaxChildren() {
+      return lowMemoryMode() ? MOBILE_MCTS_MAX_CHILDREN : Infinity;
+    }
+
+    function shouldReuseSearchTree() {
+      return !lowMemoryMode();
+    }
+
+    function applyDeviceDefaults() {
+      if (isMobileDevice() && els.sims.value === "128") {
+        els.sims.value = "96";
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[ch]));
+    }
+
+    function fmtBytes(bytes) {
+      if (!Number.isFinite(bytes) || bytes <= 0) return "n/a";
+      const units = ["B", "KB", "MB", "GB"];
+      let value = bytes;
+      let unit = 0;
+      while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+      }
+      const digits = unit === 0 ? 0 : value < 10 ? 1 : 0;
+      return `${value.toFixed(digits)}${units[unit]}`;
+    }
+
+    function fmtHeap() {
+      const mem = performance.memory;
+      if (!mem) return "n/a";
+      return `${fmtBytes(mem.usedJSHeapSize)} / ${fmtBytes(mem.totalJSHeapSize)} / ${fmtBytes(mem.jsHeapSizeLimit)}`;
+    }
+
+    function updateDebugPanel() {
+      if (!els.debugGrid) return;
+      const rect = els.canvas.getBoundingClientRect();
+      const deviceDpr = window.devicePixelRatio || 1;
+      const renderDpr = rect.width > 0 ? els.canvas.width / rect.width : canvasPixelRatio();
+      const supports = [
+        navigator.gpu ? "WebGPU" : null,
+        "ml" in navigator ? "WebNN" : null,
+      ].filter(Boolean).join(" ") || "-";
+      let boardMetric = "-";
+      try {
+        const { margin, step } = cellMetrics();
+        boardMetric = `간격 ${step.toFixed(1)} / 여백 ${margin.toFixed(1)}`;
+      } catch {
+        boardMetric = "-";
+      }
+
+      const backend = app.evaluator && app.evaluator.backend
+        ? `${backendLabel(app.backend)}→${backendLabel(app.evaluator.backend)}`
+        : backendLabel(app.backend);
+      const evaluatorState = app.evaluator ? "활성" : app.modelBuffer ? "절전" : "-";
+      const model = app.modelName
+        ? `${app.modelName} (${fmtBytes(app.modelBuffer ? app.modelBuffer.byteLength : 0)})`
+        : "-";
+      const state = app.initialSetup ? "처음 설정" : app.busy ? "계산/로딩" : "대기";
+      const ai = app.aiProgress ||
+        (app.aiTimeMs !== null ? `${fmtDuration(app.aiTimeMs)} ${fmtValue(app.aiValue) || ""}` : "-");
+      const metrics = [
+        ["경과", `${((performance.now() - DEBUG_STARTED_AT) / 1000).toFixed(0)}초 · ${document.visibilityState}`],
+        ["상태", `${state} · 자동로드 ${app.defaultModelLoadStarted ? "시작" : "전"}`],
+        ["백엔드", `${backend} · ${evaluatorState}`],
+        ["탐색", `${els.sims.value} · top ${Number.isFinite(mctsMaxChildren()) ? mctsMaxChildren() : "all"} · ${shouldReuseSearchTree() ? "reuse" : "no-reuse"}`],
+        ["모델", model],
+        ["힙", fmtHeap()],
+        ["기기", `${navigator.deviceMemory ? `${navigator.deviceMemory}GB` : "mem n/a"} · dpr ${deviceDpr.toFixed(2)}→${renderDpr.toFixed(2)} · ${navigator.hardwareConcurrency || "?"}코어`],
+        ["지원", supports],
+        ["화면", `${Math.round(window.innerWidth)}×${Math.round(window.innerHeight)} · ${Math.round(rect.width)}×${Math.round(rect.height)}css`],
+        ["캔버스", `${els.canvas.width}×${els.canvas.height}px · ${boardMetric}`],
+        ["게임", `${app.game.moveCount}/${app.game.actionSize}수 · 기록 ${app.history.length}`],
+        ["애니", `돌 ${app.anims.size}/${app.animRaf ? "raf" : "-"} · 고스트 ${app.thinkingGhostSlots.length}/${app.thinkingGhostCandidates.length}/${app.thinkingGhostRaf ? "raf" : "-"}`],
+        ["쿨파고", ai],
+      ];
+      els.debugGrid.innerHTML = metrics
+        .map(([key, value]) => `<span class="debug-k">${escapeHtml(key)}</span><span class="debug-v" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`)
+        .join("");
     }
 
     const LOOKAHEAD_TEMPLATES = [
@@ -1659,7 +1958,7 @@ function tickThinkingGhosts(now) {
 
     function updateInfo() {
       const toPlayIsBlack = app.game.toPlay === 1;
-      const aiPlayer = app.evaluator ? -app.humanPlayer : 0;
+      const aiPlayer = hasAiModel() ? -app.humanPlayer : 0;
       const aiIsBlack = aiPlayer === 1;
 
       els.blackName.textContent = app.humanPlayer === 1 ? "흑(나)" : "흑(쿨파고)";
@@ -1670,10 +1969,12 @@ function tickThinkingGhosts(now) {
 
       const humanMoves = `${app.game.moveCount}수`;
       let aiSub;
-      if (!app.evaluator) {
+      if (!hasAiModel()) {
         aiSub = "수동";
       } else if (app.aiProgress) {
         aiSub = "생각 중...";
+      } else if (!app.evaluator) {
+        aiSub = "절전 대기";
       } else if (app.aiValue !== null) {
         const t = app.aiTimeMs !== null ? ` · ${fmtDuration(app.aiTimeMs)}` : "";
         aiSub = `형세 ${fmtValue(app.aiValue)}${t}`;
@@ -1681,7 +1982,7 @@ function tickThinkingGhosts(now) {
         aiSub = "대기";
       }
 
-      if (app.evaluator) {
+      if (hasAiModel()) {
         if (aiIsBlack) { els.blackSub.textContent = aiSub; els.whiteSub.textContent = humanMoves; }
         else { els.whiteSub.textContent = aiSub; els.blackSub.textContent = humanMoves; }
       } else {
@@ -1702,7 +2003,7 @@ function tickThinkingGhosts(now) {
       } else if (app.busy) {
         text = "쿨파고가 생각하는 중입니다…";
         cls = "thinking";
-      } else if (!app.evaluator) {
+      } else if (!hasAiModel()) {
         text = toPlayIsBlack ? "흑 차례" : "백 차례";
       } else if (isHumansTurn()) {
         text = app.pendingAction !== null ? "확정을 눌러주세요" : "내 차례";
@@ -1713,7 +2014,7 @@ function tickThinkingGhosts(now) {
       setTurnPillText(text);
 
       els.btnUndo.disabled = app.busy || (app.history.length === 0 && app.pendingAction === null);
-      els.btnAi.disabled = app.busy || !app.evaluator || app.game.terminal || !isHumansTurn();
+      els.btnAi.disabled = app.busy || !hasAiModel() || app.game.terminal || !isHumansTurn();
       updateConfirmEnabled();
     }
 
@@ -1739,8 +2040,8 @@ function tickThinkingGhosts(now) {
       try {
         const buf = await file.arrayBuffer();
         const reusable = buf.slice(0);
-        app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend);
-        app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
+        app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend, lowMemoryMode());
+        app.mcts = makeMcts();
         app.modelBuffer = reusable;
         app.modelName = file.name;
         app.modelTitle = file.name;
@@ -1751,6 +2052,7 @@ function tickThinkingGhosts(now) {
         setBusy(false);
         updateInfo();
         maybeAiMove();
+        scheduleEvaluatorIdleRelease();
         return;
       } catch (err) {
         console.error(err);
@@ -1775,10 +2077,11 @@ function tickThinkingGhosts(now) {
       if (!app.initialSetup) reloadModelForBackend();
       else updateInfo();
     });
+    els.sims.addEventListener("change", updateDebugPanel);
 
     els.btnReset.addEventListener("click", () => { if (!app.busy) resetGame(); });
     els.btnUndo.addEventListener("click", undo);
-    els.btnAi.addEventListener("click", () => { if (app.evaluator && !app.busy) showHint(); });
+    els.btnAi.addEventListener("click", () => { if (hasAiModel() && !app.busy) showHint(); });
     els.btnConfirm.addEventListener("click", confirmPending);
 
     // ---- Settings sheet ----
@@ -1797,7 +2100,7 @@ function tickThinkingGhosts(now) {
       els.btnSheetClose.textContent = "완료";
       closeSheet();
       updateInfo();
-      if (app.evaluator) maybeAiMove();
+      if (hasAiModel()) maybeAiMove();
       else tryAutoLoadDefault();
     }
     els.btnSettings.addEventListener("click", openSheet);
@@ -1820,13 +2123,14 @@ function tickThinkingGhosts(now) {
       app.mcts = null;
       try {
         const buf = app.modelBuffer.slice(0);
-        app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend);
-        app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
+        app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend, lowMemoryMode());
+        app.mcts = makeMcts();
         app.aiSubtree = null;
         app.statusOverride = null;
         setBusy(false);
         updateInfo();
         maybeAiMove();
+        scheduleEvaluatorIdleRelease();
       } catch (err) {
         console.error(err);
         setBusy(false);
@@ -1902,7 +2206,7 @@ function undo() {
       app.game.applyAction(action);
       app.history.push(action);
       startStoneAnim(action);
-      if (app.aiSubtree && app.aiSubtree.children.has(action)) {
+      if (shouldReuseSearchTree() && app.aiSubtree && app.aiSubtree.children.has(action)) {
         app.aiSubtree = app.aiSubtree.children.get(action);
       } else {
         app.aiSubtree = null;
@@ -1914,82 +2218,97 @@ function undo() {
 
     function maybeAiMove() {
       if (app.initialSetup) return;
-      if (!app.evaluator || app.busy || app.game.terminal) return;
+      if (!hasAiModel() || app.busy || app.game.terminal) return;
       if (app.game.toPlay !== app.humanPlayer) aiMove();
     }
 
-async function aiMove() {
-  if (!app.mcts || app.game.terminal) return;
-  setBusy(true);
-  startThinkingGhosts(app.game.toPlay);
-  const sims = parseInt(els.sims.value);
+    async function aiMove() {
+      if (app.game.terminal || app.busy) return;
+      if (!(await ensureEvaluatorReady("쿨파고 깨우는 중"))) return;
+      if (app.game.terminal || app.game.toPlay === app.humanPlayer) {
+        scheduleEvaluatorIdleRelease();
+        return;
+      }
+
+      setBusy(true);
+      startThinkingGhosts(app.game.toPlay);
+      const sims = parseInt(els.sims.value);
       const progressTemplate = pickLookaheadTemplate();
       app.aiProgress = lookaheadText(1, progressTemplate);
       app.statusOverride = { text: app.aiProgress, cls: "thinking" };
       updateInfo();
       const t0 = performance.now();
       try {
-    const result = await app.mcts.run(app.game, sims, {
-      reuseRoot: app.aiSubtree,
-      onProgress: (done, total, candidates) => {
-        updateThinkingGhostCandidates(candidates);
-        app.aiProgress = lookaheadText(done, progressTemplate);
-        app.statusOverride = { text: app.aiProgress, cls: "thinking" };
-        updateInfo();
+        const result = await app.mcts.run(app.game, sims, {
+          reuseRoot: shouldReuseSearchTree() ? app.aiSubtree : null,
+          onProgress: (done, total, candidates) => {
+            updateThinkingGhostCandidates(candidates);
+            app.aiProgress = lookaheadText(done, progressTemplate);
+            app.statusOverride = { text: app.aiProgress, cls: "thinking" };
+            updateInfo();
           },
         });
         app.aiTimeMs = performance.now() - t0;
-    app.aiValue = result.rootValue;
-    app.aiProgress = null;
-    app.statusOverride = null;
-    stopThinkingGhosts(false);
-    app.game.applyAction(result.action);
+        app.aiValue = result.rootValue;
+        app.aiProgress = null;
+        app.statusOverride = null;
+        stopThinkingGhosts(false);
+        app.game.applyAction(result.action);
         app.history.push(result.action);
         startStoneAnim(result.action);
-        app.aiSubtree = result.nextRoot;
+        app.aiSubtree = shouldReuseSearchTree() ? result.nextRoot : null;
         updateInfo();
         redraw();
       } catch (err) {
-    console.error(err);
-    app.aiProgress = null;
-    app.statusOverride = null;
-    stopThinkingGhosts(false);
-    flashStatus("쿨파고 오류", "error");
+        console.error(err);
+        app.aiProgress = null;
+        app.statusOverride = null;
+        stopThinkingGhosts(false);
+        flashStatus("쿨파고 오류", "error");
       }
       setBusy(false);
       updateInfo();
+      scheduleEvaluatorIdleRelease();
     }
 
-async function showHint() {
-  if (!app.mcts || app.game.terminal || !isHumansTurn()) return;
-  const sims = parseInt(els.sims.value);
-  const progressTemplate = pickLookaheadTemplate();
-  clearTimeout(flashStatus._t);
-  app.statusOverride = { text: lookaheadText(1, progressTemplate), cls: "thinking" };
-  setBusy(true);
-  startThinkingGhosts(app.game.toPlay);
-  const t0 = performance.now();
-  try {
-    const result = await app.mcts.run(app.game, sims, {
-      reuseRoot: app.aiSubtree,
-      onProgress: (done, total, candidates) => {
-        updateThinkingGhostCandidates(candidates);
-        app.statusOverride = { text: lookaheadText(done, progressTemplate), cls: "thinking" };
-        updateInfo();
-      },
-    });
-    app.pendingAction = result.action;
-    app.statusOverride = null;
-    stopThinkingGhosts(false);
-    setBusy(false);
-    redraw();
+    async function showHint() {
+      if (app.game.terminal || app.busy || !isHumansTurn()) return;
+      if (!(await ensureEvaluatorReady("훈수 준비 중"))) return;
+      if (app.game.terminal || !isHumansTurn()) {
+        scheduleEvaluatorIdleRelease();
+        return;
+      }
+
+      const sims = parseInt(els.sims.value);
+      const progressTemplate = pickLookaheadTemplate();
+      clearTimeout(flashStatus._t);
+      app.statusOverride = { text: lookaheadText(1, progressTemplate), cls: "thinking" };
+      setBusy(true);
+      startThinkingGhosts(app.game.toPlay);
+      const t0 = performance.now();
+      try {
+        const result = await app.mcts.run(app.game, sims, {
+          reuseRoot: shouldReuseSearchTree() ? app.aiSubtree : null,
+          onProgress: (done, total, candidates) => {
+            updateThinkingGhostCandidates(candidates);
+            app.statusOverride = { text: lookaheadText(done, progressTemplate), cls: "thinking" };
+            updateInfo();
+          },
+        });
+        app.pendingAction = result.action;
+        app.statusOverride = null;
+        stopThinkingGhosts(false);
+        setBusy(false);
+        redraw();
         flashStatus(`추천 수 표시 · 형세 ${fmtValue(result.rootValue)} · ${fmtDuration(performance.now() - t0)}`, "thinking", 1800);
+        scheduleEvaluatorIdleRelease();
       } catch (err) {
-    console.error(err);
-    app.statusOverride = null;
-    stopThinkingGhosts(false);
-    setBusy(false);
+        console.error(err);
+        app.statusOverride = null;
+        stopThinkingGhosts(false);
+        setBusy(false);
         flashStatus("힌트 계산 실패", "error");
+        scheduleEvaluatorIdleRelease();
       }
     }
 
@@ -2002,7 +2321,7 @@ async function showHint() {
       const canvas = els.canvas;
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return false;
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = canvasPixelRatio();
       const w = Math.max(1, Math.round(rect.width * dpr));
       const h = Math.max(1, Math.round(rect.height * dpr));
       if (canvas.width !== w || canvas.height !== h) {
@@ -2336,12 +2655,14 @@ new MutationObserver(() => redraw()).observe(document.documentElement, {
     // when the CSS box rounds to a non-square pixel size.
     function handleResize() {
       if (syncCanvasSize()) redraw();
+      updateDebugPanel();
     }
     if (window.ResizeObserver) {
       new ResizeObserver(handleResize).observe(els.canvas);
     }
     window.addEventListener("resize", handleResize);
     window.addEventListener("orientationchange", handleResize);
+    window.addEventListener("visibilitychange", updateDebugPanel);
 
     // ---- Auto-load bundled default model ----
     async function tryAutoLoadDefault() {
@@ -2363,8 +2684,8 @@ new MutationObserver(() => redraw()).observe(document.documentElement, {
         const reusable = buf.slice(0);
         stage = `추론 준비 (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB)`;
         if (app.evaluator) app.evaluator.terminate();
-        app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend);
-        app.mcts = new MCTS({ cPuct: 1.6, evaluator: app.evaluator });
+        app.evaluator = await WorkerEvaluator.fromArrayBuffer(buf, app.boardSize, app.backend, lowMemoryMode());
+        app.mcts = makeMcts();
         app.modelBuffer = reusable;
         app.modelName = "best.onnx (기본)";
         app.modelTitle = "best.onnx (기본 모델)";
@@ -2375,6 +2696,7 @@ new MutationObserver(() => redraw()).observe(document.documentElement, {
         setBusy(false);
         updateInfo();
         maybeAiMove();
+        scheduleEvaluatorIdleRelease();
       } catch (err) {
         console.error(`[default-model load] failed at stage "${stage}":`, err);
         setBusy(false);
@@ -2385,9 +2707,12 @@ new MutationObserver(() => redraw()).observe(document.documentElement, {
     }
 
     // ---- Init ----
+    applyDeviceDefaults();
     updateInfo();
     syncCanvasSize();
     redraw();
+    updateDebugPanel();
+    setInterval(updateDebugPanel, 1000);
     // Extra sync after first paint — layout/viewport on iOS can settle post-load.
     requestAnimationFrame(() => { if (syncCanvasSize()) redraw(); });
     window.addEventListener("load", handleResize);

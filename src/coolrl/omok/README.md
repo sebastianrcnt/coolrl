@@ -49,6 +49,33 @@ uv run python -m coolrl.omok.gui --model exports/omok_quick.onnx
 uv run python -m coolrl.omok.gui --model exports/omok15_quick.onnx --board-size 15
 ```
 
+Watch ONNX models play each other in the terminal Textual UI:
+
+```bash
+uv run --extra omok-tui python -m coolrl.omok.tui \
+    --model exports/omok_quick.onnx
+
+uv run --extra omok-tui python -m coolrl.omok.tui \
+    --black-model exports/black.onnx \
+    --white-model exports/white.onnx \
+    --board-size 15
+
+# CUDA ONNX Runtime requires the CUDA extra.
+uv run --extra omok-tui-cuda python -m coolrl.omok.tui \
+    --model exports/omok_quick.onnx \
+    --device cuda
+
+# TensorRT requires the TensorRT TUI extra.
+uv run --extra omok-tui-tensorrt python -m coolrl.omok.tui \
+    --model exports/omok_quick.onnx \
+    --device tensorrt
+
+# Continuous model-vs-model run with a persistent score board.
+uv run --extra omok-tui python -m coolrl.omok.tui \
+    --model exports/omok_quick.onnx \
+    --infinite
+```
+
 Run a full-sized profile for your machine:
 
 ```bash
@@ -86,6 +113,19 @@ GUI CLI options:
 | `--simulations N` | `64` | MCTS simulations per AI move. |
 | `--human-color black\|white` | `white` | Which color the human plays. |
 | `--seed N` | `0` | Opening seed (also adjustable with `[`/`]` in-game). |
+
+TUI CLI options:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model FILE.onnx` | none | Single ONNX model used for both sides. |
+| `--black-model FILE.onnx` / `--white-model FILE.onnx` | none | Color-specific ONNX models. |
+| `--board-size 9\|15` | `9` | Board size. Must match the model policy output. |
+| `--device auto\|cpu\|cuda\|tensorrt\|coreml` | `auto` | ONNX Runtime execution provider. |
+| `--simulations N` | `256` | MCTS simulations per move. |
+| `--move-delay SEC` | `0.05` | Delay between displayed moves. |
+| `--infinite` | off | Start a fresh seeded game after each terminal result. Ignores `--seed`. |
+| `--debug-lines N` | `1000` | Scrollback kept in the debug console. |
 
 ## Configs
 

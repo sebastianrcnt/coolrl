@@ -25,6 +25,22 @@ omok = [
     "safetensors>=0.4.5",
     "torch>=2.0.0",
 ]
+omok-tui = [
+    "coolrl[omok]",
+    "onnxruntime>=1.18.0",
+    "textual>=0.85.0",
+]
+omok-tui-cuda = [
+    "coolrl[omok]",
+    "onnxruntime-gpu>=1.18.0; platform_system != 'Darwin'",
+    "textual>=0.85.0",
+]
+omok-tui-tensorrt = [
+    "coolrl[omok]",
+    "onnxruntime-gpu>=1.18.0; platform_system != 'Darwin'",
+    "tensorrt>=10.0.0; platform_system != 'Darwin'",
+    "textual>=0.85.0",
+]
 omok-tensorrt = [
     "coolrl[omok]",
     "onnx>=1.16.0; platform_system != 'Darwin'",
@@ -36,12 +52,13 @@ lost-cities = [
     "textual>=0.85.0",
 ]
 all = [
-    "coolrl[poker,omok,lost-cities]",
+    "coolrl[poker,omok,omok-tui,lost-cities]",
 ]
 
 [project.scripts]
 omok-train = "coolrl.omok.train:main"
 omok-plot = "coolrl.omok.plot_metrics:main"
+omok-tui = "coolrl.omok.tui:main"
 lost-cities = "coolrl.lost_cities.tui:main"
 
 [tool.setuptools.packages.find]
