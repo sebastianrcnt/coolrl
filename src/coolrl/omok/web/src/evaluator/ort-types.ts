@@ -10,6 +10,7 @@ export interface OrtTensorConstructor {
 
 export interface OrtInferenceSession {
   run(feeds: Record<string, OrtTensor>): Promise<Record<string, OrtTensor>>;
+  release?(): Promise<void>;
 }
 
 export interface OrtSessionOptions {

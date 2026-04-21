@@ -39,6 +39,21 @@ class EvaluatorSession {
     return this.activeBackend;
   }
 
+  async dispose(): Promise<void> {
+    const session = this.session;
+    this.session = null;
+    this.featureBuffer = null;
+    if (!session) {
+      logDebug("EvaluatorWorker", "dispose.noSession");
+      return;
+    }
+    logInfo("EvaluatorWorker", "dispose.start", { backend: this.activeBackend });
+    if (typeof session.release === "function") {
+      await session.release();
+    }
+    logInfo("EvaluatorWorker", "dispose.done");
+  }
+
   async init(request: InitRequest): Promise<void> {
     this.setSize(request.boardSize);
     this.activeBackend = normalizeBackend(request.backend);
@@ -261,6 +276,12 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         },
         [result.policy, result.values]
       );
+      return;
+    }
+    if (msg.type === "dispose") {
+      await evaluator.dispose();
+      logDebug("EvaluatorWorker", "onmessage.disposeDone", { id: msg.id });
+      post({ id: msg.id, ok: true, disposed: true });
       return;
     }
   } catch (err) {

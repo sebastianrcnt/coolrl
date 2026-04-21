@@ -334,7 +334,7 @@ export class OmokController {
       "thinking",
       60_000
     );
-    this.terminateEvaluator();
+    await this.disposeEvaluatorAsync();
     this.mcts = null;
     try {
       const buf = await this.fetchModelBuffer();
@@ -389,6 +389,17 @@ export class OmokController {
     this.evaluator = null;
   }
 
+  // Graceful async teardown: await the worker's InferenceSession.release()
+  // before terminating. Used by user-initiated paths (file pick, backend
+  // switch, pre-reinit) where we're already in an async handler and can
+  // afford to wait ~100-200 ms for deterministic GPU resource release.
+  private async disposeEvaluatorAsync(): Promise<void> {
+    logDebug("OmokController", "disposeEvaluatorAsync");
+    const ev = this.evaluator;
+    this.evaluator = null;
+    if (ev) await ev.dispose();
+  }
+
   private scheduleEvaluatorIdleRelease(): void {
     logDebug("OmokController", "scheduleEvaluatorIdleRelease", {
       isLowMemoryMode: this.env.isLowMemoryMode,
@@ -412,7 +423,7 @@ export class OmokController {
       "thinking",
       60_000
     );
-    this.terminateEvaluator();
+    await this.disposeEvaluatorAsync();
     this.mcts = null;
     try {
       const buf = await file.arrayBuffer();
@@ -455,7 +466,7 @@ export class OmokController {
       "thinking",
       60_000
     );
-    this.terminateEvaluator();
+    await this.disposeEvaluatorAsync();
     this.mcts = null;
     try {
       const buf = await this.fetchModelBuffer();
@@ -509,8 +520,7 @@ export class OmokController {
       stage = "모델 읽기";
       const buf = await resp.arrayBuffer();
       stage = `추론 준비 (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB)`;
-      this.terminateEvaluator();
-      this.evaluator = null;
+      await this.disposeEvaluatorAsync();
       this.evaluator = await this.createEvaluator(buf);
       this.mcts = this.makeMcts();
       this.modelSource = setFromDefault(buf, this.env.isLowMemoryMode);

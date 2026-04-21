@@ -235,15 +235,21 @@ is already past the limit.
   trail instead of a generic "WebGPU 준비 실패" that hides the actual
   failure mode.
 
-### Residual: clean session teardown
+### Follow-up: graceful session teardown
 
-When the user manually changes the backend (or picks a new ONNX file),
-we still call `worker.terminate()` without a preceding
-`session.release()`. That's acceptable because those are rare
-user-initiated events, not per-turn, but the cleanest fix would be a
-new `dispose` message on the worker protocol that awaits
-`InferenceSession.release()` before the worker exits. Filed as a
-follow-up.
+User-initiated teardown paths (backend switch, file pick, re-init after
+an idle release on WASM) now go through `WorkerEvaluator.dispose()`,
+which posts a new `dispose` protocol message to the worker. The worker
+calls `InferenceSession.release()` (awaiting GPU resource release) and
+only then acks; the main thread then calls `worker.terminate()`. A
+3-second timeout falls back to a hard terminate if `release()` hangs
+(iOS Safari with a lost WebGPU device can do this).
+
+The idle-release path for WASM sessions still uses the sync
+`terminate()` — there's no GPU state to release, and the sync path
+keeps the code simple. Page-unmount (`OmokController.dispose`) also
+stays sync because the caller is leaving and we don't want to hold up
+teardown on a release() that might never answer.
 
 ## Layered mitigations — what is active where
 
@@ -260,6 +266,7 @@ follow-up.
 | Evaluator idle release (WASM session) | off | on | on |
 | Evaluator idle release (WebGPU/WebNN session) | off | **off** | **off** |
 | Error chip includes exception detail | yes | yes | yes |
+| Graceful `session.release()` on teardown | yes (async paths only) | yes (async paths only) | yes (async paths only) |
 
 ## Residual risks / open items
 

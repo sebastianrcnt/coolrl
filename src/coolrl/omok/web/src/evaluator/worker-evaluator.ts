@@ -88,6 +88,35 @@ export class WorkerEvaluator implements Evaluator {
     this.pending.clear();
   }
 
+  // Graceful teardown: ask the worker to call InferenceSession.release() so
+  // GPU resources are freed deterministically, then terminate the worker.
+  // Falls back to a hard terminate if the worker doesn't answer within
+  // `timeoutMs` (iOS Safari with a lost WebGPU device can hang on release).
+  async dispose(timeoutMs = 3000): Promise<void> {
+    if (!this.worker) return;
+    logDebug("WorkerEvaluator", "dispose.start", {
+      backend: this.backend,
+      pending: this.pending.size,
+    });
+    const release = this.send({ type: "dispose" }).then(
+      () => "released" as const,
+      (err) => {
+        logWarn("WorkerEvaluator", "dispose.releaseFailed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return "failed" as const;
+      }
+    );
+    const timeout = new Promise<"timeout">((resolve) => {
+      setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    const outcome = await Promise.race([release, timeout]);
+    if (outcome === "timeout") {
+      logWarn("WorkerEvaluator", "dispose.timeout", { timeoutMs });
+    }
+    this.terminate();
+  }
+
   async evaluate(states: GameState[]): Promise<PolicyValue> {
     if (!this.worker) throw new Error("evaluator not initialized");
     const t0 = performance.now();

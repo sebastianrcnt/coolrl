@@ -22,7 +22,12 @@ export interface EvaluateRequest {
   states: StateSnapshot[];
 }
 
-export type WorkerRequest = InitRequest | EvaluateRequest;
+export interface DisposeRequest {
+  type: "dispose";
+  id: number;
+}
+
+export type WorkerRequest = InitRequest | EvaluateRequest | DisposeRequest;
 
 export interface InitSuccess {
   id: number;
@@ -39,10 +44,20 @@ export interface EvaluateSuccess {
   actionSize: number;
 }
 
+export interface DisposeSuccess {
+  id: number;
+  ok: true;
+  disposed: true;
+}
+
 export interface ErrorResponse {
   id: number;
   ok: false;
   error: string;
 }
 
-export type WorkerResponse = InitSuccess | EvaluateSuccess | ErrorResponse;
+export type WorkerResponse =
+  | InitSuccess
+  | EvaluateSuccess
+  | DisposeSuccess
+  | ErrorResponse;
