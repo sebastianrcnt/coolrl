@@ -349,7 +349,7 @@ def panel_title(
     if subtitle:
         ax.text(
             0.0,
-            1.32,
+            1.34,
             subtitle,
             transform=ax.transAxes,
             fontsize=13,
@@ -358,7 +358,7 @@ def panel_title(
     if caption:
         ax.text(
             0.0,
-            1.08,
+            1.18,
             caption,
             transform=ax.transAxes,
             fontsize=11,
@@ -673,6 +673,7 @@ def build_figure(
             arena[accepted],
             s=22,
             color=theme.text_primary,
+            alpha=0.55,
             zorder=6,
             edgecolors="none",
         )
