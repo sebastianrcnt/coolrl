@@ -121,13 +121,15 @@ def plot_curve(ax, x_values: Sequence[float], y_values: Sequence[float], **kwarg
     ax.plot(x, y, **kwargs)
 
 
-def iteration_tick_steps(axes: Sequence) -> tuple[int, int]:
+def iteration_tick_steps(axes: Sequence) -> tuple[float, float]:
     max_iter = 0.0
     for ax in axes:
         right = ax.get_xlim()[1]
         if np.isfinite(right):
             max_iter = max(max_iter, right)
 
+    if max_iter <= 20:
+        return 1, 0.5
     if max_iter <= 100:
         return 10, 2
     if max_iter <= 300:
@@ -144,7 +146,7 @@ def finish_figure(fig, axes: Sequence, output_path: Path | None, show: bool) -> 
         ax.xaxis.set_minor_locator(ticker.MultipleLocator(minor_step))
         ax.tick_params(axis="x", which="both", labelbottom=True)
         ax.grid(True, which="minor", axis="x", alpha=0.12)
-    plt.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
 
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
