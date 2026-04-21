@@ -153,12 +153,14 @@ export class OmokController {
       lowMemory: this.env.isLowMemoryMode,
       isMobile: this.env.isMobile,
       isIos: this.env.isIos,
+      isWebKit: this.env.isWebKit,
     });
   }
 
   start(): void {
     logInfo("OmokController", "start", {
       isIos: this.env.isIos,
+      isWebKit: this.env.isWebKit,
       initialBoardSize: this.boardSize,
     });
     if (this.env.isIos) {
@@ -287,7 +289,8 @@ export class OmokController {
     const attempts = resolveBackendAttempts(
       this.backendChoice,
       webgpuSupported,
-      this.env.isMobile
+      this.env.isMobile,
+      this.env.isWebKit
     );
     let lastError: unknown = null;
     for (const backend of attempts) {
@@ -808,6 +811,10 @@ export class OmokController {
   }
 
   private applyDeviceDefaults(): void {
+    if (this.env.isWebKit && this.dom.backendSelect.value === "auto") {
+      this.dom.backendSelect.value = "wasm";
+      this.backendChoice = "wasm";
+    }
     if (this.env.isMobile && this.dom.simsSelect.value === String(DEFAULT_SIMS)) {
       this.dom.simsSelect.value = String(MOBILE_DEFAULT_SIMS);
     }

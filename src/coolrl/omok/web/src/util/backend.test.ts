@@ -82,6 +82,9 @@ describe("resolveBackendAttempts", () => {
   it("auto on mobile uses wasm even with WebGPU support", () => {
     expect(resolveBackendAttempts("auto", true, true)).toEqual(["wasm"]);
   });
+  it("auto on WebKit uses wasm even with WebGPU support", () => {
+    expect(resolveBackendAttempts("auto", true, false, true)).toEqual(["wasm"]);
+  });
   it("auto without WebGPU support skips straight to wasm", () => {
     expect(resolveBackendAttempts("auto", false)).toEqual(["wasm"]);
   });

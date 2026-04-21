@@ -16,6 +16,7 @@ interface NavigatorLike {
 export interface DeviceEnvironment {
   readonly isMobile: boolean;
   readonly isIos: boolean;
+  readonly isWebKit: boolean;
   readonly canvasPixelRatio: number;
   readonly isLowMemoryMode: boolean;
 }
@@ -33,6 +34,16 @@ export function isIosDevice(nav: NavigatorLike = navigator): boolean {
   return (
     /iPad|iPhone|iPod/.test(ua) ||
     (platform === "MacIntel" && nav.maxTouchPoints > 1)
+  );
+}
+
+export function isWebKitBrowser(nav: NavigatorLike = navigator): boolean {
+  const ua = nav.userAgent || "";
+  if (isIosDevice(nav)) return true;
+  return (
+    /AppleWebKit/.test(ua) &&
+    /Safari/.test(ua) &&
+    !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR|SamsungBrowser|Android/.test(ua)
   );
 }
 
@@ -54,6 +65,7 @@ export function readDeviceEnvironment(
   return {
     isMobile: mobile,
     isIos: ios,
+    isWebKit: isWebKitBrowser(nav),
     canvasPixelRatio: canvasPixelRatio(win, nav),
     isLowMemoryMode: mobile,
   };
