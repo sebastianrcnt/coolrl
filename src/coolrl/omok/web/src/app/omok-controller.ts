@@ -14,9 +14,10 @@ import { TurnPillText } from "../ui/turn-pill-text";
 import { StatusPresenter, type DefaultStatus } from "../ui/status-presenter";
 import { formatSignedValue, formatDuration } from "../util/format";
 import {
-  backendLabel,
-  normalizeBackend,
-  type InferenceBackend,
+  backendChoiceLabel,
+  normalizeBackendChoice,
+  resolveBackendAttempts,
+  type BackendChoice,
 } from "../util/backend";
 import { readDeviceEnvironment, type DeviceEnvironment } from "../util/device";
 import { pickLookaheadTemplate, formatLookahead } from "../ui/lookahead-templates";
@@ -91,7 +92,7 @@ export class OmokController {
   private aiProgress: string | null = null;
   private busy = false;
   private humanPlayer: Player = 1;
-  private backend: InferenceBackend = "wasm";
+  private backendChoice: BackendChoice = "auto";
   private initialSetup = true;
   private defaultModelLoadStarted = false;
   private canvasCtx: CanvasRenderingContext2D | null = null;
@@ -197,7 +198,7 @@ export class OmokController {
       this.resetGame();
     });
     on(this.dom.backendSelect, "change", () => {
-      this.backend = normalizeBackend(this.dom.backendSelect.value);
+      this.backendChoice = normalizeBackendChoice(this.dom.backendSelect.value);
       this.pendingAction = null;
       this.aiSubtree = null;
       this.aiValue = null;
@@ -246,6 +247,28 @@ export class OmokController {
     return hasModel(this.modelSource, this.evaluator !== null);
   }
 
+  private async createEvaluator(buf: ArrayBuffer): Promise<WorkerEvaluator> {
+    const webgpuSupported =
+      typeof navigator !== "undefined" &&
+      !!(navigator as { gpu?: unknown }).gpu;
+    const attempts = resolveBackendAttempts(this.backendChoice, webgpuSupported);
+    let lastError: unknown = null;
+    for (const backend of attempts) {
+      try {
+        return await WorkerEvaluator.fromArrayBuffer(
+          buf,
+          this.boardSize,
+          backend,
+          this.env.isLowMemoryMode
+        );
+      } catch (err) {
+        lastError = err;
+        console.warn(`[evaluator] ${backend} backend failed`, err);
+      }
+    }
+    throw lastError ?? new Error("no backend available");
+  }
+
   private async fetchModelBuffer(): Promise<ArrayBuffer> {
     return fetchBufferFor(this.modelSource, this.defaultModelUrl);
   }
@@ -265,7 +288,7 @@ export class OmokController {
 
     this.setBusy(true);
     this.statusPresenter.flash(
-      `${statusText}… ${backendLabel(this.backend)}`,
+      `${statusText}… ${backendChoiceLabel(this.backendChoice)}`,
       "thinking",
       60_000
     );
@@ -273,12 +296,7 @@ export class OmokController {
     this.mcts = null;
     try {
       const buf = await this.fetchModelBuffer();
-      this.evaluator = await WorkerEvaluator.fromArrayBuffer(
-        buf,
-        this.boardSize,
-        this.backend,
-        this.env.isLowMemoryMode
-      );
+      this.evaluator = await this.createEvaluator(buf);
       this.mcts = this.makeMcts();
       this.aiSubtree = null;
       this.statusPresenter.clearOverride();
@@ -289,7 +307,11 @@ export class OmokController {
     } catch (err) {
       console.error(err);
       this.setBusy(false);
-      this.statusPresenter.flash(`${backendLabel(this.backend)} 준비 실패`, "error", 8000);
+      this.statusPresenter.flash(
+        `${backendChoiceLabel(this.backendChoice)} 준비 실패`,
+        "error",
+        8000
+      );
       this.updateInfo();
       return false;
     }
@@ -326,7 +348,7 @@ export class OmokController {
     if (!file) return;
     this.setBusy(true);
     this.statusPresenter.flash(
-      `모델 로딩 중… ${backendLabel(this.backend)}`,
+      `모델 로딩 중… ${backendChoiceLabel(this.backendChoice)}`,
       "thinking",
       60_000
     );
@@ -334,12 +356,7 @@ export class OmokController {
     this.mcts = null;
     try {
       const buf = await file.arrayBuffer();
-      this.evaluator = await WorkerEvaluator.fromArrayBuffer(
-        buf,
-        this.boardSize,
-        this.backend,
-        this.env.isLowMemoryMode
-      );
+      this.evaluator = await this.createEvaluator(buf);
       this.mcts = this.makeMcts();
       this.modelSource = setFromFile(file, buf, this.env.isLowMemoryMode);
       this.dom.fileName.textContent = file.name;
@@ -367,7 +384,7 @@ export class OmokController {
     }
     this.setBusy(true);
     this.statusPresenter.flash(
-      `추론 방식 변경 중… ${backendLabel(this.backend)}`,
+      `추론 방식 변경 중… ${backendChoiceLabel(this.backendChoice)}`,
       "thinking",
       60_000
     );
@@ -375,12 +392,7 @@ export class OmokController {
     this.mcts = null;
     try {
       const buf = await this.fetchModelBuffer();
-      this.evaluator = await WorkerEvaluator.fromArrayBuffer(
-        buf,
-        this.boardSize,
-        this.backend,
-        this.env.isLowMemoryMode
-      );
+      this.evaluator = await this.createEvaluator(buf);
       this.mcts = this.makeMcts();
       this.aiSubtree = null;
       this.statusPresenter.clearOverride();
@@ -391,7 +403,11 @@ export class OmokController {
     } catch (err) {
       console.error(err);
       this.setBusy(false);
-      this.statusPresenter.flash(`${backendLabel(this.backend)} 사용 불가`, "error", 8000);
+      this.statusPresenter.flash(
+        `${backendChoiceLabel(this.backendChoice)} 사용 불가`,
+        "error",
+        8000
+      );
       this.updateInfo();
     }
   }
@@ -410,7 +426,7 @@ export class OmokController {
     }
     this.setBusy(true);
     this.statusPresenter.flash(
-      `기본 모델 로딩 중… ${backendLabel(this.backend)}`,
+      `기본 모델 로딩 중… ${backendChoiceLabel(this.backendChoice)}`,
       "thinking",
       120_000
     );
@@ -424,12 +440,7 @@ export class OmokController {
       stage = `추론 준비 (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB)`;
       this.terminateEvaluator();
       this.evaluator = null;
-      this.evaluator = await WorkerEvaluator.fromArrayBuffer(
-        buf,
-        this.boardSize,
-        this.backend,
-        this.env.isLowMemoryMode
-      );
+      this.evaluator = await this.createEvaluator(buf);
       this.mcts = this.makeMcts();
       this.modelSource = setFromDefault(buf, this.env.isLowMemoryMode);
       const { name, title } = this.modelSource;
@@ -663,7 +674,7 @@ export class OmokController {
       this.closeSheet();
       return;
     }
-    this.backend = normalizeBackend(this.dom.backendSelect.value);
+    this.backendChoice = normalizeBackendChoice(this.dom.backendSelect.value);
     this.initialSetup = false;
     this.dom.btnSheetClose.textContent = "완료";
     this.closeSheet();
@@ -838,7 +849,7 @@ export class OmokController {
       get ghostTicking() { return ctrl.thinkingGhosts.isTicking; },
       get busy() { return ctrl.busy; },
       get initialSetup() { return ctrl.initialSetup; },
-      get backend() { return ctrl.backend; },
+      get backendChoice() { return ctrl.backendChoice; },
       get evaluatorBackend() { return ctrl.evaluator?.backend ?? null; },
       get evaluatorActive() { return ctrl.evaluator !== null; },
       get modelName() { return ctrl.modelSource.name; },

@@ -172,7 +172,8 @@
     <div class="sheet-row">
       <span class="label">추론 방식</span>
       <select bind:this={backendSelect} id="backend-select">
-        <option value="wasm" selected>WASM (기본)</option>
+        <option value="auto" selected>자동 (권장)</option>
+        <option value="wasm">WASM</option>
         <option value="webgpu">WebGPU</option>
         <option value="webnn">WebML (WebNN)</option>
       </select>

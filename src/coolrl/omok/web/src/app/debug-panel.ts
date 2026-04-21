@@ -1,5 +1,10 @@
 import { formatBytes, escapeHtml } from "../util/format";
-import { backendLabel, type InferenceBackend } from "../util/backend";
+import {
+  backendChoiceLabel,
+  backendLabel,
+  type BackendChoice,
+  type InferenceBackend,
+} from "../util/backend";
 import type { CellMetrics } from "../render/board-geometry";
 
 export interface DebugMetricsSource {
@@ -14,7 +19,7 @@ export interface DebugMetricsSource {
   readonly ghostTicking: boolean;
   readonly busy: boolean;
   readonly initialSetup: boolean;
-  readonly backend: InferenceBackend;
+  readonly backendChoice: BackendChoice;
   readonly evaluatorBackend: InferenceBackend | null;
   readonly evaluatorActive: boolean;
   readonly modelName: string | null;
@@ -80,8 +85,8 @@ export class DebugPanel {
 
     const resolvedBackend =
       src.evaluatorBackend
-        ? `${backendLabel(src.backend)}→${backendLabel(src.evaluatorBackend)}`
-        : backendLabel(src.backend);
+        ? `${backendChoiceLabel(src.backendChoice)}→${backendLabel(src.evaluatorBackend)}`
+        : backendChoiceLabel(src.backendChoice);
     const evaluatorState = src.evaluatorActive ? "활성" : src.modelName ? "절전" : "-";
     const model = src.modelName ? `${src.modelName} (${formatBytes(src.modelBytes)})` : "-";
     const state = src.initialSetup ? "처음 설정" : src.busy ? "계산/로딩" : "대기";
