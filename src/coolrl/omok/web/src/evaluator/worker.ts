@@ -88,9 +88,9 @@ class EvaluatorSession {
 
   private loadOrt(backend: InferenceBackend): void {
     if (this.ortLoaded) return;
-    const useJsep = backend === "webgpu" || backend === "webnn";
-    importScripts(ORT_CDN_BASE + (useJsep ? "ort.webgpu.min.js" : "ort.wasm.min.js"));
-    ort.env.wasm.wasmPaths = wasmPaths(backend);
+    const useWebGpuLoader = backend === "webgpu" || backend === "webnn";
+    importScripts(ORT_CDN_BASE + (useWebGpuLoader ? "ort.webgpu.min.js" : "ort.wasm.min.js"));
+    ort.env.wasm.wasmPaths = wasmPaths();
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.proxy = false;
     this.ortLoaded = true;
@@ -146,12 +146,13 @@ class EvaluatorSession {
   }
 }
 
-function wasmPaths(backend: InferenceBackend): Record<string, string> {
-  const useJsep = backend === "webgpu" || backend === "webnn";
-  const suffix = useJsep ? ".jsep" : "";
+function wasmPaths(): Record<string, string> {
+  // ORT Web 1.24 moved WebGPU off the JSEP-based glue; ort.webgpu.min.js now
+  // calls webgpuInit on the plain ort-wasm-simd-threaded module, so the same
+  // non-jsep wasm/mjs pair is used for every backend loader we ship.
   return {
-    wasm: `${ORT_CDN_BASE}ort-wasm-simd-threaded${suffix}.wasm`,
-    mjs: `${ORT_CDN_BASE}ort-wasm-simd-threaded${suffix}.mjs`,
+    wasm: `${ORT_CDN_BASE}ort-wasm-simd-threaded.wasm`,
+    mjs: `${ORT_CDN_BASE}ort-wasm-simd-threaded.mjs`,
   };
 }
 
