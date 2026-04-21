@@ -279,7 +279,6 @@ export class OmokController {
   }
 
   private async createEvaluator(buf: ArrayBuffer): Promise<WorkerEvaluator> {
-    logDebug("OmokController", "createEvaluator.start", {
       boardSize: this.boardSize,
       backendChoice: this.backendChoice,
       hasLowMemory: this.env.isLowMemoryMode,
@@ -314,8 +313,12 @@ export class OmokController {
     throw lastError ?? new Error("no backend available");
   }
 
+  private setModelBuffer(buf: ArrayBuffer): void {
+    this.modelBuffer = buf.slice(0);
+  }
+
   private async fetchModelBuffer(): Promise<ArrayBuffer> {
-    return fetchBufferFor(this.modelSource, this.defaultModelUrl);
+    this.setModelBuffer(buf);
   }
 
   private makeMcts(): MCTS {
@@ -448,7 +451,13 @@ export class OmokController {
         await this.disposeEvaluatorAsync();
         this.mcts = null;
         const buf = await this.fetchModelBuffer();
-        this.evaluator = await this.createEvaluator(buf);
+        const recovered = await this.createEvaluator(buf);
+        if (this.evaluator !== null) {
+          logWarn("OmokController", "visibilityRecovery.superseded");
+          await recovered.dispose();
+          return;
+        }
+        this.evaluator = recovered;
         this.mcts = this.makeMcts();
         this.aiSubtree = null;
         this.updateInfo();
@@ -481,6 +490,7 @@ export class OmokController {
     this.mcts = null;
     try {
       const buf = await file.arrayBuffer();
+      this.setModelBuffer(buf);
       this.evaluator = await this.createEvaluator(buf);
       this.mcts = this.makeMcts();
       this.modelSource = setFromFile(file, buf, this.env.isLowMemoryMode);
@@ -573,6 +583,7 @@ export class OmokController {
         throw new Error(`HTTP ${resp.status} on ${this.defaultModelUrl}`);
       stage = "모델 읽기";
       const buf = await resp.arrayBuffer();
+      this.setModelBuffer(buf);
       stage = `추론 준비 (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB)`;
       await this.disposeEvaluatorAsync();
       this.evaluator = await this.createEvaluator(buf);
