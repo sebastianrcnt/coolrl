@@ -184,7 +184,7 @@ def style_axis(
     ax.set_facecolor(theme.bg)
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.tick_params(colors=theme.text_secondary, length=0, labelsize=8.5, pad=5)
+    ax.tick_params(colors=theme.text_secondary, length=0, labelsize=10.5, pad=5)
     ax.grid(True, axis="y", color=theme.grid, linewidth=0.6, zorder=0)
     ax.grid(False, axis="x")
     ax.set_axisbelow(True)
@@ -312,17 +312,17 @@ def panel_title(ax, theme: Theme, title: str, subtitle: str = "") -> None:
         1.34,
         title,
         transform=ax.transAxes,
-        fontsize=14,
+        fontsize=17,
         color=theme.text_primary,
         fontweight=900,
     )
     if subtitle:
         ax.text(
             0.0,
-            1.18,
+            1.15,
             subtitle,
             transform=ax.transAxes,
-            fontsize=10,
+            fontsize=13,
             color=theme.text_secondary,
         )
 
@@ -419,7 +419,7 @@ def build_figure(
         0.0,
         0.92,
         run_name.upper(),
-        fontsize=10,
+        fontsize=12,
         color=theme.text_tertiary,
         fontweight="semibold",
         transform=ax_h.transAxes,
@@ -428,7 +428,7 @@ def build_figure(
         0.0,
         0.62,
         f"Iteration {cur_iter:,}",
-        fontsize=30,
+        fontsize=36,
         color=theme.text_primary,
         fontweight=900,
         transform=ax_h.transAxes,
@@ -439,7 +439,7 @@ def build_figure(
         0.20,
         f"{cur_elapsed:.1f}h  ·  {avg_iter_sec:.0f}s/iter  ·  "
         f"{accepted_count} accepted",
-        fontsize=11,
+        fontsize=14,
         color=theme.text_secondary,
         transform=ax_h.transAxes,
     )
@@ -505,7 +505,7 @@ def build_figure(
         ax_h.scatter(
             [dot_x],
             [label_y],
-            s=22,
+            s=30,
             c=accent,
             marker="o",
             edgecolors="none",
@@ -516,7 +516,7 @@ def build_figure(
             text_x,
             label_y,
             label,
-            fontsize=9,
+            fontsize=11,
             color=theme.text_tertiary,
             fontweight="semibold",
             transform=ax_h.transAxes,
@@ -526,7 +526,7 @@ def build_figure(
             text_x,
             val_y,
             val,
-            fontsize=22,
+            fontsize=26,
             color=theme.text_primary,
             fontweight=900,
             transform=ax_h.transAxes,
@@ -536,7 +536,7 @@ def build_figure(
             text_x,
             desc_y,
             desc,
-            fontsize=9,
+            fontsize=12,
             color=theme.text_secondary,
             transform=ax_h.transAxes,
             va="center",
