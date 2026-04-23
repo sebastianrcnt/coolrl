@@ -17,17 +17,6 @@ impl LostCitiesGrpcService {
             engine: Arc::new(Mutex::new(engine)),
         }
     }
-
-    fn with_engine<T>(
-        &self,
-        f: impl FnOnce(&mut LostCitiesEngine) -> Result<T, EngineError>,
-    ) -> Result<T, Status> {
-        let mut engine = self
-            .engine
-            .lock()
-            .map_err(|_| Status::internal("lost cities engine mutex poisoned"))?;
-        f(&mut engine).map_err(map_engine_error)
-    }
 }
 
 #[tonic::async_trait]
@@ -36,7 +25,10 @@ impl proto::lost_cities_server::LostCities for LostCitiesGrpcService {
         &self,
         request: Request<proto::NewGameRequest>,
     ) -> Result<Response<proto::GameObservation>, Status> {
-        let observation = self.with_engine(|engine| engine.new_game(request.into_inner()))?;
+        let mut engine = self.engine.lock().map_err(|_| poisoned_engine_status())?;
+        let observation = engine
+            .new_game(request.into_inner())
+            .map_err(map_engine_error)?;
         Ok(Response::new(observation))
     }
 
@@ -44,8 +36,10 @@ impl proto::lost_cities_server::LostCities for LostCitiesGrpcService {
         &self,
         request: Request<proto::SessionRef>,
     ) -> Result<Response<proto::GameObservation>, Status> {
-        let observation =
-            self.with_engine(|engine| engine.get_observation(request.into_inner()))?;
+        let engine = self.engine.lock().map_err(|_| poisoned_engine_status())?;
+        let observation = engine
+            .get_observation(request.into_inner())
+            .map_err(map_engine_error)?;
         Ok(Response::new(observation))
     }
 
@@ -53,7 +47,10 @@ impl proto::lost_cities_server::LostCities for LostCitiesGrpcService {
         &self,
         request: Request<proto::ApplyActionRequest>,
     ) -> Result<Response<proto::StepResult>, Status> {
-        let result = self.with_engine(|engine| engine.apply_action(request.into_inner()))?;
+        let mut engine = self.engine.lock().map_err(|_| poisoned_engine_status())?;
+        let result = engine
+            .apply_action(request.into_inner())
+            .map_err(map_engine_error)?;
         Ok(Response::new(result))
     }
 
@@ -61,9 +58,16 @@ impl proto::lost_cities_server::LostCities for LostCitiesGrpcService {
         &self,
         request: Request<proto::SessionRef>,
     ) -> Result<Response<()>, Status> {
-        self.with_engine(|engine| engine.end_session(request.into_inner()))?;
+        let mut engine = self.engine.lock().map_err(|_| poisoned_engine_status())?;
+        engine
+            .end_session(request.into_inner())
+            .map_err(map_engine_error)?;
         Ok(Response::new(()))
     }
+}
+
+fn poisoned_engine_status() -> Status {
+    Status::internal("lost cities engine mutex poisoned")
 }
 
 fn map_engine_error(error: EngineError) -> Status {

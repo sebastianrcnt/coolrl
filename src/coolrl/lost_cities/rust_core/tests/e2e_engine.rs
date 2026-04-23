@@ -140,7 +140,7 @@ fn off_turn_observation_hides_actions() {
     engine
         .new_game(proto::NewGameRequest {
             session_id: "hidden".to_string(),
-            config: Some(config.clone()),
+            config: Some(config),
         })
         .expect("session should start");
 
@@ -228,7 +228,7 @@ fn deterministic_engine_observations_match_for_same_seed_and_actions() {
     let mut left_observation = left
         .new_game(proto::NewGameRequest {
             session_id: "det-left".to_string(),
-            config: Some(config.clone()),
+            config: Some(config),
         })
         .expect("left session should start");
     let mut right_observation = right

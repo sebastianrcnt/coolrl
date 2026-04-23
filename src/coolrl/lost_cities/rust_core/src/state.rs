@@ -158,13 +158,10 @@ impl GameState {
             return mask;
         }
 
-        let hand = &self.hands[self.current_player];
-        for slot in 0..self.config.hand_size {
-            let Some(card) = hand.get(slot).copied() else {
-                continue;
-            };
-            mask[2 * slot] = self.can_play_card(self.current_player, card);
-            mask[2 * slot + 1] = true;
+        for (slot, card) in self.hands[self.current_player].iter().copied().enumerate() {
+            let play_id = Self::play_action_id(slot);
+            mask[play_id] = self.can_play_card(self.current_player, card);
+            mask[Self::discard_action_id(slot)] = true;
         }
         mask
     }
@@ -304,15 +301,8 @@ impl GameState {
         state_version: u64,
         include_actions: bool,
     ) -> proto::LegalActionSet {
-        let action_space_size = self.config.action_space_size() as u32;
         if self.terminal || !include_actions {
-            return proto::LegalActionSet {
-                state_version,
-                actions: Vec::new(),
-                mask: vec![false; self.config.action_space_size()],
-                action_space_size,
-                phase: self.phase.to_proto(),
-            };
+            return self.empty_legal_action_set(state_version);
         }
 
         let mask = self.legal_unified_mask();
@@ -325,14 +315,14 @@ impl GameState {
             state_version,
             actions,
             mask,
-            action_space_size,
+            action_space_size: self.config.action_space_size() as u32,
             phase: self.phase.to_proto(),
         }
     }
 
     fn apply_card_action(&mut self, action_index: usize) {
         let slot = action_index / 2;
-        let play = action_index % 2 == 0;
+        let play = action_index.is_multiple_of(2);
         let card = self.hands[self.current_player].remove(slot);
         let color = card.color as usize;
 
@@ -345,13 +335,13 @@ impl GameState {
         }
 
         self.phase = Phase::Draw;
-        if self.deck.is_empty() && !self.legal_draw_mask_phase().into_iter().any(|value| value) {
+        if self.deck.is_empty() && !self.has_draw_source() {
             self.terminal = true;
         }
     }
 
     fn apply_draw_action(&mut self, action_index: usize) {
-        let draw_index = action_index - self.config.card_action_size();
+        let draw_index = action_index - self.draw_action_offset();
         let card = if draw_index == 0 {
             self.deck.pop().expect("legal deck draw")
         } else {
@@ -374,33 +364,27 @@ impl GameState {
     }
 
     fn build_card_actions(&self, mask: &[bool]) -> Vec<proto::Action> {
-        let hand = &self.hands[self.current_player];
         let mut actions = Vec::new();
-        for slot in 0..self.config.hand_size {
-            let Some(card) = hand.get(slot).copied() else {
-                continue;
-            };
-            let play_id = 2 * slot;
+        for (slot, card) in self.hands[self.current_player].iter().copied().enumerate() {
+            let play_id = Self::play_action_id(slot);
             if mask[play_id] {
-                actions.push(proto::Action {
-                    id: play_id as u32,
-                    kind: proto::ActionKind::PlayCard as i32,
-                    hand_slot: slot as u32,
-                    card: Some(card.to_proto(&self.config)),
-                    discard_color: 0,
-                    description: format!("Play {}", card.label(self.config.min_rank)),
-                });
+                actions.push(self.card_action(
+                    play_id,
+                    proto::ActionKind::PlayCard,
+                    slot,
+                    card,
+                    "Play",
+                ));
             }
-            let discard_id = play_id + 1;
+            let discard_id = Self::discard_action_id(slot);
             if mask[discard_id] {
-                actions.push(proto::Action {
-                    id: discard_id as u32,
-                    kind: proto::ActionKind::DiscardCard as i32,
-                    hand_slot: slot as u32,
-                    card: Some(card.to_proto(&self.config)),
-                    discard_color: 0,
-                    description: format!("Discard {}", card.label(self.config.min_rank)),
-                });
+                actions.push(self.card_action(
+                    discard_id,
+                    proto::ActionKind::DiscardCard,
+                    slot,
+                    card,
+                    "Discard",
+                ));
             }
         }
         actions
@@ -408,32 +392,86 @@ impl GameState {
 
     fn build_draw_actions(&self, mask: &[bool]) -> Vec<proto::Action> {
         let mut actions = Vec::new();
-        let deck_draw_id = self.config.card_action_size();
+        let deck_draw_id = self.draw_action_offset();
         if mask[deck_draw_id] {
-            actions.push(proto::Action {
-                id: deck_draw_id as u32,
-                kind: proto::ActionKind::DrawDeck as i32,
-                hand_slot: 0,
-                card: None,
-                discard_color: 0,
-                description: "Draw deck".to_string(),
-            });
+            actions.push(self.draw_action(deck_draw_id, None));
         }
 
         for color in 0..self.config.n_colors {
-            let action_id = self.config.card_action_size() + 1 + color;
+            let action_id = self.discard_draw_action_id(color);
             if mask[action_id] {
-                actions.push(proto::Action {
-                    id: action_id as u32,
-                    kind: proto::ActionKind::DrawDiscard as i32,
-                    hand_slot: 0,
-                    card: None,
-                    discard_color: color as u32,
-                    description: format!("Draw discard {}", color),
-                });
+                actions.push(self.draw_action(action_id, Some(color)));
             }
         }
         actions
+    }
+
+    fn empty_legal_action_set(&self, state_version: u64) -> proto::LegalActionSet {
+        proto::LegalActionSet {
+            state_version,
+            actions: Vec::new(),
+            mask: vec![false; self.config.action_space_size()],
+            action_space_size: self.config.action_space_size() as u32,
+            phase: self.phase.to_proto(),
+        }
+    }
+
+    fn has_draw_source(&self) -> bool {
+        self.legal_draw_mask_phase().into_iter().any(|value| value)
+    }
+
+    fn draw_action_offset(&self) -> usize {
+        self.config.card_action_size()
+    }
+
+    fn play_action_id(slot: usize) -> usize {
+        slot * 2
+    }
+
+    fn discard_action_id(slot: usize) -> usize {
+        Self::play_action_id(slot) + 1
+    }
+
+    fn discard_draw_action_id(&self, color: usize) -> usize {
+        self.draw_action_offset() + 1 + color
+    }
+
+    fn card_action(
+        &self,
+        id: usize,
+        kind: proto::ActionKind,
+        slot: usize,
+        card: Card,
+        verb: &str,
+    ) -> proto::Action {
+        proto::Action {
+            id: id as u32,
+            kind: kind as i32,
+            hand_slot: slot as u32,
+            card: Some(card.to_proto(&self.config)),
+            discard_color: 0,
+            description: format!("{verb} {}", card.label(self.config.min_rank)),
+        }
+    }
+
+    fn draw_action(&self, id: usize, discard_color: Option<usize>) -> proto::Action {
+        let (kind, discard_color, description) = match discard_color {
+            Some(color) => (
+                proto::ActionKind::DrawDiscard,
+                color as u32,
+                format!("Draw discard {color}"),
+            ),
+            None => (proto::ActionKind::DrawDeck, 0, "Draw deck".to_string()),
+        };
+
+        proto::Action {
+            id: id as u32,
+            kind: kind as i32,
+            hand_slot: 0,
+            card: None,
+            discard_color,
+            description,
+        }
     }
 }
 

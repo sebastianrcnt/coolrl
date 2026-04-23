@@ -11,6 +11,81 @@ struct SessionState {
     state_version: u64,
 }
 
+impl SessionState {
+    fn observation(&self, session_id: &str, observer: usize) -> proto::GameObservation {
+        let game = &self.game;
+        let can_act = !game.terminal && observer == game.current_player;
+        let my_score = game.total_score(observer);
+        let opponent_score = game.total_score(1 - observer);
+
+        proto::GameObservation {
+            session_id: session_id.to_string(),
+            config: Some((&game.config).into()),
+            state_version: self.state_version,
+            observer_player: observer as u32,
+            current_player: game.current_player as u32,
+            phase: game.phase.to_proto(),
+            hand: game.hands[observer]
+                .iter()
+                .copied()
+                .map(|card| card.to_proto(&game.config))
+                .collect(),
+            opponent_hand_size: game.hands[1 - observer].len() as u32,
+            my_expeditions: Self::build_expeditions(observer, game),
+            opponent_expeditions: Self::build_expeditions(1 - observer, game),
+            discards: Self::build_discards(game),
+            deck_size: game.deck.len() as u32,
+            pending_discarded_color: if game.phase == Phase::Draw {
+                game.pending_discarded_color
+            } else {
+                None
+            },
+            legal_actions: Some(game.build_legal_action_set(self.state_version, can_act)),
+            turn_count: game.turn_count,
+            terminal: game.terminal,
+            my_score,
+            opponent_score,
+            score_diff: my_score - opponent_score,
+        }
+    }
+
+    fn final_scores(&self) -> HashMap<u32, i32> {
+        HashMap::from([(0, self.game.total_score(0)), (1, self.game.total_score(1))])
+    }
+
+    fn build_expeditions(player: usize, game: &GameState) -> Vec<proto::Expedition> {
+        game.expeditions[player]
+            .iter()
+            .enumerate()
+            .map(|(color, cards)| proto::Expedition {
+                color: color as u32,
+                cards: cards
+                    .iter()
+                    .copied()
+                    .map(|card| card.to_proto(&game.config))
+                    .collect(),
+                current_score: crate::score_expedition(cards, &game.config),
+            })
+            .collect()
+    }
+
+    fn build_discards(game: &GameState) -> Vec<proto::DiscardPile> {
+        game.discards
+            .iter()
+            .enumerate()
+            .map(|(color, cards)| proto::DiscardPile {
+                color: color as u32,
+                cards: cards
+                    .iter()
+                    .copied()
+                    .map(|card| card.to_proto(&game.config))
+                    .collect(),
+                size: cards.len() as u32,
+            })
+            .collect()
+    }
+}
+
 #[derive(Default)]
 pub struct LostCitiesEngine {
     sessions: HashMap<String, SessionState>,
@@ -47,7 +122,7 @@ impl LostCitiesEngine {
             state_version: 0,
         };
 
-        let observation = Self::build_observation(&session_id, &session, 0)?;
+        let observation = session.observation(&session_id, 0);
         self.sessions.insert(session_id, session);
         Ok(observation)
     }
@@ -62,18 +137,23 @@ impl LostCitiesEngine {
             .sessions
             .get(&session_id)
             .ok_or_else(|| EngineError::not_found(format!("unknown session {}", session_id)))?;
-        let observer =
-            Self::resolve_observer(request.observer_player, session.game.current_player)?;
-        Self::build_observation(&session_id, session, observer)
+        let observer = Self::requested_or_default_observer(
+            request.observer_player,
+            session.game.current_player,
+        )?;
+        Ok(session.observation(&session_id, observer))
     }
 
     pub fn apply_action(
         &mut self,
         request: proto::ApplyActionRequest,
     ) -> Result<proto::StepResult, EngineError> {
-        Self::validate_explicit_observer(request.observer_player)?;
         let session_id = request.session_id;
         Self::validate_session_id(&session_id)?;
+        let requested_observer = request
+            .observer_player
+            .map(Self::validate_observer)
+            .transpose()?;
         let session = self
             .sessions
             .get_mut(&session_id)
@@ -92,9 +172,8 @@ impl LostCitiesEngine {
         session.game.apply_unified_action(request.action_id)?;
         session.state_version += 1;
 
-        let observer =
-            Self::resolve_observer(request.observer_player, session.game.current_player)?;
-        let observation = Self::build_observation(&session_id, session, observer)?;
+        let observer = requested_observer.unwrap_or(session.game.current_player);
+        let observation = session.observation(&session_id, observer);
         let terminal = session.game.terminal;
         let reward = if terminal {
             f64::from(observation.score_diff)
@@ -102,10 +181,7 @@ impl LostCitiesEngine {
             0.0
         };
         let final_scores = if terminal {
-            HashMap::from([
-                (0, session.game.total_score(0)),
-                (1, session.game.total_score(1)),
-            ])
+            session.final_scores()
         } else {
             HashMap::new()
         };
@@ -133,25 +209,17 @@ impl LostCitiesEngine {
         Ok(())
     }
 
-    fn validate_explicit_observer(observer_player: Option<u32>) -> Result<(), EngineError> {
-        if let Some(observer) = observer_player {
-            match observer {
-                0 | 1 => {}
-                _ => {
-                    return Err(EngineError::invalid_argument(
-                        "observer_player must be 0 or 1",
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn resolve_observer(
+    fn requested_or_default_observer(
         observer_player: Option<u32>,
         default_player: usize,
     ) -> Result<usize, EngineError> {
-        let observer = observer_player.unwrap_or(default_player as u32);
+        observer_player
+            .map(Self::validate_observer)
+            .transpose()
+            .map(|observer| observer.unwrap_or(default_player))
+    }
+
+    fn validate_observer(observer: u32) -> Result<usize, EngineError> {
         match observer {
             0 => Ok(0),
             1 => Ok(1),
@@ -159,82 +227,6 @@ impl LostCitiesEngine {
                 "observer_player must be 0 or 1",
             )),
         }
-    }
-
-    fn build_observation(
-        session_id: &str,
-        session: &SessionState,
-        observer: usize,
-    ) -> Result<proto::GameObservation, EngineError> {
-        let game = &session.game;
-        let can_act = !game.terminal && observer == game.current_player;
-        let my_score = game.total_score(observer);
-        let opponent_score = game.total_score(1 - observer);
-
-        Ok(proto::GameObservation {
-            session_id: session_id.to_string(),
-            config: Some((&game.config).into()),
-            state_version: session.state_version,
-            observer_player: observer as u32,
-            current_player: game.current_player as u32,
-            phase: game.phase.to_proto(),
-            hand: game.hands[observer]
-                .iter()
-                .copied()
-                .map(|card| card.to_proto(&game.config))
-                .collect(),
-            opponent_hand_size: game.hands[1 - observer].len() as u32,
-            my_expeditions: Self::build_expeditions(observer, game),
-            opponent_expeditions: Self::build_expeditions(1 - observer, game),
-            discards: Self::build_discards(game),
-            deck_size: game.deck.len() as u32,
-            pending_discarded_color: if game.phase == Phase::Draw {
-                game.pending_discarded_color
-            } else {
-                None
-            },
-            legal_actions: Some(game.build_legal_action_set(session.state_version, can_act)),
-            turn_count: game.turn_count,
-            terminal: game.terminal,
-            my_score,
-            opponent_score,
-            score_diff: my_score - opponent_score,
-        })
-    }
-
-    fn build_expeditions(observer: usize, game: &GameState) -> Vec<proto::Expedition> {
-        game.expeditions[observer]
-            .iter()
-            .enumerate()
-            .map(|(color, cards)| proto::Expedition {
-                color: color as u32,
-                cards: cards
-                    .iter()
-                    .copied()
-                    .map(|card| card.to_proto(&game.config))
-                    .collect(),
-                current_score: game.expeditions[observer]
-                    .get(color)
-                    .map(|expedition| crate::score_expedition(expedition, &game.config))
-                    .unwrap_or(0),
-            })
-            .collect()
-    }
-
-    fn build_discards(game: &GameState) -> Vec<proto::DiscardPile> {
-        game.discards
-            .iter()
-            .enumerate()
-            .map(|(color, cards)| proto::DiscardPile {
-                color: color as u32,
-                cards: cards
-                    .iter()
-                    .copied()
-                    .map(|card| card.to_proto(&game.config))
-                    .collect(),
-                size: cards.len() as u32,
-            })
-            .collect()
     }
 }
 
