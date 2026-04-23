@@ -198,9 +198,7 @@ tinygrad는 lazy이므로, benchmark의 `forward_lazy`는 mostly graph construct
 
 ## PyTorch Evaluator Microbenchmark
 
-A one-off PyTorch eager benchmark using the same Omok network shape
-(`channels=64`, `blocks=6`) was run through `uv run --with torch`, without
-adding PyTorch as a project dependency. Environment:
+동일한 Omok network shape (`channels=64`, `blocks=6`)을 사용한 one-off PyTorch eager benchmark를 `uv run --with torch`를 통해 실행했습니다. PyTorch를 project dependency로 추가하지 않았습니다. Environment:
 
 ```text
 GPU: NVIDIA GeForce RTX 3090
@@ -208,12 +206,9 @@ PyTorch: 2.11.0+cu130
 CUDA: available
 ```
 
-The benchmark constructed an equivalent PyTorch module and measured CUDA
-forward, softmax, and numpy materialization with explicit synchronization.
-Weights were random; this was a latency comparison, not a parity test against a
-saved checkpoint.
+benchmark는 equivalent PyTorch module을 구성했고 explicit synchronization으로 CUDA forward, softmax, numpy materialization을 측정했습니다. Weights는 random이었습니다. 이는 saved checkpoint에 대한 parity test가 아닌 latency comparison이었습니다.
 
-The integrated benchmark script can now exercise the torch evaluator directly:
+integrated benchmark script는 이제 torch evaluator를 직접 exercise할 수 있습니다:
 
 ```bash
 uv run --extra omok python scripts/bench_omok_evaluator.py \
@@ -233,45 +228,29 @@ uv run --extra omok python scripts/bench_omok_evaluator.py \
 | 1024 | ~0.0998s | ~0.0060s | ~17x |
 | 2048 | ~0.1162s | ~0.0116s | ~10x |
 
-This is a much larger gap than the earlier 2-4x rough estimate. Because
-previous C MCTS timing showed `ModelEvaluator.evaluate_features(...)` was more
-than 98% of `search_batch(...)`, replacing only the evaluator can plausibly
-make self-play and arena eval costs almost disappear relative to training.
+이는 초기 2-4x rough estimate보다 훨씬 더 큰 gap입니다. 이전 C MCTS timing이 `ModelEvaluator.evaluate_features(...)`가 `search_batch(...)`의 98% 이상이었기 때문에, evaluator만 대체하면 training에 상대적으로 self-play 및 arena eval costs가 거의 사라질 수 있습니다.
 
-Updated rough iteration estimates:
+업데이트된 rough iteration estimates:
 
 | Scenario | Self-play | Training | Arena | Iteration | 200 Iterations |
 |---|---:|---:|---:|---:|---:|
 | current tinygrad | ~47s | ~48s | ~48s | ~135-143s | ~7.5-8.0h |
 | PyTorch evaluator only | ~3-5s | ~48s | ~3-5s | ~55-60s | ~3.0-3.4h |
 
-The exact numbers still need full-loop validation. The microbenchmark does not
-include checkpoint weight conversion, C MCTS feed/collect overhead after eval is
-reduced, Python loop overhead, or changes in game length. It is strong enough,
-however, to make a PyTorch evaluator backend the next highest-ROI change.
+정확한 numbers는 여전히 full-loop validation이 필요합니다. microbenchmark는 checkpoint weight conversion, C MCTS feed/collect overhead after eval is reduced, Python loop overhead, game length의 변화를 포함하지 않습니다. 그러나 충분히 강력해서 PyTorch evaluator backend를 다음 highest-ROI change로 만듭니다.
 
-The integrated PyTorch evaluator still pads to power-of-two batch buckets. An
-unpadded smoke run produced many unique CUDA shapes and spent `13.3s` in
-self-play eval for iteration 1. Power-of-two padding collapsed the shape set and
-reduced the same run to `3.29s` of eval time.
+integrated PyTorch evaluator는 여전히 power-of-two batch buckets로 pads합니다. unpadded smoke run은 많은 unique CUDA shapes를 생성했고 iteration 1에서 self-play eval에 `13.3s`를 소비했습니다. Power-of-two padding은 shape set을 collapsed하고 같은 run을 `3.29s` eval time으로 줄였습니다.
 
-Once PyTorch eval is integrated, `leaves_per_batch` should be swept again. The
-current `64` value was chosen mainly to reduce expensive tinygrad evaluator
-calls. If PyTorch eval makes calls cheap, lower values such as `8`, `16`, or
-`32` may recover search quality by feeding/backing up neural evaluations more
-often, without costing much wall time.
+PyTorch eval이 integrated되면, `leaves_per_batch`를 다시 sweep해야 합니다. 현재 `64` value는 주로 expensive tinygrad evaluator calls를 줄이기 위해 선택되었습니다. PyTorch eval이 calls를 cheap하게 만든다면, `8`, `16`, `32`와 같은 더 낮은 values는 wall time을 많이 소비하지 않으면서 neural evaluations를 더 자주 feeding/backing up하여 search quality를 recover할 수 있습니다.
 
-Implementation status: the CUDA profile now uses `selfplay.evaluator_backend:
-torch`. CPU and CUDA parity checks against the tinygrad evaluator were within
-normal floating-point tolerance:
+Implementation status: CUDA profile은 이제 `selfplay.evaluator_backend: torch`를 사용합니다. tinygrad evaluator에 대한 CPU 및 CUDA parity checks는 normal floating-point tolerance 내에 있었습니다:
 
 | Device | Policy Max Abs Diff | Value Max Abs Diff |
 |---|---:|---:|
 | CPU, batch 7 | ~2.8e-9 | ~1.0e-7 |
 | CUDA, batch 64 | ~4.0e-7 | ~1.1e-5 |
 
-A small C MCTS + CUDA smoke run with 8 games and 8 simulations completed with
-the torch evaluator:
+torch evaluator로 완료된 8 games 및 8 simulations를 가진 small C MCTS + CUDA smoke run:
 
 ```text
 selfplay_seconds=1.184s
@@ -280,9 +259,7 @@ eval_selfplay_candidate_calls=68
 eval_selfplay_candidate_avg_seconds=0.0168s
 ```
 
-The full CUDA iteration-1 warmup run, using 64 games and 96 simulations but no
-training/arena, dropped from the previous tinygrad baseline of `25.42s`
-self-play time to:
+64 games 및 96 simulations를 사용하지만 training/arena가 없는 full CUDA iteration-1 warmup run은 이전 tinygrad baseline of `25.42s` self-play time에서 다음으로 dropped:
 
 ```text
 selfplay_seconds=3.591s
@@ -293,15 +270,11 @@ eval_selfplay_candidate_max_bucket=4096
 eval_selfplay_candidate_pad_ratio=1.1685
 ```
 
-Use `uv run --extra omok ...` or otherwise install PyTorch before running the
-CUDA profile. Without PyTorch installed, `evaluator_backend: torch` fails fast
-with an installation hint.
+CUDA profile을 실행하기 전에 `uv run --extra omok ...`을 사용하거나 PyTorch를 설치하세요. PyTorch가 설치되지 않으면, `evaluator_backend: torch`는 installation hint로 빠르게 실패합니다.
 
 ## 4-Iteration Phase Benchmark
 
-After adding phase timing fields to `metrics.jsonl`, a fresh run from an empty
-`checkpoints/omok_full_cuda` with `leaves_per_batch: 64` and
-`search_threads: auto` produced:
+`metrics.jsonl`에 phase timing fields를 추가한 후, empty `checkpoints/omok_full_cuda`에서 `leaves_per_batch: 64` 및 `search_threads: auto`를 사용한 fresh run을 produced:
 
 ```bash
 rm -rf checkpoints/omok_full_cuda
@@ -317,7 +290,7 @@ uv run python -m coolrl.omok.train \
 | 3 | 160 | 143.83s | 47.14s | 42.59s | 54.09s | 1.03s | 54.36 | 0.4167 | false |
 | 4 | 160 | 141.25s | 47.04s | 43.44s | 50.77s | 1.03s | 54.41 | 0.4167 | false |
 
-For trained iterations 2-4, average phase times were:
+trained iterations 2-4의 경우, average phase times는:
 
 | Phase | Average |
 |---|---:|
@@ -327,54 +300,48 @@ For trained iterations 2-4, average phase times were:
 | arena | 48.14s |
 | checkpoint | 1.03s |
 
-The current CUDA profile is therefore no longer dominated by one CPU MCTS
-section. At 160 simulations, self-play, training updates, and arena are all
-material contributors. Future optimization should avoid focusing only on
-self-play MCTS traversal.
+현재 CUDA profile은 따라서 더 이상 하나의 CPU MCTS section에 의해 dominated되지 않습니다. 160 simulations에서 self-play, training updates, arena는 모두 material contributors입니다. 미래의 최적화는 self-play MCTS traversal에만 focusing하는 것을 피해야 합니다.
 
 ## Built-In Training Metrics
 
-The trainer now writes enough per-iteration fields to diagnose the common Omok
-CUDA bottlenecks without running a separate microbenchmark first.
+trainer는 이제 별도의 microbenchmark를 먼저 실행하지 않고 common Omok CUDA bottlenecks를 진단하기 위해 충분한 per-iteration fields를 작성합니다.
 
 Top-level phase timings:
 
 | Field | Meaning |
 |---|---|
-| `duration_seconds` | full iteration wall time, including checkpoint save |
+| `duration_seconds` | checkpoint save를 포함한 full iteration wall time |
 | `selfplay_seconds` | full self-play phase wall time |
 | `train_seconds` | optimizer update phase wall time |
 | `arena_seconds` | candidate-vs-best arena wall time |
-| `checkpoint_seconds` | checkpoint and runtime state save time |
+| `checkpoint_seconds` | checkpoint 및 runtime state save time |
 
-MCTS search timings are grouped by phase, for example
-`search_selfplay_candidate_*`, `search_selfplay_best_*`,
-`search_arena_candidate_*`, and `search_arena_best_*`:
+MCTS search timings은 phase로 grouped됩니다. 예를 들어 `search_selfplay_candidate_*`, `search_selfplay_best_*`, `search_arena_candidate_*`, `search_arena_best_*`:
 
 | Suffix | Meaning |
 |---|---|
-| `_calls` | number of `MCTS.search_batch(...)` calls |
-| `_seconds` | total search wall time, including evaluator calls |
+| `_calls` | `MCTS.search_batch(...)` calls의 number |
+| `_seconds` | evaluator calls를 포함한 total search wall time |
 | `_avg_seconds` | average search call latency |
-| `_states` / `_avg_states` | active game states seen by search calls |
+| `_states` / `_avg_states` | search calls로 본 active game states |
 | `_requested_leaves` | requested MCTS leaf visits, roughly states * simulations |
-| `_max_states` | largest active batch seen by that phase |
-| `_max_simulations` | largest simulation count used by that phase |
-| `_max_leaves_per_batch` | largest configured leaf batch used by that phase |
+| `_max_states` | that phase로 본 largest active batch |
+| `_max_simulations` | that phase로 사용한 largest simulation count |
+| `_max_leaves_per_batch` | that phase로 사용한 largest configured leaf batch |
 
-Evaluator timings are grouped by the same phase names with `eval_*` fields:
+Evaluator timings은 `eval_*` fields로 같은 phase names로 grouped됩니다:
 
 | Suffix | Meaning |
 |---|---|
-| `_calls` | number of neural evaluator calls |
+| `_calls` | neural evaluator calls의 number |
 | `_seconds` | total evaluator wall time |
 | `_avg_seconds` | average evaluator call latency |
 | `_positions` | unpadded board positions evaluated |
-| `_padded_positions` | positions after power-of-two tinygrad bucket padding |
+| `_padded_positions` | power-of-two tinygrad bucket padding 후 positions |
 | `_pad_ratio` | padded_positions / positions |
 | `_avg_batch` / `_max_batch` | actual evaluator batch sizes |
 | `_max_bucket` | largest padded tinygrad bucket |
-| `_bucket_counts` | count of calls per padded bucket size |
+| `_bucket_counts` | padded bucket size당 calls count |
 
 Training update timings:
 
@@ -382,44 +349,33 @@ Training update timings:
 |---|---|
 | `train_metric_updates` | measured optimizer updates |
 | `train_metric_samples` | total sampled replay rows |
-| `train_sample_seconds` | replay sample and tensor creation time |
+| `train_sample_seconds` | replay sample 및 tensor creation time |
 | `train_forward_seconds` | model forward graph construction time |
 | `train_loss_seconds` | policy/value loss graph construction time |
 | `train_backward_seconds` | backward graph construction time |
 | `train_optimizer_seconds` | optimizer step graph construction/execution time |
-| `train_sync_seconds` | loss materialization and synchronization time |
-| `train_measured_seconds` | sum of measured training substeps |
+| `train_sync_seconds` | loss materialization 및 synchronization time |
+| `train_measured_seconds` | measured training substeps의 sum |
 
-Use the separate `scripts/bench_omok_evaluator.py` only when isolating evaluator
-latency by synthetic batch size or comparing tinygrad against another inference
-backend. Normal training runs should rely on `metrics.jsonl` first.
+evaluator latency를 synthetic batch size로 isolate하거나 tinygrad를 다른 inference backend와 비교할 때만 separate `scripts/bench_omok_evaluator.py`를 사용하세요. Normal training runs은 먼저 `metrics.jsonl`에 rely해야 합니다.
 
 ## Current Handoff Notes
 
-- C MCTS traversal is fast after tree-level threading and node arena
-  allocation.
-- `search_threads: auto` is useful as a ceiling, but high CPU utilization should
-  not be expected because C collection is a tiny part of wall time.
-- `leaves_per_batch: 64` improved early CUDA throughput by reducing evaluator
-  calls in tinygrad. Re-sweep `8/16/32/64` after PyTorch eval is integrated;
-  `64` may no longer be the best quality/speed tradeoff.
-- The most promising next experiments are:
-  - add a PyTorch evaluator backend for self-play and arena;
-  - verify tinygrad-to-PyTorch checkpoint weight parity before using it for
-    training runs;
-  - run a full-loop CUDA benchmark with PyTorch eval and `leaves_per_batch: 64`;
-  - sweep `leaves_per_batch` after PyTorch eval;
-  - measure whether training updates are tinygrad-bound once eval is no longer
-    dominant;
-  - consider ONNX Runtime or TensorRT only after PyTorch eval lands, because
-    training is expected to become the dominant remaining bottleneck;
-  - only revisit persistent C worker pools if `collect` becomes a meaningful
-    share of `search_batch` time again.
+- tree-level threading 및 node arena allocation 후 C MCTS traversal은 빠릅니다.
+- `search_threads: auto`는 ceiling로서 유용하지만, C collection은 wall time의 작은 부분이기 때문에 높은 CPU utilization을 기대할 수 없습니다.
+- `leaves_per_batch: 64`는 tinygrad에서 evaluator calls를 줄여 초기 CUDA throughput을 개선했습니다. PyTorch eval이 integrated된 후 `8/16/32/64`를 re-sweep하세요. `64`는 더 이상 best quality/speed tradeoff가 아닐 수 있습니다.
+- 가장 promising한 다음 experiments는:
+  - self-play 및 arena를 위한 PyTorch evaluator backend를 추가합니다.
+  - training runs를 위해 사용하기 전에 tinygrad-to-PyTorch checkpoint weight parity를 verify합니다.
+  - PyTorch eval 및 `leaves_per_batch: 64`로 full-loop CUDA benchmark를 실행합니다.
+  - PyTorch eval 후 `leaves_per_batch`를 sweep합니다.
+  - eval이 더 이상 dominant하지 않을 때 training updates이 tinygrad-bound인지 measure합니다.
+  - training이 expected to become the dominant remaining bottleneck이므로 PyTorch eval lands 후에만 ONNX Runtime 또는 TensorRT를 고려합니다.
+  - `collect`가 다시 `search_batch` 시간의 meaningful share가 될 경우에만 persistent C worker pools을 revisit합니다.
 
 ## Currently Unused Reference Fields
 
-These fields are parsed for compatibility with reference configs, but the
-current C backend does not implement async inference queues:
+이 fields는 reference configs와의 호환성을 위해 parsed되지만, 현재 C backend는 async inference queues를 구현하지 않습니다:
 
 ```yaml
 selfplay:
@@ -429,6 +385,5 @@ selfplay:
 
 Useful future directions:
 
-- `inference_batch_size`: could become a target/cap for collecting multiple C
-  leaf batches before calling the evaluator.
-- `inference_wait_ms`: only makes sense with an async inference server/queue.
+- `inference_batch_size`: evaluator를 호출하기 전에 여러 C leaf batches를 collecting하기 위한 target/cap이 될 수 있습니다.
+- `inference_wait_ms`: async inference server/queue에서만 makes sense합니다.
