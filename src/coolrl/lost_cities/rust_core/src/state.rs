@@ -658,4 +658,136 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn legal_action_set_matches_mask_contract() {
+        let config = Config {
+            n_colors: 2,
+            n_ranks: 2,
+            min_rank: 1,
+            n_handshakes: 0,
+            hand_size: 1,
+            expedition_penalty: 0,
+            bonus_threshold: 99,
+            bonus_amount: 0,
+            seed: None,
+        };
+        let mut state = GameState::empty(config).expect("valid config");
+        state.hands[0] = vec![Card { color: 0, rank: 1 }];
+        state.deck = vec![Card { color: 1, rank: 2 }];
+
+        let card_actions = state.build_legal_action_set(7, true);
+        assert_eq!(card_actions.state_version, 7);
+        assert_eq!(
+            card_actions.mask.len(),
+            card_actions.action_space_size as usize
+        );
+        let mut previous_id = None;
+        for action in &card_actions.actions {
+            assert!(card_actions.mask[action.id as usize]);
+            assert!(action.id < card_actions.action_space_size);
+            if let Some(previous_id) = previous_id {
+                assert!(previous_id < action.id);
+            }
+            previous_id = Some(action.id);
+        }
+
+        state
+            .apply_unified_action(1)
+            .expect("discard action should be legal");
+        let draw_actions = state.build_legal_action_set(8, true);
+        assert_eq!(draw_actions.state_version, 8);
+        assert_eq!(
+            draw_actions.mask.len(),
+            draw_actions.action_space_size as usize
+        );
+        let mut previous_id = None;
+        for action in &draw_actions.actions {
+            assert!(draw_actions.mask[action.id as usize]);
+            assert!(action.id < draw_actions.action_space_size);
+            if let Some(previous_id) = previous_id {
+                assert!(previous_id < action.id);
+            }
+            previous_id = Some(action.id);
+        }
+    }
+
+    #[test]
+    fn pending_discarded_color_clears_after_draw_turn_boundary() {
+        let config = Config {
+            n_colors: 2,
+            n_ranks: 2,
+            min_rank: 1,
+            n_handshakes: 0,
+            hand_size: 1,
+            expedition_penalty: 0,
+            bonus_threshold: 99,
+            bonus_amount: 0,
+            seed: None,
+        };
+        let mut state = GameState::empty(config).expect("valid config");
+        state.hands[0] = vec![Card { color: 0, rank: 1 }];
+        state.hands[1] = vec![Card { color: 1, rank: 1 }];
+        state.deck = vec![Card { color: 1, rank: 2 }, Card { color: 0, rank: 2 }];
+
+        state
+            .apply_unified_action(1)
+            .expect("discard action should be legal");
+        assert_eq!(state.pending_discarded_color, Some(0));
+        assert_eq!(state.phase, Phase::Draw);
+
+        state
+            .apply_unified_action(state.config.card_action_size() as u32)
+            .expect("deck draw should be legal");
+        assert_eq!(state.pending_discarded_color, None);
+        assert_eq!(state.phase, Phase::Card);
+        assert_eq!(state.current_player, 1);
+        assert!(!state.terminal);
+    }
+
+    #[test]
+    fn same_seed_and_action_sequence_are_deterministic() {
+        let config = Config {
+            n_colors: 3,
+            n_ranks: 5,
+            min_rank: 2,
+            n_handshakes: 1,
+            hand_size: 5,
+            expedition_penalty: -20,
+            bonus_threshold: 8,
+            bonus_amount: 20,
+            seed: Some(1234),
+        };
+        let mut left = GameState::new_game(config.clone()).expect("left game should start");
+        let mut right = GameState::new_game(config).expect("right game should start");
+
+        loop {
+            assert_eq!(left.deck, right.deck);
+            assert_eq!(left.hands, right.hands);
+            assert_eq!(left.expeditions, right.expeditions);
+            assert_eq!(left.discards, right.discards);
+            assert_eq!(left.current_player, right.current_player);
+            assert_eq!(left.phase, right.phase);
+            assert_eq!(left.turn_count, right.turn_count);
+            assert_eq!(left.terminal, right.terminal);
+
+            if left.terminal {
+                break;
+            }
+
+            let action = left
+                .legal_unified_mask()
+                .into_iter()
+                .enumerate()
+                .find_map(|(index, is_legal)| is_legal.then_some(index as u32))
+                .expect("non-terminal state must have a legal action");
+            assert!(right.legal_unified_mask()[action as usize]);
+
+            left.apply_unified_action(action)
+                .expect("left action should be legal");
+            right
+                .apply_unified_action(action)
+                .expect("right action should be legal");
+        }
+    }
 }

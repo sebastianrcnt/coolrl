@@ -203,9 +203,101 @@ fn full_session_loop_returns_terminal_reward_and_scores() {
                 step.final_scores.get(&other).copied(),
                 Some(next_observation.opponent_score)
             );
+            let err = engine
+                .apply_action(proto::ApplyActionRequest {
+                    session_id: "loop".to_string(),
+                    action_id: 0,
+                    expected_state_version: next_observation.state_version,
+                    observer_player: None,
+                })
+                .expect_err("terminal game must reject further actions");
+            assert_eq!(err.kind(), EngineErrorKind::FailedPrecondition);
             break;
         }
 
         observation = next_observation;
+    }
+}
+
+#[test]
+fn deterministic_engine_observations_match_for_same_seed_and_actions() {
+    let config = small_config(29);
+    let mut left = LostCitiesEngine::new();
+    let mut right = LostCitiesEngine::new();
+
+    let mut left_observation = left
+        .new_game(proto::NewGameRequest {
+            session_id: "det-left".to_string(),
+            config: Some(config.clone()),
+        })
+        .expect("left session should start");
+    let mut right_observation = right
+        .new_game(proto::NewGameRequest {
+            session_id: "det-right".to_string(),
+            config: Some(config),
+        })
+        .expect("right session should start");
+
+    loop {
+        assert_eq!(
+            left_observation.current_player,
+            right_observation.current_player
+        );
+        assert_eq!(left_observation.phase, right_observation.phase);
+        assert_eq!(left_observation.hand, right_observation.hand);
+        assert_eq!(left_observation.deck_size, right_observation.deck_size);
+        assert_eq!(left_observation.discards, right_observation.discards);
+        assert_eq!(
+            left_observation.my_expeditions,
+            right_observation.my_expeditions
+        );
+        assert_eq!(
+            left_observation
+                .legal_actions
+                .as_ref()
+                .map(|actions| &actions.mask),
+            right_observation
+                .legal_actions
+                .as_ref()
+                .map(|actions| &actions.mask)
+        );
+
+        if left_observation.terminal {
+            assert!(right_observation.terminal);
+            break;
+        }
+
+        let action_id = left_observation
+            .legal_actions
+            .as_ref()
+            .and_then(|actions| actions.actions.first())
+            .map(|action| action.id)
+            .expect("non-terminal observation must have a legal action");
+        let left_step = left
+            .apply_action(proto::ApplyActionRequest {
+                session_id: "det-left".to_string(),
+                action_id,
+                expected_state_version: left_observation.state_version,
+                observer_player: None,
+            })
+            .expect("left action should apply");
+        let right_step = right
+            .apply_action(proto::ApplyActionRequest {
+                session_id: "det-right".to_string(),
+                action_id,
+                expected_state_version: right_observation.state_version,
+                observer_player: None,
+            })
+            .expect("right action should apply");
+        assert_eq!(left_step.terminal, right_step.terminal);
+        assert_eq!(left_step.final_scores, right_step.final_scores);
+        assert_eq!(left_step.reward, right_step.reward);
+
+        left_observation = left_step
+            .observation
+            .expect("left observation should exist");
+        right_observation = right_step
+            .observation
+            .expect("right observation should exist");
     }
 }

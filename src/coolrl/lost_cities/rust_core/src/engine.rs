@@ -71,6 +71,7 @@ impl LostCitiesEngine {
         &mut self,
         request: proto::ApplyActionRequest,
     ) -> Result<proto::StepResult, EngineError> {
+        Self::validate_explicit_observer(request.observer_player)?;
         let session_id = request.session_id;
         Self::validate_session_id(&session_id)?;
         let session = self
@@ -128,6 +129,20 @@ impl LostCitiesEngine {
             return Err(EngineError::invalid_argument(
                 "session_id must not be empty",
             ));
+        }
+        Ok(())
+    }
+
+    fn validate_explicit_observer(observer_player: Option<u32>) -> Result<(), EngineError> {
+        if let Some(observer) = observer_player {
+            match observer {
+                0 | 1 => {}
+                _ => {
+                    return Err(EngineError::invalid_argument(
+                        "observer_player must be 0 or 1",
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -281,5 +296,87 @@ mod tests {
         let legal = observation.legal_actions.expect("legal action set");
         assert!(legal.actions.is_empty());
         assert!(legal.mask.iter().all(|value| !value));
+    }
+
+    #[test]
+    fn new_game_requires_config() {
+        let mut engine = LostCitiesEngine::new();
+        let err = engine
+            .new_game(proto::NewGameRequest {
+                session_id: "missing-config".to_string(),
+                config: None,
+            })
+            .expect_err("missing config must fail");
+        assert_eq!(err.kind(), EngineErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    fn empty_session_id_is_rejected() {
+        let mut engine = LostCitiesEngine::new();
+        let err = engine
+            .new_game(proto::NewGameRequest {
+                session_id: "   ".to_string(),
+                config: Some(test_config()),
+            })
+            .expect_err("empty session id must fail");
+        assert_eq!(err.kind(), EngineErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    fn unknown_session_is_rejected() {
+        let engine = LostCitiesEngine::new();
+        let err = engine
+            .get_observation(proto::SessionRef {
+                session_id: "unknown".to_string(),
+                observer_player: None,
+            })
+            .expect_err("unknown session must fail");
+        assert_eq!(err.kind(), EngineErrorKind::NotFound);
+    }
+
+    #[test]
+    fn invalid_apply_action_observer_does_not_mutate_state() {
+        let mut engine = LostCitiesEngine::new();
+        let observation = engine
+            .new_game(proto::NewGameRequest {
+                session_id: "bad-observer".to_string(),
+                config: Some(test_config()),
+            })
+            .expect("session should start");
+        let action_id = observation
+            .legal_actions
+            .as_ref()
+            .and_then(|actions| actions.actions.first())
+            .map(|action| action.id)
+            .expect("must have a legal action");
+
+        let err = engine
+            .apply_action(proto::ApplyActionRequest {
+                session_id: "bad-observer".to_string(),
+                action_id,
+                expected_state_version: observation.state_version,
+                observer_player: Some(2),
+            })
+            .expect_err("invalid observer must fail");
+        assert_eq!(err.kind(), EngineErrorKind::InvalidArgument);
+
+        let after_error = engine
+            .get_observation(proto::SessionRef {
+                session_id: "bad-observer".to_string(),
+                observer_player: Some(0),
+            })
+            .expect("state should still be readable");
+        assert_eq!(after_error.state_version, observation.state_version);
+        assert_eq!(after_error.phase, observation.phase);
+        assert_eq!(after_error.current_player, observation.current_player);
+
+        engine
+            .apply_action(proto::ApplyActionRequest {
+                session_id: "bad-observer".to_string(),
+                action_id,
+                expected_state_version: observation.state_version,
+                observer_player: Some(0),
+            })
+            .expect("same action should still be applicable after failed request");
     }
 }
