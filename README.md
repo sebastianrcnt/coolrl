@@ -1,5 +1,5 @@
-RL 배워나가는 시원 여정 기록
+RL(강화학습)을 배워나가며 기록한 여정
 
-- [Tabular CFR for Kuhn Poker](src/coolrl/kuhn_poker/tabular_cfr.md)
+- [Kuhn Poker를 위한 Tabular CFR](src/coolrl/kuhn_poker/tabular_cfr.md)
 - [Omok self-play RL, GUI, and TUI](src/coolrl/omok/README.md)
-- [Setup Guide](docs/setup.md)
+- [설정 가이드](docs/setup.md)

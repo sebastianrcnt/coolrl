@@ -1,35 +1,35 @@
-# Setup
+# 설정
 
-## 1) Install uv
+## 1) uv 설치
 
-If you don't have `uv` yet:
+`uv`가 없다면:
 
 ```bash
 pip install uv
 ```
 
-## 2) Create and sync environment
+## 2) 환경 생성 및 동기화
 
-From the project root:
+프로젝트 루트에서:
 
 ```bash
 uv sync
 ```
 
-This installs the base dependencies from `[project.dependencies]`.
+이는 `[project.dependencies]`에서 기본 의존성을 설치합니다.
 
-## 3) Optional feature dependencies
+## 3) 선택적 기능 의존성
 
-This project defines extras in `[project.optional-dependencies]`:
+이 프로젝트는 `[project.optional-dependencies]`에 extras를 정의합니다:
 
 - `poker`: `inquirer`
 - `omok`: `torch`, `numpy`, `pygame`, `pyyaml`, `safetensors`
 - `omok-tui`: `omok` plus `onnxruntime` and `textual`
 - `omok-tui-cuda`: `omok` plus CUDA ONNX Runtime and `textual`
 - `omok-tui-tensorrt`: `omok` plus CUDA ONNX Runtime, TensorRT, and `textual`
-- `all`: installs `poker`, `omok`, `omok-tui`, and `lost-cities`
+- `all`: `poker`, `omok`, `omok-tui`, and `lost-cities` 설치
 
-Install one or more extras as needed:
+필요에 따라 하나 이상의 extras를 설치합니다:
 
 ```bash
 uv sync --extra poker
@@ -43,20 +43,16 @@ uv sync --extra poker --extra omok
 uv sync --all-extras
 ```
 
-TensorRT is intentionally not part of the normal `omok` extra because it is
-NVIDIA CUDA-only. For CUDA inference experiments, install NVIDIA TensorRT and
-ONNX through `uv sync --extra omok-tensorrt`, then select
-`selfplay.evaluator_backend: tensorrt` or `auto`. The extra skips TensorRT on
-macOS so Apple Silicon setups keep the normal PyTorch/MPS path.
+TensorRT는 NVIDIA CUDA 전용이므로 일반적인 `omok` extra에 포함되지 않습니다. CUDA inference 실험을 위해 `uv sync --extra omok-tensorrt`를 통해 NVIDIA TensorRT와 ONNX를 설치한 후, `selfplay.evaluator_backend: tensorrt` 또는 `auto`를 선택합니다. 이 extra는 macOS에서 TensorRT를 건너뛰어 Apple Silicon 설정이 일반적인 PyTorch/MPS 경로를 유지하게 합니다.
 
-## 4) Run examples
+## 4) 예제 실행
 
-Use the project docs for each module:
+각 모듈의 프로젝트 문서를 사용합니다:
 
-- Kuhn Poker: see `src/coolrl/kuhn_poker/tabular_cfr.md`
-- Omok: see `src/coolrl/omok/README.md`
+- Kuhn Poker: `src/coolrl/kuhn_poker/tabular_cfr.md` 참조
+- Omok: `src/coolrl/omok/README.md` 참조
 
-For Omok quick smoke test:
+Omok 빠른 테스트용:
 
 ```bash
 uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device CPU

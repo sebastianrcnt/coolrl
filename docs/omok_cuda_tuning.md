@@ -1,13 +1,12 @@
-> Historical note: this document records CUDA tuning measurements from the earlier tinygrad-to-PyTorch transition. The current Omok runtime is PyTorch-only: training checkpoints are `.pt`, the normal evaluator is PyTorch, and tinygrad is no longer a runtime dependency. Treat tinygrad-specific sections below as historical baseline context, not current setup guidance.
+> 역사적 참고: 이 문서는 초기 tinygrad-to-PyTorch transition에서의 CUDA tuning measurements를 기록합니다. 현재 Omok runtime은 PyTorch-only입니다: training checkpoints는 `.pt`, 일반 evaluator는 PyTorch, tinygrad는 더 이상 runtime dependency가 아닙니다. 아래의 tinygrad-specific 섹션을 현재 설정 지침이 아닌 역사적 baseline context로 취급하세요.
 
 # Omok CUDA Self-Play Tuning Notes
 
-These notes capture measurements from the RTX 3090 CUDA profile
-(`configs/omok_full_cuda.yaml`) after adding the C MCTS backend.
+이 note들은 C MCTS backend 추가 후 RTX 3090 CUDA profile(`configs/omok_full_cuda.yaml`)의 measurements를 캡처합니다.
 
-## Current Recommendation
+## 현재 권장사항
 
-For CUDA self-play on a discrete NVIDIA GPU:
+이산 NVIDIA GPU의 CUDA self-play:
 
 ```yaml
 selfplay:
@@ -19,9 +18,7 @@ selfplay:
   search_threads: auto
 ```
 
-Keep `num_workers: 0` for the CUDA profile. The multi-process worker path pins
-tinygrad inference to CPU in `selfplay_worker.py`, so `num_workers: auto` moves
-self-play neural network inference off the GPU.
+CUDA profile의 경우 `num_workers: 0`을 유지합니다. Multi-process worker path는 `selfplay_worker.py`에서 tinygrad inference를 CPU에 고정하므로, `num_workers: auto`는 self-play neural network inference를 GPU에서 이동시킵니다.
 
 On the Ryzen 5 5600X test machine, `search_threads: auto` resolves to 12
 logical CPUs. This is a maximum for the C leaf-collection phase, not a promise

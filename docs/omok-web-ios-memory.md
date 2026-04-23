@@ -1,11 +1,6 @@
-# Omok Web Client — iOS Safari Memory Investigation
+# Omok Web Client — iOS Safari 메모리 조사
 
-This note records two separate tab-death incidents on iOS Safari while
-running the 15×15 Omok ("쿨파고") web client, and the diagnostic reasoning
-behind each fix. The two incidents look identical from the user's seat
-("game runs for a while, tab dies") but have completely different root
-causes on completely different memory axes. Keeping them separate in
-memory makes future regressions easier to bisect.
+이 문서는 15×15 Omok("쿨파고") web client를 iOS Safari에서 실행하는 동안 발생한 두 개의 별도 tab-death 사건과 각 수정 뒤의 진단 추론을 기록합니다. 두 사건은 사용자 관점에서는 동일해 보이지만("게임이 잠시 동안 실행되다가 탭이 죽음") 완전히 다른 root causes와 완전히 다른 메모리 축을 가집니다. 메모리에 이들을 별도로 유지하면 향후 regression을 bisect하기가 더 쉬워집니다.
 
 Relevant commits:
 

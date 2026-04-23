@@ -1,21 +1,17 @@
 # Omok PyTorch-Only Migration Plan
 
-This document describes how to replace Omok's remaining tinygrad training path
-with PyTorch. The goal is not to support two training backends. The goal is to
-delete tinygrad from the recommended path and make PyTorch the single source of
-truth for model definition, training, checkpointing, and export.
+이 문서는 Omok의 남은 tinygrad training path를 PyTorch로 어떻게 대체할 것인지를 설명합니다. 목표는 두 개의 training backends을 지원하는 것이 아닙니다. 목표는 추천 경로에서 tinygrad를 삭제하고 PyTorch를 model definition, training, checkpointing, export의 단일 source of truth로 만드는 것입니다.
 
 ## Migration Policy
 
-- Do not add `training.backend`.
-- Do not add a `TrainingBackend` abstraction.
-- Do not keep tinygrad and torch training side by side.
-- Use PyTorch `.pt` checkpoints for training state.
-- Treat existing tinygrad checkpoints as legacy input artifacts only.
-- Tinygrad optimizer state is not portable and will not be migrated.
-- Keep MCTS interfaces unchanged; MCTS should continue to depend only on the
-  evaluator interface.
-- Retune search settings only after the torch-only path works.
+- `training.backend`를 추가하지 마세요.
+- `TrainingBackend` abstraction을 추가하지 마세요.
+- tinygrad와 torch training을 나란히 유지하지 마세요.
+- Training state에 PyTorch `.pt` checkpoints를 사용하세요.
+- 기존 tinygrad checkpoints를 legacy input artifacts로만 취급하세요.
+- Tinygrad optimizer state는 이식성이 없으며 마이그레이션되지 않을 것입니다.
+- MCTS interfaces를 변경하지 마세요. MCTS는 evaluator interface에만 의존해야 합니다.
+- Torch-only path가 작동한 후에만 search settings을 retune하세요.
 
 The implementation should prefer direct replacement over compatibility layers.
 Compatibility code is allowed only where it is needed to load old tinygrad model
