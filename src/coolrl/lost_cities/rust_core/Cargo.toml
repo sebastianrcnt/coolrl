@@ -1,0 +1,20 @@
+[package]
+name = "lost-cities-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "lost_cities_core"
+path = "src/lib.rs"
+
+[dependencies]
+prost = "0.13"
+prost-types = "0.13"
+rand = { version = "0.8", features = ["std", "std_rng"] }
+
+[build-dependencies]
+prost-build = "0.13"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+rand = { version = "0.8", features = ["std", "std_rng"] }
