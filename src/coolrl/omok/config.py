@@ -11,7 +11,7 @@ import yaml
 @dataclass(slots=True)
 class RulesConfig:
     board_size: int = 9
-    exactly_five: bool = False
+    exactly_five: bool = True
 
     def __post_init__(self) -> None:
         self.board_size = int(self.board_size)
