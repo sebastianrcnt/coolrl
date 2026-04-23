@@ -59,6 +59,10 @@ class LostCitiesConfig:
     def draw_action_size(self) -> int:
         return 1 + self.n_colors
 
+    @property
+    def action_size(self) -> int:
+        return self.card_action_size + self.draw_action_size
+
     def validate(self) -> None:
         if self.n_colors <= 0:
             raise ValueError("n_colors must be positive")
@@ -139,6 +143,7 @@ class GameState:
     discards: list[list[Card]]
     current_player: int = 0
     phase: Phase = "card"
+    # Only set during draw phase after a discard action.
     pending_discarded_color: int | None = None
     turn_count: int = 0
     terminal: bool = False
@@ -185,6 +190,10 @@ class GameState:
     @property
     def draw_action_size(self) -> int:
         return self.config.draw_action_size
+
+    @property
+    def action_size(self) -> int:
+        return self.config.action_size
 
     def sort_hands(self) -> None:
         for player in range(2):
@@ -250,6 +259,36 @@ class GameState:
             return self.legal_card_mask()
         return self.legal_draw_mask()
 
+    def unified_legal_mask(self) -> list[bool]:
+        if self.phase == "card":
+            return self.legal_card_mask() + ([False] * self.draw_action_size)
+        return ([False] * self.card_action_size) + self.legal_draw_mask()
+
+    def to_unified_action(self, action_id: int, phase: Phase | None = None) -> int:
+        phase = self.phase if phase is None else phase
+        if phase == "card":
+            if action_id < 0 or action_id >= self.card_action_size:
+                raise IllegalMoveError(f"card action {action_id} is out of range")
+            return action_id
+        if action_id < 0 or action_id >= self.draw_action_size:
+            raise IllegalMoveError(f"draw action {action_id} is out of range")
+        return self.card_action_size + action_id
+
+    def from_unified_action(self, action_id: int) -> int:
+        if action_id < 0 or action_id >= self.action_size:
+            raise IllegalMoveError(f"action {action_id} is out of range")
+        if self.phase == "card":
+            if action_id >= self.card_action_size:
+                raise IllegalMoveError(
+                    f"draw action {action_id} is illegal during card phase"
+                )
+            return action_id
+        if action_id < self.card_action_size:
+            raise IllegalMoveError(
+                f"card action {action_id} is illegal during draw phase"
+            )
+        return action_id - self.card_action_size
+
     def apply_action(self, action_id: int) -> None:
         if self.terminal:
             raise IllegalMoveError("game is already terminal")
@@ -264,18 +303,23 @@ class GameState:
         else:
             self._apply_draw_action(action_id)
 
+    def apply_unified_action(self, action_id: int) -> None:
+        self.apply_action(self.from_unified_action(action_id))
+
     def _apply_card_action(self, action_id: int) -> None:
         slot = action_id // 2
         play = action_id % 2 == 0
         card = self.hands[self.current_player].pop(slot)
         if play:
             self.expeditions[self.current_player][card.color].append(card)
-            self.pending_discarded_color = None
         else:
             self.discards[card.color].append(card)
             self.pending_discarded_color = card.color
         self.phase = "draw"
-        if not any(self.legal_draw_mask()):
+        if len(self.deck) == 0 and not any(
+            len(self.discards[color]) > 0 and color != self.pending_discarded_color
+            for color in range(self.config.n_colors)
+        ):
             self.terminal = True
 
     def _apply_draw_action(self, action_id: int) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .game import GameState, LostCitiesConfig
+from .game import GameState, IllegalMoveError, LostCitiesConfig
 
 try:
     import numpy as np
@@ -21,16 +21,17 @@ class LostCitiesEnv:
         if self.state is None:
             self.reset()
         assert self.state is not None
-        self.state.apply_action(action_id)
+        actor = self.state.current_player
+        self.state.apply_unified_action(self._normalize_action_id(action_id))
         done = self.state.terminal
-        reward = float(self.state.score_diff(0)) if done else 0.0
+        reward = float(self.state.score_diff(actor)) if done else 0.0
         return self._obs(), reward, done, {}
 
     def legal_actions(self) -> np.ndarray:
         if self.state is None:
             self.reset()
         assert self.state is not None
-        return np.asarray(self.state.legal_mask(), dtype=bool)
+        return np.asarray(self.state.unified_legal_mask(), dtype=bool)
 
     @property
     def current_player(self) -> int:
@@ -51,7 +52,22 @@ class LostCitiesEnv:
         return {
             "spatial": np.zeros((0,), dtype=np.float32),
             "scalar": np.zeros((0,), dtype=np.float32),
-            "legal_mask": np.asarray(self.state.legal_mask(), dtype=bool),
+            "legal_mask": np.asarray(self.state.unified_legal_mask(), dtype=bool),
             "phase": 0 if self.state.phase == "card" else 1,
             "player": self.state.current_player,
         }
+
+    def _normalize_action_id(self, action_id: int) -> int:
+        assert self.state is not None
+        unified_mask = self.state.unified_legal_mask()
+        if 0 <= action_id < len(unified_mask) and unified_mask[action_id]:
+            return action_id
+
+        local_mask = self.state.legal_mask()
+        if 0 <= action_id < len(local_mask) and local_mask[action_id]:
+            return self.state.to_unified_action(action_id)
+
+        raise IllegalMoveError(
+            f"illegal action {action_id} in phase {self.state.phase} "
+            f"for player {self.state.current_player}"
+        )

@@ -28,6 +28,21 @@ def test_empty_discard_pile_draw_is_illegal() -> None:
     assert all(mask[1 + color] is False for color in range(state.config.n_colors))
 
 
+def test_unified_legal_mask_has_fixed_shape_across_phases() -> None:
+    config = LostCitiesConfig()
+    state = GameState.new_game(config, seed=1)
+    assert len(state.unified_legal_mask()) == config.action_size
+
+    action = next(index for index, legal in enumerate(state.legal_mask()) if legal)
+    state.apply_action(action)
+
+    mask = state.unified_legal_mask()
+    assert state.phase == "draw"
+    assert len(mask) == config.action_size
+    assert all(value is False for value in mask[:config.card_action_size])
+    assert any(mask[config.card_action_size:])
+
+
 def test_random_fuzz_invariants() -> None:
     config = tier_config("tier1")
     bot = RandomBot(99)

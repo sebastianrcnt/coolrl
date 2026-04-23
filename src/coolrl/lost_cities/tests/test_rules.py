@@ -63,3 +63,14 @@ def test_deck_exhaustion_ends_after_last_deck_draw() -> None:
     state.apply_action(0)
     assert state.terminal is True
     assert len(state.deck) == 0
+
+
+def test_card_phase_can_end_game_when_no_draw_sources_exist() -> None:
+    config = LostCitiesConfig(n_colors=3, n_ranks=5, n_handshakes=1, hand_size=5)
+    state = GameState.empty(config)
+    state.hands[0] = [Card(0, 1)]
+    state.hands[1] = [Card(1, 1)]
+    state.deck = []
+    state.apply_action(1)
+    assert state.phase == "draw"
+    assert state.terminal is True
