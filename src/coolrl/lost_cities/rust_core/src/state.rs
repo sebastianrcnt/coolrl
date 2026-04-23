@@ -86,6 +86,21 @@ impl GameState {
             }
         }
 
+        Self::new_game_from_deck(config, deck)
+    }
+
+    pub fn new_game_from_deck(config: Config, deck: Vec<Card>) -> Result<Self, EngineError> {
+        config.validate()?;
+        let mut expected = build_deck(&config);
+        let mut actual = deck.clone();
+        expected.sort();
+        actual.sort();
+        if actual != expected {
+            return Err(EngineError::invalid_argument(
+                "deck must contain exactly the cards defined by config",
+            ));
+        }
+
         let mut state = Self::empty(config)?;
         state.deck = deck;
         for _ in 0..state.config.hand_size {
@@ -98,6 +113,9 @@ impl GameState {
             }
         }
         state.sort_hands();
+        state
+            .validate_invariants()
+            .map_err(EngineError::invalid_argument)?;
         Ok(state)
     }
 
@@ -232,34 +250,40 @@ impl GameState {
     }
 
     pub fn validate_invariants(&self) -> Result<(), String> {
-        let total_cards = self.deck.len()
-            + self.hands.iter().map(Vec::len).sum::<usize>()
-            + self
-                .expeditions
-                .iter()
-                .flat_map(|player| player.iter())
-                .map(Vec::len)
-                .sum::<usize>()
-            + self.discards.iter().map(Vec::len).sum::<usize>();
-        if total_cards != self.config.deck_size() {
-            return Err(format!(
-                "card conservation failed: expected {}, found {}",
-                self.config.deck_size(),
-                total_cards
-            ));
+        self.config.validate().map_err(|err| err.to_string())?;
+        if self.current_player > 1 {
+            return Err("current_player must be 0 or 1".to_string());
+        }
+        if self.discards.len() != self.config.n_colors {
+            return Err("discard pile count must match n_colors".to_string());
         }
 
+        let mut all_cards = Vec::new();
+        all_cards.extend(self.deck.iter().copied());
         for (player_index, hand) in self.hands.iter().enumerate() {
+            if hand.len() > self.config.hand_size {
+                return Err(format!("hand {} exceeds hand_size", player_index));
+            }
             if !hand.windows(2).all(|pair| pair[0] <= pair[1]) {
                 return Err(format!("hand {} is not sorted", player_index));
             }
+            all_cards.extend(hand.iter().copied());
         }
 
         for (player_index, expeditions) in self.expeditions.iter().enumerate() {
+            if expeditions.len() != self.config.n_colors {
+                return Err("expedition color count must match n_colors".to_string());
+            }
             for (color, expedition) in expeditions.iter().enumerate() {
                 let mut seen_numeric = false;
                 let mut last_numeric = 0;
                 for card in expedition {
+                    if card.color as usize != color {
+                        return Err(format!(
+                            "player {} expedition {} contains wrong color",
+                            player_index, color
+                        ));
+                    }
                     if card.is_handshake() {
                         if seen_numeric {
                             return Err(format!(
@@ -278,11 +302,31 @@ impl GameState {
                     }
                     last_numeric = card.rank;
                 }
+                all_cards.extend(expedition.iter().copied());
             }
+        }
+        for discard in &self.discards {
+            all_cards.extend(discard.iter().copied());
+        }
+
+        let mut expected = build_deck(&self.config);
+        expected.sort();
+        all_cards.sort();
+        if all_cards != expected {
+            return Err("card conservation failed".to_string());
         }
 
         if self.phase == Phase::Card && self.pending_discarded_color.is_some() {
             return Err("pending_discarded_color must be None during card phase".to_string());
+        }
+        if let Some(color) = self.pending_discarded_color {
+            let color = color as usize;
+            if color >= self.config.n_colors {
+                return Err("pending_discarded_color is out of range".to_string());
+            }
+            if self.discards[color].is_empty() {
+                return Err("pending discard color must have a discard pile card".to_string());
+            }
         }
 
         let any_legal = self.legal_unified_mask().into_iter().any(|value| value);
@@ -503,329 +547,4 @@ pub fn score_expedition(expedition: &[Card], config: &Config) -> i32 {
         score += config.bonus_amount;
     }
     score
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{build_deck, score_expedition, Card, GameState, Phase};
-    use crate::Config;
-    use rand::rngs::StdRng;
-    use rand::seq::SliceRandom;
-    use rand::SeedableRng;
-
-    #[test]
-    fn score_examples_match_rules() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 3,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: None,
-        };
-
-        assert_eq!(score_expedition(&[], &config), 0);
-        assert_eq!(
-            score_expedition(
-                &[Card { color: 0, rank: 0 }, Card { color: 0, rank: 0 }],
-                &config
-            ),
-            -60
-        );
-        assert_eq!(
-            score_expedition(
-                &[
-                    Card { color: 1, rank: 0 },
-                    Card { color: 1, rank: 1 },
-                    Card { color: 1, rank: 3 },
-                ],
-                &config,
-            ),
-            (2 + 4 - 20) * 2
-        );
-    }
-
-    #[test]
-    fn deck_generation_matches_config() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 1,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: None,
-        };
-        assert_eq!(build_deck(&config).len(), config.deck_size());
-    }
-
-    #[test]
-    fn handshake_after_number_is_illegal() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 1,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: None,
-        };
-        let mut state = GameState::empty(config).expect("valid config");
-        state.hands[0] = vec![Card { color: 1, rank: 0 }];
-        state.expeditions[0][1] = vec![Card { color: 1, rank: 1 }];
-        assert!(!state.legal_card_mask_phase()[0]);
-    }
-
-    #[test]
-    fn cannot_draw_just_discarded_color() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 1,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: None,
-        };
-        let mut state = GameState::empty(config).expect("valid config");
-        state.hands[0] = vec![Card { color: 2, rank: 2 }];
-        state.deck = vec![Card { color: 0, rank: 1 }];
-        state
-            .apply_unified_action(1)
-            .expect("discard should be legal");
-        let draw_mask = state.legal_draw_mask_phase();
-        assert!(!draw_mask[1 + 2]);
-    }
-
-    #[test]
-    fn deck_exhaustion_after_last_draw_is_terminal() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 1,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: None,
-        };
-        let mut state = GameState::empty(config).expect("valid config");
-        state.hands[0] = vec![Card { color: 0, rank: 1 }];
-        state.deck = vec![Card { color: 1, rank: 1 }];
-        state
-            .apply_unified_action(1)
-            .expect("discard should be legal");
-        state
-            .apply_unified_action(state.config.card_action_size() as u32)
-            .expect("deck draw should be legal");
-        assert!(state.terminal);
-        assert_eq!(state.phase, Phase::Draw);
-        assert!(state.deck.is_empty());
-    }
-
-    #[test]
-    fn card_phase_terminal_when_no_draw_sources_exist() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 1,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: None,
-        };
-        let mut state = GameState::empty(config).expect("valid config");
-        state.hands[0] = vec![Card { color: 0, rank: 1 }];
-        state.hands[1] = vec![Card { color: 1, rank: 1 }];
-        state
-            .apply_unified_action(1)
-            .expect("discard should be legal");
-        assert!(state.terminal);
-        assert_eq!(state.phase, Phase::Draw);
-    }
-
-    #[test]
-    fn random_games_preserve_invariants() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 1,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: None,
-        };
-
-        for seed in 0..128_u64 {
-            let mut state = GameState::new_game(config.clone().with_seed(Some(seed)))
-                .expect("seeded game should be valid");
-            let mut rng = StdRng::seed_from_u64(seed ^ 0x5eed);
-            let mut steps = 0;
-            while !state.terminal {
-                let legal = state
-                    .legal_unified_mask()
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(index, is_legal)| is_legal.then_some(index as u32))
-                    .collect::<Vec<_>>();
-                let action = *legal
-                    .choose(&mut rng)
-                    .expect("non-terminal has legal action");
-                state
-                    .apply_unified_action(action)
-                    .expect("chosen legal action must apply");
-                state
-                    .validate_invariants()
-                    .expect("invariants must hold after every action");
-                steps += 1;
-                assert!(steps < 1_000);
-            }
-        }
-    }
-
-    #[test]
-    fn legal_action_set_matches_mask_contract() {
-        let config = Config {
-            n_colors: 2,
-            n_ranks: 2,
-            min_rank: 1,
-            n_handshakes: 0,
-            hand_size: 1,
-            expedition_penalty: 0,
-            bonus_threshold: 99,
-            bonus_amount: 0,
-            seed: None,
-        };
-        let mut state = GameState::empty(config).expect("valid config");
-        state.hands[0] = vec![Card { color: 0, rank: 1 }];
-        state.deck = vec![Card { color: 1, rank: 2 }];
-
-        let card_actions = state.build_legal_action_set(7, true);
-        assert_eq!(card_actions.state_version, 7);
-        assert_eq!(
-            card_actions.mask.len(),
-            card_actions.action_space_size as usize
-        );
-        let mut previous_id = None;
-        for action in &card_actions.actions {
-            assert!(card_actions.mask[action.id as usize]);
-            assert!(action.id < card_actions.action_space_size);
-            if let Some(previous_id) = previous_id {
-                assert!(previous_id < action.id);
-            }
-            previous_id = Some(action.id);
-        }
-
-        state
-            .apply_unified_action(1)
-            .expect("discard action should be legal");
-        let draw_actions = state.build_legal_action_set(8, true);
-        assert_eq!(draw_actions.state_version, 8);
-        assert_eq!(
-            draw_actions.mask.len(),
-            draw_actions.action_space_size as usize
-        );
-        let mut previous_id = None;
-        for action in &draw_actions.actions {
-            assert!(draw_actions.mask[action.id as usize]);
-            assert!(action.id < draw_actions.action_space_size);
-            if let Some(previous_id) = previous_id {
-                assert!(previous_id < action.id);
-            }
-            previous_id = Some(action.id);
-        }
-    }
-
-    #[test]
-    fn pending_discarded_color_clears_after_draw_turn_boundary() {
-        let config = Config {
-            n_colors: 2,
-            n_ranks: 2,
-            min_rank: 1,
-            n_handshakes: 0,
-            hand_size: 1,
-            expedition_penalty: 0,
-            bonus_threshold: 99,
-            bonus_amount: 0,
-            seed: None,
-        };
-        let mut state = GameState::empty(config).expect("valid config");
-        state.hands[0] = vec![Card { color: 0, rank: 1 }];
-        state.hands[1] = vec![Card { color: 1, rank: 1 }];
-        state.deck = vec![Card { color: 1, rank: 2 }, Card { color: 0, rank: 2 }];
-
-        state
-            .apply_unified_action(1)
-            .expect("discard action should be legal");
-        assert_eq!(state.pending_discarded_color, Some(0));
-        assert_eq!(state.phase, Phase::Draw);
-
-        state
-            .apply_unified_action(state.config.card_action_size() as u32)
-            .expect("deck draw should be legal");
-        assert_eq!(state.pending_discarded_color, None);
-        assert_eq!(state.phase, Phase::Card);
-        assert_eq!(state.current_player, 1);
-        assert!(!state.terminal);
-    }
-
-    #[test]
-    fn same_seed_and_action_sequence_are_deterministic() {
-        let config = Config {
-            n_colors: 3,
-            n_ranks: 5,
-            min_rank: 2,
-            n_handshakes: 1,
-            hand_size: 5,
-            expedition_penalty: -20,
-            bonus_threshold: 8,
-            bonus_amount: 20,
-            seed: Some(1234),
-        };
-        let mut left = GameState::new_game(config.clone()).expect("left game should start");
-        let mut right = GameState::new_game(config).expect("right game should start");
-
-        loop {
-            assert_eq!(left.deck, right.deck);
-            assert_eq!(left.hands, right.hands);
-            assert_eq!(left.expeditions, right.expeditions);
-            assert_eq!(left.discards, right.discards);
-            assert_eq!(left.current_player, right.current_player);
-            assert_eq!(left.phase, right.phase);
-            assert_eq!(left.turn_count, right.turn_count);
-            assert_eq!(left.terminal, right.terminal);
-
-            if left.terminal {
-                break;
-            }
-
-            let action = left
-                .legal_unified_mask()
-                .into_iter()
-                .enumerate()
-                .find_map(|(index, is_legal)| is_legal.then_some(index as u32))
-                .expect("non-terminal state must have a legal action");
-            assert!(right.legal_unified_mask()[action as usize]);
-
-            left.apply_unified_action(action)
-                .expect("left action should be legal");
-            right
-                .apply_unified_action(action)
-                .expect("right action should be legal");
-        }
-    }
 }

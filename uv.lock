@@ -147,7 +147,6 @@ all = [
 lost-cities = [
     { name = "numpy" },
     { name = "pyyaml" },
-    { name = "textual" },
 ]
 omok = [
     { name = "matplotlib" },
@@ -225,7 +224,6 @@ requires-dist = [
     { name = "safetensors", marker = "extra == 'omok'", specifier = ">=0.4.5" },
     { name = "tensorrt", marker = "sys_platform != 'darwin' and extra == 'omok-tensorrt'", specifier = ">=10.0.0" },
     { name = "tensorrt", marker = "sys_platform != 'darwin' and extra == 'omok-tui-tensorrt'", specifier = ">=10.0.0" },
-    { name = "textual", marker = "extra == 'lost-cities'", specifier = ">=0.85.0" },
     { name = "textual", marker = "extra == 'omok-tui'", specifier = ">=0.85.0" },
     { name = "textual", marker = "extra == 'omok-tui-cuda'", specifier = ">=0.85.0" },
     { name = "textual", marker = "extra == 'omok-tui-tensorrt'", specifier = ">=0.85.0" },

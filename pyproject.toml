@@ -65,3 +65,4 @@ include = ["coolrl*"]
 
 [tool.setuptools.package-data]
 "coolrl.omok" = ["assets/fonts/*.ttf", "assets/licenses/*.txt"]
+"coolrl.lost_cities" = ["fixtures/*.json"]

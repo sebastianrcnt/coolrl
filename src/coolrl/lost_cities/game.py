@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, fields
 import random
 from typing import Any, Literal
 
@@ -29,6 +30,19 @@ class Card:
         if self.is_handshake:
             return f"[{self.color}]H"
         return f"[{self.color}]{self.numeric_value(min_rank)}"
+
+    def to_snapshot(self) -> dict[str, int]:
+        return {"color": self.color, "rank": self.rank}
+
+    @classmethod
+    def from_snapshot(cls, data: Any) -> Card:
+        if isinstance(data, cls):
+            return data
+        if isinstance(data, dict):
+            return cls(color=int(data["color"]), rank=int(data["rank"]))
+        if isinstance(data, (list, tuple)) and len(data) == 2:
+            return cls(color=int(data[0]), rank=int(data[1]))
+        raise ValueError(f"invalid card snapshot: {data!r}")
 
 
 @dataclass(frozen=True)
@@ -79,6 +93,9 @@ class LostCitiesConfig:
         if self.bonus_threshold <= 0:
             raise ValueError("bonus_threshold must be positive")
 
+    def to_snapshot(self) -> dict[str, Any]:
+        return {field.name: getattr(self, field.name) for field in fields(self)}
+
 
 TIER_PRESETS: dict[str, tuple[int, int, int, int, int]] = {
     "tier0": (2, 3, 2, 0, 3),
@@ -112,6 +129,10 @@ def config_from_mapping(data: dict[str, Any]) -> LostCitiesConfig:
     return config
 
 
+def config_to_mapping(config: LostCitiesConfig) -> dict[str, Any]:
+    return config.to_snapshot()
+
+
 def load_config(path: str) -> LostCitiesConfig:
     try:
         import yaml
@@ -132,6 +153,20 @@ def build_deck(config: LostCitiesConfig) -> list[Card]:
         deck.extend(Card(color, 0) for _ in range(config.n_handshakes))
         deck.extend(Card(color, rank) for rank in range(1, config.n_ranks + 1))
     return deck
+
+
+def _card_counter(cards: list[Card]) -> Counter[Card]:
+    return Counter(cards)
+
+
+def _cards_from_snapshot(data: Any) -> list[Card]:
+    if not isinstance(data, list):
+        raise ValueError(f"expected card list snapshot, got {type(data).__name__}")
+    return [Card.from_snapshot(card) for card in data]
+
+
+def _cards_to_snapshot(cards: list[Card]) -> list[dict[str, int]]:
+    return [card.to_snapshot() for card in cards]
 
 
 @dataclass
@@ -160,12 +195,27 @@ class GameState:
         rng = random.Random(config.seed if seed is None else seed)
         deck = build_deck(config)
         rng.shuffle(deck)
+        return cls.new_game_from_deck(deck, config)
+
+    @classmethod
+    def new_game_from_deck(
+        cls,
+        deck: list[Card] | list[dict[str, int]] | list[tuple[int, int]],
+        config: LostCitiesConfig | None = None,
+    ) -> GameState:
+        config = config or LostCitiesConfig()
+        config.validate()
+        cards = [Card.from_snapshot(card) for card in deck]
+        if _card_counter(cards) != _card_counter(build_deck(config)):
+            raise ValueError("deck must contain exactly the cards defined by config")
+
         state = cls.empty(config)
-        state.deck = deck
+        state.deck = list(cards)
         for _ in range(config.hand_size):
             for player in range(2):
                 state.hands[player].append(state.deck.pop())
         state.sort_hands()
+        state.validate_invariants()
         return state
 
     @classmethod
@@ -182,6 +232,71 @@ class GameState:
             ],
             discards=[[] for _ in range(config.n_colors)],
         )
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot: dict[str, Any],
+        *,
+        validate: bool = True,
+    ) -> GameState:
+        config = config_from_mapping(snapshot["config"])
+        phase = snapshot.get("phase", "card")
+        if phase not in ("card", "draw"):
+            raise ValueError(f"invalid phase: {phase!r}")
+
+        state = cls(
+            config=config,
+            deck=_cards_from_snapshot(snapshot["deck"]),
+            hands=[
+                _cards_from_snapshot(snapshot["hands"][0]),
+                _cards_from_snapshot(snapshot["hands"][1]),
+            ],
+            expeditions=[
+                [
+                    _cards_from_snapshot(color_cards)
+                    for color_cards in snapshot["expeditions"][0]
+                ],
+                [
+                    _cards_from_snapshot(color_cards)
+                    for color_cards in snapshot["expeditions"][1]
+                ],
+            ],
+            discards=[
+                _cards_from_snapshot(color_cards)
+                for color_cards in snapshot["discards"]
+            ],
+            current_player=int(snapshot.get("current_player", 0)),
+            phase=phase,
+            pending_discarded_color=snapshot.get("pending_discarded_color"),
+            turn_count=int(snapshot.get("turn_count", 0)),
+            terminal=bool(snapshot.get("terminal", False)),
+        )
+        if state.pending_discarded_color is not None:
+            state.pending_discarded_color = int(state.pending_discarded_color)
+        if validate:
+            state.validate_invariants()
+        return state
+
+    def to_snapshot(self) -> dict[str, Any]:
+        return {
+            "config": self.config.to_snapshot(),
+            "deck": _cards_to_snapshot(self.deck),
+            "hands": [_cards_to_snapshot(hand) for hand in self.hands],
+            "expeditions": [
+                [_cards_to_snapshot(expedition) for expedition in player_expeditions]
+                for player_expeditions in self.expeditions
+            ],
+            "discards": [_cards_to_snapshot(discard) for discard in self.discards],
+            "current_player": self.current_player,
+            "phase": self.phase,
+            "pending_discarded_color": self.pending_discarded_color,
+            "turn_count": self.turn_count,
+            "terminal": self.terminal,
+        }
+
+    def clone(self) -> GameState:
+        return self.from_snapshot(self.to_snapshot())
 
     @property
     def card_action_size(self) -> int:
@@ -350,6 +465,89 @@ class GameState:
     def score_diff(self, player: int = 0) -> int:
         other = 1 - player
         return self.total_score(player) - self.total_score(other)
+
+    def validate_invariants(self) -> None:
+        self.config.validate()
+        if self.current_player not in (0, 1):
+            raise ValueError("current_player must be 0 or 1")
+        if self.phase not in ("card", "draw"):
+            raise ValueError(f"invalid phase: {self.phase!r}")
+        if len(self.hands) != 2:
+            raise ValueError("hands must contain two players")
+        if len(self.expeditions) != 2:
+            raise ValueError("expeditions must contain two players")
+        if len(self.discards) != self.config.n_colors:
+            raise ValueError("discard pile count must match n_colors")
+
+        all_cards: list[Card] = []
+        all_cards.extend(self.deck)
+        for player, hand in enumerate(self.hands):
+            if len(hand) > self.config.hand_size:
+                raise ValueError(f"hand {player} exceeds hand_size")
+            if hand != sorted(hand, key=lambda card: (card.color, card.rank)):
+                raise ValueError(f"hand {player} is not sorted")
+            all_cards.extend(hand)
+
+        for player, expeditions in enumerate(self.expeditions):
+            if len(expeditions) != self.config.n_colors:
+                raise ValueError("expedition color count must match n_colors")
+            for color, expedition in enumerate(expeditions):
+                self._validate_expedition(player, color, expedition)
+                all_cards.extend(expedition)
+        for discard in self.discards:
+            all_cards.extend(discard)
+
+        for card in all_cards:
+            self._validate_card(card)
+        if _card_counter(all_cards) != _card_counter(build_deck(self.config)):
+            raise ValueError("card conservation failed")
+
+        if self.phase == "card" and self.pending_discarded_color is not None:
+            raise ValueError("pending_discarded_color must be None during card phase")
+        if self.pending_discarded_color is not None:
+            color = self.pending_discarded_color
+            if color < 0 or color >= self.config.n_colors:
+                raise ValueError("pending_discarded_color is out of range")
+            if not self.discards[color]:
+                raise ValueError("pending discard color must have a discard pile card")
+
+        any_legal = any(self.unified_legal_mask())
+        if self.terminal and any_legal:
+            raise ValueError("terminal state must have no legal actions")
+        if not self.terminal and not any_legal:
+            raise ValueError("non-terminal state must have at least one legal action")
+
+    def _validate_card(self, card: Card) -> None:
+        if card.color < 0 or card.color >= self.config.n_colors:
+            raise ValueError(f"card color out of range: {card}")
+        if card.rank < 0 or card.rank > self.config.n_ranks:
+            raise ValueError(f"card rank out of range: {card}")
+
+    def _validate_expedition(
+        self,
+        player: int,
+        color: int,
+        expedition: list[Card],
+    ) -> None:
+        seen_numeric = False
+        last_numeric = 0
+        for card in expedition:
+            if card.color != color:
+                raise ValueError(
+                    f"player {player} expedition {color} contains wrong color"
+                )
+            if card.is_handshake:
+                if seen_numeric:
+                    raise ValueError(
+                        f"player {player} expedition {color} has handshake after number"
+                    )
+                continue
+            seen_numeric = True
+            if card.rank <= last_numeric:
+                raise ValueError(
+                    f"player {player} expedition {color} is not strictly increasing"
+                )
+            last_numeric = card.rank
 
 
 def score_expedition(expedition: list[Card], config: LostCitiesConfig) -> int:

@@ -17,11 +17,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            n_colors: 5,
-            n_ranks: 9,
+            n_colors: 3,
+            n_ranks: 5,
             min_rank: 2,
-            n_handshakes: 3,
-            hand_size: 8,
+            n_handshakes: 1,
+            hand_size: 5,
             expedition_penalty: -20,
             bonus_threshold: 8,
             bonus_amount: 20,
