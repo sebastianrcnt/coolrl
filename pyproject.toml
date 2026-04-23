@@ -54,6 +54,13 @@ all = [
     "coolrl[poker,omok,omok-tui,lost-cities]",
 ]
 
+[dependency-groups]
+dev = [
+    "numpy>=1.26.0",
+    "pytest>=9.0.3",
+    "pyyaml>=6.0.3",
+]
+
 [project.scripts]
 omok-train = "coolrl.omok.train:main"
 omok-plot = "coolrl.omok.plot_metrics:main"
