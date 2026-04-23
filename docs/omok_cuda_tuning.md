@@ -20,46 +20,38 @@ selfplay:
 
 CUDA profile의 경우 `num_workers: 0`을 유지합니다. Multi-process worker path는 `selfplay_worker.py`에서 tinygrad inference를 CPU에 고정하므로, `num_workers: auto`는 self-play neural network inference를 GPU에서 이동시킵니다.
 
-On the Ryzen 5 5600X test machine, `search_threads: auto` resolves to 12
-logical CPUs. This is a maximum for the C leaf-collection phase, not a promise
-that the whole training process will keep 12 CPU cores busy.
+Ryzen 5 5600X 테스트 머신에서 `search_threads: auto`는 12개의 logical CPUs로 resolve됩니다. 이는 C leaf-collection phase의 최대값이지, 전체 training process가 12개의 CPU cores를 계속 사용한다는 약속은 아닙니다.
 
-`evaluator_backend: torch` affects only self-play and arena inference. Training,
-optimizer state, and checkpoints still use the tinygrad `PolicyValueNet`. The
-PyTorch evaluator is rebuilt from the current tinygrad weights after optimizer
-updates and after best-model promotion, so it remains a drop-in inference
-backend rather than a full training migration.
+`evaluator_backend: torch`는 self-play와 arena inference에만 영향을 미칩니다. Training, optimizer state, checkpoints는 여전히 tinygrad `PolicyValueNet`을 사용합니다. PyTorch evaluator는 optimizer updates 후와 best-model promotion 후 현재 tinygrad weights에서 rebuild되므로, 전체 training migration이 아닌 drop-in inference backend로 유지됩니다.
 
-## Why `leaves_per_batch: 64`
+## `leaves_per_batch: 64`인 이유
 
-With C MCTS, tree traversal is faster than the old Python tree walk. The
-previous `leaves_per_batch: 8` produced a maximum self-play inference batch of:
+C MCTS를 사용하면 tree traversal이 기존 Python tree walk보다 빠릅니다. 이전 `leaves_per_batch: 8`은 최대 self-play inference batch를 다음과 같이 생성했습니다:
 
 ```text
 64 active games * 8 leaves = 512 positions
 ```
 
-Raising it to 16 lets CUDA see:
+이를 16으로 높이면 CUDA가 다음을 볼 수 있습니다:
 
 ```text
 64 active games * 16 leaves = 1024 positions
 ```
 
-Raising it further to 64 reduces the number of evaluator calls:
+이를 더 64로 높이면 evaluator calls 수를 줄입니다:
 
 ```text
-simulations=256, leaves_per_batch=16 -> 16 eval rounds per search_batch
-simulations=256, leaves_per_batch=64 ->  4 eval rounds per search_batch
+simulations=256, leaves_per_batch=16 -> search_batch당 16 eval rounds
+simulations=256, leaves_per_batch=64 ->  search_batch당 4 eval rounds
 ```
 
-With mixed self-play in the current trainer, each source usually owns half the
-global batch, so the largest observed early bucket is typically:
+현재 trainer의 mixed self-play에서 각 source는 보통 global batch의 절반을 소유하므로, 관찰된 가장 큰 초기 bucket은 일반적으로:
 
 ```text
 32 active games * 64 leaves = 2048 positions
 ```
 
-Observed self-play timings on the full CUDA profile:
+전체 CUDA profile에서 관찰된 self-play 타이밍:
 
 | Setting | Iteration | Self-play time | Notes |
 |---|---:|---:|---|
@@ -71,51 +63,39 @@ Observed self-play timings on the full CUDA profile:
 | `leaves_per_batch: 64` | 3 | ~47s | simulations=160, mixed source |
 | `leaves_per_batch: 64` | 4 | ~47s | simulations=160, mixed source |
 
-The move from 8 to 16 reduced self-play time by roughly 30-40% in the earlier
-runs. The move from 16 to 64 also improved throughput, but total iteration time
-is now split across self-play, training, and arena, so further self-play-only
-tuning has limited impact on whole-iteration time.
+8에서 16으로의 이동은 초기 runs에서 self-play 시간을 대략 30-40% 줄였습니다. 16에서 64로의 이동도 throughput을 개선했지만, 전체 iteration time은 이제 self-play, training, arena에 걸쳐 분할되므로, 추가적인 self-play-only tuning은 whole-iteration time에 제한적인 영향을 미칩니다.
 
-Do not blindly generalize `leaves_per_batch: 64` to ROCm or Metal profiles.
-Backend kernel behavior, JIT behavior, and search-quality tradeoffs differ.
-For non-CUDA profiles, sweep 8/16/32/64 and compare duration plus arena
-quality metrics.
+`leaves_per_batch: 64`를 ROCm 또는 Metal profiles에 맹목적으로 일반화하지 마세요. Backend kernel behavior, JIT behavior, search-quality tradeoffs는 다릅니다. Non-CUDA profiles의 경우 8/16/32/64를 sweep하고 duration 및 arena quality metrics을 비교하세요.
 
 ## Optional TensorRT Evaluator
 
-The TensorRT evaluator accelerates only neural network inference inside
-self-play and arena MCTS. It does not replace PyTorch training, optimizer
-updates, replay sampling, or MCTS tree traversal.
+TensorRT evaluator는 self-play와 arena MCTS 내 neural network inference을 가속화하기만 합니다. 이는 PyTorch training, optimizer updates, replay sampling, MCTS tree traversal을 대체하지 않습니다.
 
-Enable it explicitly on NVIDIA CUDA systems with:
+NVIDIA CUDA systems에서 명시적으로 활성화하려면:
 
 ```yaml
 selfplay:
   evaluator_backend: tensorrt
 ```
 
-Or allow CUDA-only auto-selection when TensorRT is installed:
+또는 TensorRT가 설치되었을 때 CUDA-only auto-selection을 허용하려면:
 
 ```yaml
 selfplay:
   evaluator_backend: auto
 ```
 
-`auto` falls back to the torch evaluator when CUDA or TensorRT is unavailable.
-Apple Silicon and Metal/MPS runs should keep using the torch evaluator; TensorRT
-is not a Metal backend and is not imported on non-CUDA paths.
+`auto`는 CUDA 또는 TensorRT를 사용할 수 없을 때 torch evaluator로 fallback합니다. Apple Silicon과 Metal/MPS runs는 torch evaluator를 계속 사용해야 합니다. TensorRT는 Metal backend가 아니고 non-CUDA paths에서 imported되지 않습니다.
 
-Install the optional dependencies with:
+다음으로 optional dependencies를 설치하세요:
 
 ```bash
 uv sync --extra omok-tensorrt
 ```
 
-NVIDIA's pip package defaults to the latest CUDA major variant supported by
-TensorRT. If a machine needs a specific CUDA major version, install the matching
-NVIDIA package manually, for example `tensorrt-cu12` or `tensorrt-cu13`.
+NVIDIA의 pip package는 TensorRT가 지원하는 최신 CUDA major variant로 기본값을 설정합니다. 머신에 특정 CUDA major version이 필요한 경우 matching NVIDIA package를 수동으로 설치하세요. 예를 들어 `tensorrt-cu12` 또는 `tensorrt-cu13`.
 
-Useful environment knobs:
+유용한 environment knobs:
 
 | Variable | Default | Meaning |
 |---|---:|---|
@@ -125,9 +105,7 @@ Useful environment knobs:
 | `COOLRL_TENSORRT_WORKSPACE_MB` | `2048` | TensorRT builder workspace limit |
 | `COOLRL_TENSORRT_CACHE` | `~/.cache/coolrl/tensorrt` | engine cache directory; set `0` for a temp cache |
 
-Candidate-model engines can be expensive because the candidate weights change
-after every optimizer phase. Best-model engines amortize better because the best
-model changes only on promotion.
+Candidate-model engines는 비용이 많이 들 수 있습니다. candidate weights가 모든 optimizer phase 후에 변경되기 때문입니다. Best-model engines는 best model이 promotion 시에만 변경되므로 더 잘 분산됩니다.
 
 ## Why Not `num_workers: auto`
 
