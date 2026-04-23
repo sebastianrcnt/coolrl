@@ -11,10 +11,13 @@ path = "src/lib.rs"
 prost = "0.13"
 prost-types = "0.13"
 rand = { version = "0.8", features = ["std", "std_rng"] }
+tonic = { version = "0.12", features = ["transport"] }
 
 [build-dependencies]
-prost-build = "0.13"
 protoc-bin-vendored = "3"
+tonic-build = "0.12"
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["std", "std_rng"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+tokio-stream = { version = "0.1", features = ["net"] }

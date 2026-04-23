@@ -9,7 +9,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", proto_file.display());
 
-    prost_build::Config::new()
+    tonic_build::configure()
         .compile_protos(&[proto_file], &[proto_dir])
         .expect("compile lost_cities proto");
 }
