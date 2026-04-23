@@ -11,6 +11,7 @@ const DIRECTIONS: ReadonlyArray<readonly [number, number]> = [
 export class GameState {
   readonly boardSize: number;
   readonly actionSize: number;
+  readonly exactlyFive: boolean;
   readonly board: Int8Array;
   toPlay: Player;
   moveCount: number;
@@ -18,9 +19,10 @@ export class GameState {
   winner: Player | 0;
   terminal: boolean;
 
-  constructor(boardSize = 9) {
+  constructor(boardSize = 9, exactlyFive = true) {
     this.boardSize = boardSize;
     this.actionSize = boardSize * boardSize;
+    this.exactlyFive = exactlyFive;
     this.board = new Int8Array(this.actionSize);
     this.toPlay = 1;
     this.moveCount = 0;
@@ -30,7 +32,7 @@ export class GameState {
   }
 
   clone(): GameState {
-    const copy = new GameState(this.boardSize);
+    const copy = new GameState(this.boardSize, this.exactlyFive);
     copy.board.set(this.board);
     copy.toPlay = this.toPlay;
     copy.moveCount = this.moveCount;
@@ -86,7 +88,7 @@ export class GameState {
         1 +
         this.countDirection(row, col, dr, dc, player) +
         this.countDirection(row, col, -dr, -dc, player);
-      if (count >= 5) return true;
+      if (this.exactlyFive ? count === 5 : count >= 5) return true;
     }
     return false;
   }

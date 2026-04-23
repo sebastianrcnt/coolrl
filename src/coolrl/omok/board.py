@@ -11,7 +11,7 @@ Action = int
 @dataclass(slots=True)
 class GameState:
     board_size: int = 9
-    exactly_five: bool = False
+    exactly_five: bool = True
     board: np.ndarray | None = None
     to_play: int = 1
     move_count: int = 0

@@ -106,6 +106,45 @@ describe("GameState.clone", () => {
     expect(copy.moveCount).toBe(2);
     expect(g.board[1]).toBe(0);
   });
+
+  it("preserves the exactlyFive flag", () => {
+    const strict = new GameState(15, true);
+    const relaxed = new GameState(15, false);
+    expect(strict.clone().exactlyFive).toBe(true);
+    expect(relaxed.clone().exactlyFive).toBe(false);
+  });
+});
+
+describe("GameState exactly-five rule", () => {
+  // Build a 6-in-a-row for black at row 0, columns 0..5, ending with
+  // black filling the gap at (0,4). White plays spaced stones on row 2
+  // so it never forms its own line.
+  // Black: (0,0..3),(0,5),(0,4)  White: (2,0),(2,2),(2,4),(2,6),(2,8)
+  const overlineMoves = [0, 30, 1, 32, 2, 34, 3, 36, 5, 38, 4];
+
+  it("defaults to exactly-five (overline is not a win)", () => {
+    const g = new GameState(15);
+    expect(g.exactlyFive).toBe(true);
+    playSequence(g, overlineMoves);
+    expect(g.terminal).toBe(false);
+    expect(g.winner).toBe(0);
+    for (const col of [0, 1, 2, 3, 4, 5]) expect(g.board[col]).toBe(1);
+  });
+
+  it("with exactlyFive=false, overline counts as a win", () => {
+    const g = new GameState(15, false);
+    expect(g.exactlyFive).toBe(false);
+    playSequence(g, overlineMoves);
+    expect(g.terminal).toBe(true);
+    expect(g.winner).toBe(1);
+  });
+
+  it("still detects clean 5-in-a-row under exactlyFive=true", () => {
+    const g = new GameState(15, true);
+    playSequence(g, [0, 15, 1, 16, 2, 17, 3, 18, 4]);
+    expect(g.terminal).toBe(true);
+    expect(g.winner).toBe(1);
+  });
 });
 
 describe("outcomeForPlayer", () => {
