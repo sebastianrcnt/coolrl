@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import Protocol, TypeAlias, runtime_checkable
-
-from .game import Card, GameState, LostCitiesConfig
+from ..game import Card, GameState
+from ..interfaces import BotInput, LostCitiesBot
+from .base import first_legal, legal_from_obs
 
 try:
     import numpy as np
@@ -11,41 +10,10 @@ except ImportError as exc:  # pragma: no cover
     raise RuntimeError("numpy is required for Lost Cities bots") from exc
 
 
-BotInput: TypeAlias = dict | GameState
-
-
-@runtime_checkable
-class LostCitiesBot(Protocol):
-    def act(self, obs_or_state: BotInput) -> int:
-        """Choose an action id from the current state or observation."""
-
-
-def _legal_from_obs(obs_or_state: BotInput) -> np.ndarray:
-    if isinstance(obs_or_state, GameState):
-        return np.asarray(obs_or_state.legal_mask(), dtype=bool)
-    return np.asarray(obs_or_state["legal_mask"], dtype=bool)
-
-
-class RandomBot(LostCitiesBot):
-    def __init__(self, seed: int | None = None):
-        self.rng = np.random.default_rng(seed)
-
-    def act(self, obs_or_state: BotInput) -> int:
-        legal = _legal_from_obs(obs_or_state)
-        legal_indices = np.nonzero(legal)[0]
-        if len(legal_indices) == 0:
-            raise RuntimeError("no legal action available")
-        return int(self.rng.choice(legal_indices))
-
-
 class SafeHeuristicBot(LostCitiesBot):
     def act(self, obs_or_state: BotInput) -> int:
         if not isinstance(obs_or_state, GameState):
-            legal = _legal_from_obs(obs_or_state)
-            legal_indices = np.nonzero(legal)[0]
-            if len(legal_indices) == 0:
-                raise RuntimeError("no legal action available")
-            return int(legal_indices[0])
+            return first_legal(legal_from_obs(obs_or_state))
         if obs_or_state.phase == "card":
             return self._act_card(obs_or_state)
         return self._act_draw(obs_or_state)
@@ -104,7 +72,7 @@ class SafeHeuristicBot(LostCitiesBot):
             )
         if discard_candidates:
             return min(discard_candidates)[3]
-        return self._first_legal(legal)
+        return first_legal(legal)
 
     def _act_draw(self, state: GameState) -> int:
         legal = state.legal_draw_mask()
@@ -118,63 +86,7 @@ class SafeHeuristicBot(LostCitiesBot):
                 return action
         if legal[0]:
             return 0
-        return self._first_legal(legal)
+        return first_legal(legal)
 
     def _can_use_now(self, state: GameState, player: int, card: Card) -> bool:
         return state.can_play_card(player, card)
-
-    def _first_legal(self, legal: list[bool] | np.ndarray) -> int:
-        legal_indices = np.nonzero(np.asarray(legal, dtype=bool))[0]
-        if len(legal_indices) == 0:
-            raise RuntimeError("no legal action available")
-        return int(legal_indices[0])
-
-
-def play_game(
-    bot0: LostCitiesBot,
-    bot1: LostCitiesBot,
-    config: LostCitiesConfig,
-    *,
-    seed: int | None = None,
-    max_steps: int = 10_000,
-) -> GameState:
-    game_config = replace(config, seed=seed) if seed is not None else config
-    state = GameState.new_game(game_config)
-    bots = [bot0, bot1]
-    for _ in range(max_steps):
-        if state.terminal:
-            return state
-        action = bots[state.current_player].act(state)
-        state.apply_action(action)
-    raise RuntimeError(f"game exceeded max_steps={max_steps}")
-
-
-def run_series(
-    bot0: LostCitiesBot,
-    bot1: LostCitiesBot,
-    config: LostCitiesConfig,
-    *,
-    games: int = 100,
-    seed: int = 0,
-) -> dict:
-    diffs: list[int] = []
-    wins0 = 0
-    wins1 = 0
-    draws = 0
-    for index in range(games):
-        state = play_game(bot0, bot1, config, seed=seed + index)
-        diff = state.score_diff(0)
-        diffs.append(diff)
-        if diff > 0:
-            wins0 += 1
-        elif diff < 0:
-            wins1 += 1
-        else:
-            draws += 1
-    return {
-        "games": games,
-        "avg_diff": float(np.mean(diffs)) if diffs else 0.0,
-        "wins0": wins0,
-        "wins1": wins1,
-        "draws": draws,
-    }

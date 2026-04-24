@@ -9,14 +9,10 @@ import sys
 from typing import Any, Literal
 
 from .game import Card, LostCitiesConfig, tier_config
-from .gui_models import DEFAULT_MODEL, GuiModel, available_model_names, build_model
-from .pygame_common import (
-    BackendName,
-    LostCitiesBackend,
-    Snapshot,
-    build_lost_cities_backend,
-    snapshot_summary,
-)
+from .backends import build_lost_cities_backend
+from .backends.common import snapshot_summary
+from .bots import DEFAULT_BOT, LostCitiesBot, available_bot_names, build_bot
+from .interfaces import BackendName, LostCitiesBackend, Snapshot
 
 LOGGER = logging.getLogger("coolrl.lost_cities.pvp")
 ModeName = Literal["pvp", "pvc"]
@@ -109,7 +105,13 @@ def preferred_font_path() -> Path | None:
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Play Lost Cities in one pygame window.")
     parser.add_argument("--mode", choices=("pvp", "pvc"), default="pvp")
-    parser.add_argument("--model", choices=available_model_names(), default=DEFAULT_MODEL)
+    parser.add_argument("--bot", choices=available_bot_names(), default=DEFAULT_BOT)
+    parser.add_argument(
+        "--model",
+        dest="bot",
+        choices=available_bot_names(),
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--backend", choices=("python", "rust"), default="python")
     parser.add_argument("--tier", choices=("tier0", "tier1", "tier2", "tier3"), default="tier3")
     parser.add_argument("--seed", type=int, default=None)
@@ -123,7 +125,7 @@ class LostCitiesGuiApp:
         self,
         *,
         mode: ModeName = "pvp",
-        model_name: str = DEFAULT_MODEL,
+        bot_name: str = DEFAULT_BOT,
         backend_name: BackendName,
         tier_name: str = "tier3",
         seed: int | None = None,
@@ -150,9 +152,9 @@ class LostCitiesGuiApp:
         self.seed = seed
         self.tier_name = tier_name
         self.mode: ModeName = mode
-        self.model_name = model_name
+        self.bot_name = bot_name
         self.computer_player = 1
-        self.computer_model: GuiModel = build_model(self.model_name, seed=self._model_seed())
+        self.computer_bot: LostCitiesBot = build_bot(self.bot_name, seed=self._bot_seed())
         self.next_computer_action_at_ms = 0
         self.selected_backend: BackendName = backend_name
         self.config = tier_config(tier_name)
@@ -165,7 +167,7 @@ class LostCitiesGuiApp:
         self.hand_card_rects: dict[int, Any] = {}
         self.board_targets: list[ActionTarget] = []
         self.mode_dropdown: Any = None
-        self.model_dropdown: Any = None
+        self.bot_dropdown: Any = None
         self.backend_dropdown: Any = None
         self.tier_dropdown: Any = None
         self.new_game_button: Any = None
@@ -176,9 +178,9 @@ class LostCitiesGuiApp:
         self.turn_flash_until_ms = 0
         self.rebuild_ui()
         LOGGER.debug(
-            "GUI 앱 초기화: 모드=%s 모델=%s 백엔드=%s 티어=%s 시드=%s 크기=%sx%s 색상수=%s 손패=%s 덱=%s",
+            "GUI 앱 초기화: 모드=%s 봇=%s 백엔드=%s 티어=%s 시드=%s 크기=%sx%s 색상수=%s 손패=%s 덱=%s",
             self.mode,
-            self.model_name,
+            self.bot_name,
             self.selected_backend,
             self.tier_name,
             self.seed,
@@ -189,7 +191,7 @@ class LostCitiesGuiApp:
             self.config.deck_size,
         )
 
-    def _model_seed(self) -> int | None:
+    def _bot_seed(self) -> int | None:
         if self.seed is None:
             return None
         return self.seed + 10_001
@@ -247,10 +249,10 @@ class LostCitiesGuiApp:
                 LOGGER.debug("모드 변경: %s -> %s", self.mode, event.text)
                 self.mode = event.text
                 self.reset_game()
-            elif event.ui_element == self.model_dropdown:
-                LOGGER.debug("모델 변경: %s -> %s", self.model_name, event.text)
-                self.model_name = event.text
-                self.computer_model = build_model(self.model_name, seed=self._model_seed())
+            elif event.ui_element == self.bot_dropdown:
+                LOGGER.debug("봇 변경: %s -> %s", self.bot_name, event.text)
+                self.bot_name = event.text
+                self.computer_bot = build_bot(self.bot_name, seed=self._bot_seed())
                 self.reset_game()
             elif event.ui_element == self.backend_dropdown:
                 LOGGER.debug("백엔드 변경: %s -> %s", self.selected_backend, event.text)
@@ -289,17 +291,17 @@ class LostCitiesGuiApp:
         if now < self.next_computer_action_at_ms:
             return
         try:
-            action_id = self.computer_model.act(snapshot)
+            action_id = self.computer_bot.act(snapshot)
             LOGGER.debug(
-                "컴퓨터 액션 선택: 모델=%s 액션=%s 상태={%s}",
-                self.model_name,
+                "컴퓨터 액션 선택: 봇=%s 액션=%s 상태={%s}",
+                self.bot_name,
                 action_id,
                 snapshot_summary(snapshot),
             )
             self.apply_action(action_id, rebuild=False)
         except Exception as exc:
             self.error_text = str(exc)
-            LOGGER.exception("컴퓨터 액션 실패: 모델=%s", self.model_name)
+            LOGGER.exception("컴퓨터 액션 실패: 봇=%s", self.bot_name)
         self.next_computer_action_at_ms = self.pygame.time.get_ticks() + 360
         self.rebuild_ui()
 
@@ -345,7 +347,7 @@ class LostCitiesGuiApp:
         self.last_turn_identity = None
         self.turn_flash_until_ms = 0
         self.next_computer_action_at_ms = 0
-        self.computer_model = build_model(self.model_name, seed=self._model_seed())
+        self.computer_bot = build_bot(self.bot_name, seed=self._bot_seed())
         try:
             self.backend = build_lost_cities_backend(
                 self.selected_backend,
@@ -435,14 +437,14 @@ class LostCitiesGuiApp:
             relative_rect=pygame.Rect(92, 17, 108, 46),
             manager=self.manager,
         )
-        self.model_dropdown = pygame_gui.elements.UIDropDownMenu(
-            options_list=available_model_names(),
-            starting_option=self.model_name,
+        self.bot_dropdown = pygame_gui.elements.UIDropDownMenu(
+            options_list=available_bot_names(),
+            starting_option=self.bot_name,
             relative_rect=pygame.Rect(288, 17, 138, 46),
             manager=self.manager,
         )
         if self.mode != "pvc":
-            self.model_dropdown.disable()
+            self.bot_dropdown.disable()
         self.backend_dropdown = pygame_gui.elements.UIDropDownMenu(
             options_list=["python", "rust"],
             starting_option=self.selected_backend,
@@ -470,7 +472,7 @@ class LostCitiesGuiApp:
         self.ui_elements.extend(
             [
                 self.mode_dropdown,
-                self.model_dropdown,
+                self.bot_dropdown,
                 self.backend_dropdown,
                 self.tier_dropdown,
                 self.new_game_button,
@@ -500,7 +502,7 @@ class LostCitiesGuiApp:
         pygame.draw.line(self.screen, LINE, (0, 90), (width, 90), 1)
         pygame.draw.line(self.screen, LINE, (1080, 0), (1080, 90), 1)
         self._draw_text("MODE", (31, 31), MUTED, 18)
-        self._draw_text("MODEL", (220, 31), MUTED, 18)
+        self._draw_text("BOT", (220, 31), MUTED, 18)
         self._draw_text("BACKEND", (448, 31), MUTED, 18)
         self._draw_text("TIER", (704, 31), MUTED, 18)
         if snapshot.terminal:
@@ -518,9 +520,9 @@ class LostCitiesGuiApp:
                 status = (
                     "CPU: CHOOSE CARD"
                     if compact
-                    else f"COMPUTER ({self.model_name.upper()}): CHOOSE A CARD"
+                    else f"COMPUTER ({self.bot_name.upper()}): CHOOSE A CARD"
                 )
-                detail = "Waiting for model action."
+                detail = "Waiting for bot action."
             elif card is None:
                 status = (
                     f"P{snapshot.current_player}: CHOOSE CARD"
@@ -544,9 +546,9 @@ class LostCitiesGuiApp:
                 status = (
                     "CPU: DRAW"
                     if compact
-                    else f"COMPUTER ({self.model_name.upper()}): DRAW A CARD"
+                    else f"COMPUTER ({self.bot_name.upper()}): DRAW A CARD"
                 )
-                detail = "Waiting for model action."
+                detail = "Waiting for bot action."
             else:
                 status = (
                     f"P{snapshot.current_player}: DRAW"
@@ -605,7 +607,7 @@ class LostCitiesGuiApp:
             active_label = "COMPUTER" if self.is_computer_turn(snapshot) else "ACTIVE"
             self._draw_text(active_label, (status_box.x + 22, status_box.y + 22), GOLD, 20)
             if self.is_computer_turn(snapshot):
-                prompt = f"Model: {self.model_name}"
+                prompt = f"Bot: {self.bot_name}"
             elif snapshot.phase == "card":
                 prompt = (
                     "Yellow border: expedition or discard"
@@ -1036,7 +1038,7 @@ def main(argv: list[str] | None = None) -> None:
     args = build_argparser().parse_args(argv)
     app = LostCitiesGuiApp(
         mode=args.mode,
-        model_name=args.model,
+        bot_name=args.bot,
         backend_name=args.backend,
         tier_name=args.tier,
         seed=args.seed,
