@@ -145,3 +145,62 @@ def test_safe_heuristic_tier3_self_play_opens_expeditions() -> None:
 
     assert play_actions
     assert any(state.expeditions[0][color] for color in range(state.config.n_colors))
+
+
+def test_safe_heuristic_avoids_opening_weak_fifth_color() -> None:
+    config = LostCitiesConfig(n_colors=5, n_ranks=8, hand_size=8)
+    bot = SafeHeuristicBot()
+    state = GameState.empty(config)
+    state.current_player = 0
+    state.phase = "card"
+
+    state.expeditions[0][0] = [Card(color=0, rank=4)]
+    state.expeditions[0][1] = [Card(color=1, rank=4)]
+    state.expeditions[0][2] = [Card(color=2, rank=5)]
+    state.expeditions[0][3] = [Card(color=3, rank=6)]
+    weak_open = Card(color=4, rank=4)
+    state.hands[0] = [weak_open, Card(color=4, rank=7), Card(color=0, rank=6)]
+    state.sort_hand(0)
+
+    assert bot._should_open_expedition(
+        state=state,
+        player=0,
+        color=4,
+        opening_card=weak_open,
+        derived=bot._derived(state),
+        deck_left=config.deck_size,
+    ) is False
+
+
+def test_safe_heuristic_prefers_followup_on_started_expedition() -> None:
+    config = LostCitiesConfig(n_colors=3, n_ranks=8, hand_size=5)
+    bot = SafeHeuristicBot()
+    state = GameState.empty(config)
+    state.current_player = 0
+    state.phase = "card"
+    state.expeditions[0][0] = [Card(color=0, rank=4)]
+    state.hands[0] = [Card(color=0, rank=6), Card(color=1, rank=4), Card(color=1, rank=7)]
+    state.sort_hand(0)
+
+    action = bot._act_card(state)
+    chosen = state.hands[0][action // 2]
+
+    assert action % 2 == 0
+    assert chosen.color == 0
+
+
+def test_safe_heuristic_avoids_unopened_discard_draw_after_four_opens() -> None:
+    config = LostCitiesConfig(n_colors=5, n_ranks=8, hand_size=8)
+    bot = SafeHeuristicBot()
+    state = GameState.empty(config)
+    state.current_player = 0
+    state.phase = "draw"
+    state.deck = [Card(color=0, rank=8), Card(color=1, rank=8)]
+    state.expeditions[0][0] = [Card(color=0, rank=4)]
+    state.expeditions[0][1] = [Card(color=1, rank=4)]
+    state.expeditions[0][2] = [Card(color=2, rank=5)]
+    state.expeditions[0][3] = [Card(color=3, rank=6)]
+    state.hands[0] = [Card(color=4, rank=4), Card(color=4, rank=7)]
+    state.discards[4] = [Card(color=4, rank=5)]
+
+    assert bot._act_draw(state) == 0

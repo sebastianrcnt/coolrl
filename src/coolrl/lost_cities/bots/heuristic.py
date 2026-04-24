@@ -63,10 +63,15 @@ class SafeHeuristicParams:
     losing_visible_draw_bonus: float = 1.50
     speculative_visible_draw_bonus: float = 1.50
     dead_visible_draw_penalty: float = 2.00
+    unopened_draw_penalty_three_open: float = 10.00
+    unopened_draw_penalty_four_open: float = 20.00
+    strong_deny_threshold: float = 10.00
 
     # General behavior.
     late_open_block_ratio: float = 0.20
     low_card_sequence_bonus: float = 5.00
+    started_expedition_play_bonus: float = 4.00
+    started_expedition_followup_bonus: float = 3.00
 
 
 @dataclass(frozen=True)
@@ -384,6 +389,8 @@ class SafeHeuristicBot(LostCitiesBot):
         )
 
         value = 0.0
+        value += self.params.started_expedition_play_bonus
+        value += self.params.started_expedition_followup_bonus
 
         # Early/mid game: preserve sequencing by playing lower legal cards first.
         value += float(state.config.max_rank + 1 - numeric_value)
@@ -460,9 +467,12 @@ class SafeHeuristicBot(LostCitiesBot):
             for card in state.hands[player]
             if card.color == color and card.is_handshake
         ]
+        opened_colors = sum(1 for expedition in state.expeditions[player] if expedition)
         number_sum = sum(self._num(state, card) for card in numbers)
         high_cards = [card for card in numbers if card.rank >= derived.middle_rank]
+        high_count = len(high_cards)
         opening_value = self._num(state, opening_card)
+        new_color_penalty = self._new_color_open_penalty(opened_colors)
 
         strong_open = (
             len(numbers) >= derived.min_open_cards
@@ -470,6 +480,8 @@ class SafeHeuristicBot(LostCitiesBot):
             and (high_cards or number_sum >= 0.85 * derived.max_color_sum)
         )
         speculative_open = (
+            opened_colors <= 2
+            and
             len(numbers) >= 2
             and number_sum >= 0.65 * derived.open_target_sum
             and bool(high_cards)
@@ -479,6 +491,19 @@ class SafeHeuristicBot(LostCitiesBot):
             and len(numbers) >= 1
             and opening_value >= 8
         )
+        exceptional_open = (
+            len(numbers) >= derived.min_open_cards + 1
+            and number_sum >= max(float(derived.break_even_sum), derived.open_target_sum * 1.4)
+            and high_count >= 2
+            and deck_left > derived.mid_deck_threshold
+        )
+
+        if opened_colors == 3:
+            speculative_open = False
+        if opened_colors >= 4:
+            strong_open = False
+            speculative_open = False
+            single_late_open = False
 
         if strong_open:
             return (
@@ -486,6 +511,7 @@ class SafeHeuristicBot(LostCitiesBot):
                 + 0.25 * number_sum
                 + 0.8 * len(numbers)
                 + 0.5 * len(handshakes)
+                - new_color_penalty
             )
         if speculative_open:
             return (
@@ -493,9 +519,20 @@ class SafeHeuristicBot(LostCitiesBot):
                 + 0.18 * number_sum
                 + 0.7 * len(numbers)
                 + 0.4 * len(handshakes)
+                - new_color_penalty
+            )
+        if opened_colors == 3:
+            return 0.0
+        if exceptional_open:
+            return (
+                10.0
+                + 0.3 * number_sum
+                + 1.0 * len(numbers)
+                + 0.7 * high_count
+                - new_color_penalty
             )
         if single_late_open:
-            return 1.5 + 0.2 * opening_value
+            return 1.5 + 0.2 * opening_value - new_color_penalty
 
         return 0.0
 
@@ -708,6 +745,8 @@ class SafeHeuristicBot(LostCitiesBot):
     ) -> float:
         color = card.color
         opponent = 1 - player
+        opened_colors = sum(1 for expedition in state.expeditions[player] if expedition)
+        is_unopened_color = not state.expeditions[player][color]
         commitment = self._color_commitment(
             state=state,
             player=player,
@@ -725,6 +764,13 @@ class SafeHeuristicBot(LostCitiesBot):
         value = self.params.deny_opponent_weight * opponent_value
         if score_diff <= 0:
             value += self.params.losing_visible_draw_bonus
+
+        exceptional_support = False
+        if is_unopened_color:
+            if opened_colors >= 4:
+                value -= self.params.unopened_draw_penalty_four_open
+            elif opened_colors >= 3:
+                value -= self.params.unopened_draw_penalty_three_open
 
         if card.is_handshake:
             if state.has_numeric(player, color):
@@ -753,6 +799,15 @@ class SafeHeuristicBot(LostCitiesBot):
                         card=card,
                         derived=derived,
                     )
+                    exceptional_support = support >= 6.0
+                    if (
+                        is_unopened_color
+                        and opened_colors >= 4
+                        and not exceptional_support
+                        and opponent_value < self.params.strong_deny_threshold
+                        and score_diff > -15
+                    ):
+                        return -8.0
                     return value + support - 0.5
             return value + 6.0 + commitment
 
@@ -764,21 +819,34 @@ class SafeHeuristicBot(LostCitiesBot):
             if state.expeditions[player][color]:
                 value += 5.0
             else:
-                value += self._visible_open_support_value(
+                support = self._visible_open_support_value(
                     state=state,
                     player=player,
                     card=card,
                     derived=derived,
                 )
+                exceptional_support = support >= 6.0
+                value += support
         else:
             value -= self.params.dead_visible_draw_penalty
             if not state.expeditions[player][color]:
-                value += self._visible_open_support_value(
+                support = self._visible_open_support_value(
                     state=state,
                     player=player,
                     card=card,
                     derived=derived,
                 )
+                exceptional_support = support >= 6.0
+                value += support
+
+        if (
+            is_unopened_color
+            and opened_colors >= 4
+            and not exceptional_support
+            and opponent_value < self.params.strong_deny_threshold
+            and score_diff > -15
+        ):
+            return -8.0
 
         value += self._bonus_potential(
             state=state,
@@ -799,6 +867,7 @@ class SafeHeuristicBot(LostCitiesBot):
         derived: DerivedHeuristicConfig,
     ) -> float:
         color = card.color
+        opened_colors = sum(1 for expedition in state.expeditions[player] if expedition)
         same_color_numbers = [
             other
             for other in state.hands[player]
@@ -829,17 +898,30 @@ class SafeHeuristicBot(LostCitiesBot):
             derived=derived,
         ):
             value += 4.0
-        elif future_numbers or same_color_handshakes:
+        elif opened_colors <= 2 and (future_numbers or same_color_handshakes):
             value += self.params.speculative_visible_draw_bonus
 
-        value += 0.25 * self._opening_plan_value(
-            state=state,
-            player=player,
-            color=color,
-            opening_card=card,
-            derived=derived,
-            deck_left=len(state.deck),
-        )
+        if opened_colors <= 2:
+            value += 0.25 * self._opening_plan_value(
+                state=state,
+                player=player,
+                color=color,
+                opening_card=card,
+                derived=derived,
+                deck_left=len(state.deck),
+            )
+        elif opened_colors == 3:
+            value += 0.1 * max(
+                0.0,
+                self._opening_plan_value(
+                    state=state,
+                    player=player,
+                    color=color,
+                    opening_card=card,
+                    derived=derived,
+                    deck_left=len(state.deck),
+                ),
+            )
 
         return value
 
@@ -919,12 +1001,24 @@ class SafeHeuristicBot(LostCitiesBot):
         value = 0.0
         value += 0.8 * numeric_value
         value += self.params.commitment_weight * commitment
+        if state.expeditions[player][card.color]:
+            value += self.params.started_expedition_play_bonus
+            value += self.params.started_expedition_followup_bonus
 
         # Low playable cards are valuable when we are committed to that color.
         if commitment >= 6.0 and card.rank <= derived.middle_rank:
             value += self.params.low_card_sequence_bonus
 
         return value
+
+    def _new_color_open_penalty(self, opened_colors: int) -> float:
+        if opened_colors <= 1:
+            return 0.0
+        if opened_colors == 2:
+            return 6.0
+        if opened_colors == 3:
+            return 14.0
+        return 28.0
 
     def _card_value_for_opponent(
         self,
