@@ -2,7 +2,7 @@ experiment_name: lost_cities_deep_cfr_small_run
 seed: 29
 max_hours: null
 max_iterations: 10
-device: CUDA
+device: CPU
 use_amp: false
 
 rules:
