@@ -1,6 +1,7 @@
 from coolrl.lost_cities.game import LostCitiesConfig
 from coolrl.lost_cities.backends import build_lost_cities_backend
 from coolrl.lost_cities.bots import SafeHeuristicBot, available_bot_names, build_bot
+from coolrl.lost_cities.pygame_pvp import undo_until_player_card_phase
 
 
 def test_random_gui_bot_selects_unified_legal_action() -> None:
@@ -21,3 +22,39 @@ def test_bot_registry_lists_random_bot() -> None:
 
 def test_bot_registry_builds_safe_heuristic_bot() -> None:
     assert isinstance(build_bot("safe-heuristic"), SafeHeuristicBot)
+
+
+def test_pvc_undo_rewinds_human_turn_when_bot_turn_starts() -> None:
+    backend = build_lost_cities_backend("python", LostCitiesConfig(seed=3), seed=3)
+    initial = backend.snapshot()
+
+    for _ in range(2):
+        snapshot = backend.snapshot()
+        action = next(i for i, legal in enumerate(snapshot.legal_mask) if legal)
+        backend.apply(action)
+
+    assert backend.snapshot().current_player == 1
+    assert backend.snapshot().phase == "card"
+
+    undo_count = undo_until_player_card_phase(backend, player=0)
+
+    assert undo_count == 2
+    assert backend.snapshot() == initial
+
+
+def test_pvc_undo_rewinds_full_human_and_bot_cycle() -> None:
+    backend = build_lost_cities_backend("python", LostCitiesConfig(seed=3), seed=3)
+    initial = backend.snapshot()
+
+    for _ in range(4):
+        snapshot = backend.snapshot()
+        action = next(i for i, legal in enumerate(snapshot.legal_mask) if legal)
+        backend.apply(action)
+
+    assert backend.snapshot().current_player == 0
+    assert backend.snapshot().phase == "card"
+
+    undo_count = undo_until_player_card_phase(backend, player=0)
+
+    assert undo_count == 4
+    assert backend.snapshot() == initial

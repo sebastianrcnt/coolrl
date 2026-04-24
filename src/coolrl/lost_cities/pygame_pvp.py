@@ -108,6 +108,23 @@ def turn_identity_summary(identity: tuple[int, str, int] | None) -> str:
     return f"플레이어={player} 단계={phase_name} 턴={turn}"
 
 
+def undo_until_player_card_phase(
+    backend: LostCitiesBackend,
+    *,
+    player: int,
+) -> int:
+    undone = 0
+    while backend.can_undo():
+        changed = backend.undo()
+        if not changed:
+            break
+        undone += 1
+        snapshot = backend.snapshot()
+        if snapshot.current_player == player and snapshot.phase == "card":
+            break
+    return undone
+
+
 def configure_debug_logging() -> None:
     root = logging.getLogger()
     if not root.handlers:
@@ -439,23 +456,31 @@ class LostCitiesGuiApp:
             self.rebuild_ui()
 
     def undo(self) -> None:
-        if self.is_computer_turn():
-            self.error_text = "컴퓨터 턴에는 되돌릴 수 없음"
-            self.rebuild_ui()
-            return
         try:
             before = self.backend.snapshot()
-            changed = self.backend.undo()
+            if self.mode == "pvc":
+                undo_count = undo_until_player_card_phase(
+                    self.backend,
+                    player=1 - self.computer_player,
+                )
+            else:
+                undo_count = 1 if self.backend.undo() else 0
+            changed = undo_count > 0
             self.selected_card_slot = None
             self.hand_card_rects = {}
             self.board_targets = []
+            self.next_computer_action_at_ms = 0
             self.error_text = None if changed else "되돌릴 수 없음"
-            if changed and len(self.match_trace) > 1:
-                self.match_trace.pop()
+            if changed:
+                for _ in range(undo_count):
+                    if len(self.match_trace) <= 1:
+                        break
+                    self.match_trace.pop()
                 self.export_text = None
             LOGGER.debug(
-                "되돌리기 요청: 변경됨=%s 이전={%s} 이후={%s}",
+                "되돌리기 요청: 변경됨=%s 횟수=%s 이전={%s} 이후={%s}",
                 changed,
+                undo_count,
                 snapshot_summary(before),
                 snapshot_summary(self.backend.snapshot()),
             )
@@ -518,7 +543,7 @@ class LostCitiesGuiApp:
             self.rebuild_ui()
             return
 
-        export_dir = Path.cwd() / "lost_cities_exports"
+        export_dir = Path.cwd() / "exports"
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         seed_label = "none" if self.seed is None else str(self.seed)
         path = export_dir / (
