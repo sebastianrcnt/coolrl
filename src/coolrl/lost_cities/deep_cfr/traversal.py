@@ -46,7 +46,7 @@ class DeepCFRTraverser:
 
     def traverse(self, state: GameState, traverser: int, iteration: int) -> tuple[float, TraversalStats]:
         stats = TraversalStats()
-        value = self._traverse(state, traverser, iteration, 0, stats, True)
+        value = self._traverse(state, traverser, iteration, 0, stats)
         return value, stats
 
     def _policy(self, state: GameState, player: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -77,7 +77,6 @@ class DeepCFRTraverser:
         iteration: int,
         depth: int,
         stats: TraversalStats,
-        enumerate_traverser_node: bool,
     ) -> float:
         stats.nodes += 1
         stats.max_depth_reached = max(stats.max_depth_reached, depth)
@@ -96,7 +95,7 @@ class DeepCFRTraverser:
             stats.terminals += 1
             return float(state.score_diff(traverser))
 
-        if player == traverser and enumerate_traverser_node:
+        if player == traverser:
             action_values = np.zeros(state.action_size, dtype=np.float32)
             for action in legal_actions:
                 child = clone_state(state)
@@ -107,7 +106,6 @@ class DeepCFRTraverser:
                     iteration,
                     depth + 1,
                     stats,
-                    False,
                 )
             node_value = float(np.dot(policy, action_values))
             regrets = np.where(legal, action_values - node_value, 0.0).astype(np.float32)
@@ -130,7 +128,6 @@ class DeepCFRTraverser:
             iteration,
             depth + 1,
             stats,
-            enumerate_traverser_node,
         )
 
 

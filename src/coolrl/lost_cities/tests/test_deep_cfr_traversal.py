@@ -44,3 +44,43 @@ def test_cfr_traversal_tier3_completes() -> None:
     )
     assert math.isfinite(value)
     assert stats.nodes > 0
+
+
+def test_cfr_traversal_stores_regrets_for_multiple_traverser_decisions() -> None:
+    config = tier_config("tier1", seed=11)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+    state = GameState.new_game(config)
+    value, stats = cfr_traverse(
+        state,
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=2,
+        rng=np.random.default_rng(17),
+    )
+
+    assert math.isfinite(value)
+    assert stats.nodes > 0
+    assert len(memories[0]) > 1
+
+    saw_card_phase = False
+    saw_draw_phase = False
+    for sample in memories[0].samples:
+        legal_mask = sample.legal_mask
+        has_card_action = bool(np.any(legal_mask[: config.card_action_size]))
+        has_draw_action = bool(np.any(legal_mask[config.card_action_size :]))
+        if has_card_action and not has_draw_action:
+            saw_card_phase = True
+        if has_draw_action and not has_card_action:
+            saw_draw_phase = True
+
+    assert saw_card_phase
+    assert saw_draw_phase

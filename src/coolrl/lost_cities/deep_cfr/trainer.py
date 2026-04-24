@@ -75,6 +75,12 @@ class DeepCFRTrainer:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.metrics_path = self.checkpoint_dir / "metrics.jsonl"
         self.progress_path = self.checkpoint_dir / "runtime_progress.json"
+        self.num_workers, _ = config.traversal.resolved_num_workers()
+        if self.num_workers != 0:
+            logger.warning(
+                "traversal.num_workers={} is ignored by the Python Deep CFR MVP; traversals run in-process",
+                self.num_workers,
+            )
         if resume_path is None and self.metrics_path.exists():
             archive = self.metrics_path.with_name(f"metrics.{time.strftime('%Y%m%d-%H%M%S')}.jsonl")
             shutil.move(self.metrics_path, archive)
@@ -260,6 +266,7 @@ class DeepCFRTrainer:
         payload = {
             "config": self.config.to_dict(),
             "lost_cities_config": self.lc_config.to_snapshot(),
+            "resume_semantics": "weights_only",
             "iteration": self.iteration,
             "input_dim": self.input_dim,
             "action_size": self.action_size,
@@ -274,6 +281,10 @@ class DeepCFRTrainer:
     def load_checkpoint(self, path: str | Path) -> None:
         payload = torch.load(path, map_location=self.device)
         self.iteration = int(payload.get("iteration", 0))
+        logger.warning(
+            "Resuming from {} restores networks, optimizers, and iteration only; reservoir memories are not restored",
+            path,
+        )
         for net, state_dict in zip(self.advantage_nets, payload["advantage_nets"], strict=True):
             net.load_state_dict(state_dict)
         self.strategy_net.load_state_dict(payload["strategy_net"])
