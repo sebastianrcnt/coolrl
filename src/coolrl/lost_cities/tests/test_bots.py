@@ -121,3 +121,27 @@ def test_safe_heuristic_can_draw_discard_to_deny_opponent_when_losing() -> None:
 
     assert state.score_diff(0) < 0
     assert bot._act_draw(state) == draw_from_discard_action(0)
+
+
+def test_safe_heuristic_tier3_self_play_opens_expeditions() -> None:
+    state = GameState.new_game(tier_config("tier3"), seed=1)
+    bot = SafeHeuristicBot()
+    player0_actions: list[int] = []
+
+    for _ in range(60):
+        if state.terminal:
+            break
+        action = bot.act(state)
+        unified = state.to_unified_action(action)
+        if state.current_player == 0:
+            player0_actions.append(unified)
+        state.apply_unified_action(unified)
+
+    play_actions = [
+        action
+        for action in player0_actions
+        if action < state.config.card_action_size and action % 2 == 0
+    ]
+
+    assert play_actions
+    assert any(state.expeditions[0][color] for color in range(state.config.n_colors))

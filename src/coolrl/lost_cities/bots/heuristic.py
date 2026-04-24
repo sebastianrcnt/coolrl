@@ -36,7 +36,7 @@ LOGGER = logging.getLogger("coolrl.lost_cities.bots.safe_heuristic")
 @dataclass(frozen=True)
 class SafeHeuristicParams:
     # Expedition opening.
-    open_target_ratio: float = 0.65
+    open_target_ratio: float = 0.50
     open_min_card_ratio: float = 0.40
 
     # Handshake / investment behavior.
@@ -97,7 +97,7 @@ def derive_heuristic_config(
 
     # In small tiers, break-even can be impossible. Do not set impossible targets.
     open_target_sum = min(
-        float(break_even_sum),
+        0.8 * float(break_even_sum),
         params.open_target_ratio * float(max_color_sum),
     )
 
@@ -195,6 +195,18 @@ class SafeHeuristicBot(LostCitiesBot):
         )
         if play_action_id is not None:
             return play_action_id
+
+        if all(not expedition for expedition in state.expeditions[player]):
+            forced_open_action = self._best_forced_open(
+                state=state,
+                player=player,
+                hand=hand,
+                legal=legal,
+                derived=derived,
+                deck_left=deck_left,
+            )
+            if forced_open_action is not None:
+                return forced_open_action
 
         discard_action_id = self._best_discard(
             state=state,
@@ -415,6 +427,25 @@ class SafeHeuristicBot(LostCitiesBot):
         if deck_left <= derived.late_open_block_threshold:
             return False
 
+        return self._opening_plan_value(
+            state=state,
+            player=player,
+            color=color,
+            opening_card=opening_card,
+            derived=derived,
+            deck_left=deck_left,
+        ) > 0.0
+
+    def _opening_plan_value(
+        self,
+        *,
+        state: GameState,
+        player: int,
+        color: int,
+        opening_card: Card,
+        derived: DerivedHeuristicConfig,
+        deck_left: int,
+    ) -> float:
         numbers = [
             card
             for card in state.hands[player]
@@ -424,23 +455,49 @@ class SafeHeuristicBot(LostCitiesBot):
                 and card.rank >= opening_card.rank
             )
         ]
-
-        if len(numbers) < derived.min_open_cards:
-            return False
-
-        number_sum = sum(self._num(state, card) for card in numbers)
-        if number_sum < derived.open_target_sum:
-            return False
-
-        # If there are no medium/high cards, avoid opening just because of many lows.
-        high_cards = [
-            card for card in numbers
-            if card.rank >= derived.middle_rank
+        handshakes = [
+            card
+            for card in state.hands[player]
+            if card.color == color and card.is_handshake
         ]
-        if not high_cards and number_sum < 0.85 * derived.max_color_sum:
-            return False
+        number_sum = sum(self._num(state, card) for card in numbers)
+        high_cards = [card for card in numbers if card.rank >= derived.middle_rank]
+        opening_value = self._num(state, opening_card)
 
-        return True
+        strong_open = (
+            len(numbers) >= derived.min_open_cards
+            and number_sum >= derived.open_target_sum
+            and (high_cards or number_sum >= 0.85 * derived.max_color_sum)
+        )
+        speculative_open = (
+            len(numbers) >= 2
+            and number_sum >= 0.65 * derived.open_target_sum
+            and bool(high_cards)
+        )
+        single_late_open = (
+            deck_left <= derived.mid_deck_threshold
+            and len(numbers) >= 1
+            and opening_value >= 8
+        )
+
+        if strong_open:
+            return (
+                6.0
+                + 0.25 * number_sum
+                + 0.8 * len(numbers)
+                + 0.5 * len(handshakes)
+            )
+        if speculative_open:
+            return (
+                3.0
+                + 0.18 * number_sum
+                + 0.7 * len(numbers)
+                + 0.4 * len(handshakes)
+            )
+        if single_late_open:
+            return 1.5 + 0.2 * opening_value
+
+        return 0.0
 
     def _open_expedition_value(
         self,
@@ -473,6 +530,14 @@ class SafeHeuristicBot(LostCitiesBot):
         value += number_sum
         value += 2.0 * len(numbers)
         value += 1.5 * len(handshakes)
+        value += self._opening_plan_value(
+            state=state,
+            player=player,
+            color=color,
+            opening_card=opening_card,
+            derived=derived,
+            deck_left=deck_left,
+        )
 
         # Opening an expedition accepts the penalty.
         value += state.config.expedition_penalty
@@ -493,6 +558,58 @@ class SafeHeuristicBot(LostCitiesBot):
         value -= self._late_penalty(derived, deck_left)
 
         return value
+
+    def _best_forced_open(
+        self,
+        *,
+        state: GameState,
+        player: int,
+        hand: list[Card],
+        legal: list[bool] | np.ndarray,
+        derived: DerivedHeuristicConfig,
+        deck_left: int,
+    ) -> int | None:
+        candidates: list[tuple[float, int]] = []
+
+        for slot, card in enumerate(hand):
+            action = play_action(slot)
+            if not legal[action] or card.is_handshake:
+                continue
+            if state.expeditions[player][card.color]:
+                continue
+
+            opening_value = self._opening_plan_value(
+                state=state,
+                player=player,
+                color=card.color,
+                opening_card=card,
+                derived=derived,
+                deck_left=deck_left,
+            )
+            color_numbers = [
+                other
+                for other in hand
+                if other.color == card.color and not other.is_handshake
+            ]
+            number_sum = sum(self._num(state, other) for other in color_numbers)
+
+            if (
+                opening_value <= 0.0
+                and len(color_numbers) < 2
+                and number_sum < 0.5 * derived.open_target_sum
+                and deck_left > derived.mid_deck_threshold
+            ):
+                continue
+
+            forced_value = opening_value
+            forced_value += 0.2 * number_sum
+            forced_value += float(state.config.max_rank + 1 - self._num(state, card))
+            candidates.append((forced_value, action))
+
+        if not candidates:
+            return None
+
+        return max(candidates)[1]
 
     def _best_discard(
         self,
@@ -714,6 +831,15 @@ class SafeHeuristicBot(LostCitiesBot):
             value += 4.0
         elif future_numbers or same_color_handshakes:
             value += self.params.speculative_visible_draw_bonus
+
+        value += 0.25 * self._opening_plan_value(
+            state=state,
+            player=player,
+            color=color,
+            opening_card=card,
+            derived=derived,
+            deck_left=len(state.deck),
+        )
 
         return value
 

@@ -26,7 +26,7 @@ def test_bot_registry_builds_safe_heuristic_bot() -> None:
 
 
 def test_safe_heuristic_game_state_path_differs_from_snapshot_fallback() -> None:
-    backend = build_lost_cities_backend("python", tier_config("tier3"), seed=7)
+    backend = build_lost_cities_backend("python", tier_config("tier3"), seed=2)
     bot = SafeHeuristicBot()
 
     while backend.snapshot().current_player != 1:
@@ -41,7 +41,7 @@ def test_safe_heuristic_game_state_path_differs_from_snapshot_fallback() -> None
     heuristic_action = state_input.to_unified_action(bot.act(state_input))
 
     assert fallback_action == 0
-    assert heuristic_action == 13
+    assert heuristic_action == 8
 
 
 def test_pvc_undo_rewinds_human_turn_when_bot_turn_starts() -> None:
