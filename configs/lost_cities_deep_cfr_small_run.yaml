@@ -1,8 +1,8 @@
-experiment_name: lost_cities_deep_cfr_probe
+experiment_name: lost_cities_deep_cfr_small_run
 seed: 29
 max_hours: null
-max_iterations: 1
-device: CPU
+max_iterations: 10
+device: CUDA
 use_amp: false
 
 rules:
@@ -17,8 +17,8 @@ rules:
   bonus_amount: null
 
 network:
-  hidden_size: 64
-  num_layers: 1
+  hidden_size: 128
+  num_layers: 2
   activation: relu
 
 traversal:
@@ -32,26 +32,27 @@ traversal:
   regret_matching_epsilon: 1.0e-8
 
 optimization:
-  advantage_batch_size: 128
-  strategy_batch_size: 128
-  advantage_updates_per_iteration: 1
-  strategy_updates_per_iteration: 1
+  advantage_batch_size: 256
+  strategy_batch_size: 256
+  advantage_updates_per_iteration: 8
+  strategy_updates_per_iteration: 8
   learning_rate: 0.0003
   weight_decay: 0.0001
   grad_clip: 1.0
 
 memory:
-  advantage_capacity: 5000
-  strategy_capacity: 5000
+  advantage_capacity: 100000
+  strategy_capacity: 100000
 
 evaluation:
-  eval_every: 1
-  games: 1
+  eval_every: 2
+  games: 20
   opponents:
     - random
+    - safe_heuristic
 
 checkpoint:
-  directory: checkpoints/lost_cities_deep_cfr_probe
+  directory: checkpoints/lost_cities_deep_cfr_small_run
   save_every_iteration: true
   save_iteration_interval: 1
   progress_interval_seconds: 20.0
