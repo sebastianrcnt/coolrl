@@ -5,16 +5,15 @@ from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
-import random
-import subprocess
 import sys
-import tempfile
 from typing import Any, Literal
 
-from .game import Card, GameState, LostCitiesConfig, build_deck, score_expedition, tier_config
+from .game import Card, LostCitiesConfig, tier_config
+from .gui_models import DEFAULT_MODEL, GuiModel, available_model_names, build_model
+from .pygame_common import BackendName, Snapshot, build_backend, snapshot_summary
 
-BackendName = Literal["python", "rust"]
 LOGGER = logging.getLogger("coolrl.lost_cities.pvp")
+ModeName = Literal["pvp", "pvc"]
 
 
 COLOR_PALETTE = [
@@ -46,256 +45,11 @@ B612_FONT_PATH = (
 COLOR_NAME_PALETTE = ["Red", "Blue", "Green", "Gold", "Violet", "Cyan", "Orange", "Rose"]
 
 
-@dataclass
-class Snapshot:
-    config: LostCitiesConfig
-    deck: list[Card]
-    hands: list[list[Card]]
-    expeditions: list[list[list[Card]]]
-    discards: list[list[Card]]
-    current_player: int
-    phase: str
-    pending_discarded_color: int | None
-    turn_count: int
-    terminal: bool
-    legal_mask: list[bool]
-
-    @property
-    def card_action_size(self) -> int:
-        return self.config.card_action_size
-
-    @property
-    def draw_action_size(self) -> int:
-        return self.config.draw_action_size
-
-    def expedition_score(self, player: int, color: int) -> int:
-        return score_expedition(self.expeditions[player][color], self.config)
-
-    def total_score(self, player: int) -> int:
-        return sum(
-            self.expedition_score(player, color)
-            for color in range(self.config.n_colors)
-        )
-
-    def score_diff(self, player: int = 0) -> int:
-        return self.total_score(player) - self.total_score(1 - player)
-
-
 @dataclass(frozen=True)
 class ActionTarget:
     rect: Any
     action_id: int
     label: str
-
-
-class GameBackend:
-    name: BackendName
-
-    def __init__(self, config: LostCitiesConfig, seed: int | None):
-        self.config = config
-        self.seed = seed
-
-    def snapshot(self) -> Snapshot:
-        raise NotImplementedError
-
-    def apply(self, action_id: int) -> None:
-        raise NotImplementedError
-
-    def can_undo(self) -> bool:
-        raise NotImplementedError
-
-    def undo(self) -> bool:
-        raise NotImplementedError
-
-
-class PythonBackend(GameBackend):
-    name: BackendName = "python"
-
-    def __init__(self, config: LostCitiesConfig, seed: int | None):
-        super().__init__(config, seed)
-        self.state = GameState.new_game(config, seed=seed)
-        self.history: list[GameState] = []
-        LOGGER.debug("파이썬 백엔드 초기화: %s", snapshot_summary(self.snapshot()))
-
-    def snapshot(self) -> Snapshot:
-        return _snapshot_from_state(self.state)
-
-    def apply(self, action_id: int) -> None:
-        before = self.snapshot()
-        self.history.append(self.state.clone())
-        self.state.apply_unified_action(action_id)
-        LOGGER.debug(
-            "파이썬 액션 적용: 액션=%s 이전={%s} 이후={%s} 되돌리기깊이=%s",
-            action_id,
-            snapshot_summary(before),
-            snapshot_summary(self.snapshot()),
-            len(self.history),
-        )
-
-    def can_undo(self) -> bool:
-        return bool(self.history)
-
-    def undo(self) -> bool:
-        if not self.history:
-            LOGGER.debug("파이썬 되돌리기 무시: 기록이 비어 있음")
-            return False
-        before = self.snapshot()
-        self.state = self.history.pop()
-        LOGGER.debug(
-            "파이썬 되돌리기: 이전={%s} 이후={%s} 되돌리기깊이=%s",
-            snapshot_summary(before),
-            snapshot_summary(self.snapshot()),
-            len(self.history),
-        )
-        return True
-
-
-class RustBackend(GameBackend):
-    name: BackendName = "rust"
-
-    def __init__(self, config: LostCitiesConfig, seed: int | None):
-        super().__init__(config, seed)
-        self.initial_deck = _shuffled_deck(config, seed)
-        self.actions: list[int] = []
-        self._snapshot = self._run_trace()
-        LOGGER.debug("러스트 백엔드 초기화: %s", snapshot_summary(self.snapshot()))
-
-    def snapshot(self) -> Snapshot:
-        return self._snapshot
-
-    def apply(self, action_id: int) -> None:
-        before = self.snapshot()
-        self.actions.append(action_id)
-        try:
-            self._snapshot = self._run_trace()
-        except Exception:
-            self.actions.pop()
-            raise
-        LOGGER.debug(
-            "러스트 액션 적용: 액션=%s 이전={%s} 이후={%s} 되돌리기깊이=%s",
-            action_id,
-            snapshot_summary(before),
-            snapshot_summary(self.snapshot()),
-            len(self.actions),
-        )
-
-    def can_undo(self) -> bool:
-        return bool(self.actions)
-
-    def undo(self) -> bool:
-        if not self.actions:
-            LOGGER.debug("러스트 되돌리기 무시: 액션 기록이 비어 있음")
-            return False
-        before = self.snapshot()
-        removed = self.actions.pop()
-        self._snapshot = self._run_trace()
-        LOGGER.debug(
-            "러스트 되돌리기: 제거한액션=%s 이전={%s} 이후={%s} 되돌리기깊이=%s",
-            removed,
-            snapshot_summary(before),
-            snapshot_summary(self.snapshot()),
-            len(self.actions),
-        )
-        return True
-
-    def _run_trace(self) -> Snapshot:
-        fixture = {
-            "config": self.config.to_snapshot(),
-            "initial_deck": [card.to_snapshot() for card in self.initial_deck],
-            "steps": [{"action": None}]
-            + [{"action": action} for action in self.actions],
-        }
-        rust_core = Path(__file__).resolve().parent / "rust_core"
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
-            json.dump(fixture, handle)
-            fixture_path = Path(handle.name)
-        try:
-            result = subprocess.run(
-                [
-                    "cargo",
-                    "run",
-                    "--quiet",
-                    "--bin",
-                    "lost_cities_probe",
-                    "--",
-                    "trace",
-                    str(fixture_path),
-                ],
-                cwd=rust_core,
-                check=True,
-                text=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            message = exc.stderr.strip() or exc.stdout.strip() or str(exc)
-            raise RuntimeError(f"rust backend failed: {message}") from exc
-        finally:
-            fixture_path.unlink(missing_ok=True)
-
-        trace = json.loads(result.stdout)
-        return _snapshot_from_trace(trace["config"], trace["steps"][-1])
-
-
-def build_backend(
-    backend: BackendName,
-    config: LostCitiesConfig,
-    seed: int | None,
-) -> GameBackend:
-    if backend == "python":
-        return PythonBackend(config, seed)
-    if backend == "rust":
-        return RustBackend(config, seed)
-    raise ValueError(f"unknown backend: {backend}")
-
-
-def _shuffled_deck(config: LostCitiesConfig, seed: int | None) -> list[Card]:
-    deck = build_deck(config)
-    rng = random.Random(config.seed if seed is None else seed)
-    rng.shuffle(deck)
-    return deck
-
-
-def _snapshot_from_state(state: GameState) -> Snapshot:
-    return Snapshot(
-        config=state.config,
-        deck=list(state.deck),
-        hands=[list(hand) for hand in state.hands],
-        expeditions=[
-            [list(expedition) for expedition in player_expeditions]
-            for player_expeditions in state.expeditions
-        ],
-        discards=[list(discard) for discard in state.discards],
-        current_player=state.current_player,
-        phase=state.phase,
-        pending_discarded_color=state.pending_discarded_color,
-        turn_count=state.turn_count,
-        terminal=state.terminal,
-        legal_mask=state.unified_legal_mask(),
-    )
-
-
-def _snapshot_from_trace(config_data: dict[str, Any], step: dict[str, Any]) -> Snapshot:
-    config = LostCitiesConfig(**config_data)
-    return Snapshot(
-        config=config,
-        deck=_cards_from_json(step["deck"]),
-        hands=[_cards_from_json(hand) for hand in step["hands"]],
-        expeditions=[
-            [_cards_from_json(expedition) for expedition in player_expeditions]
-            for player_expeditions in step["expeditions"]
-        ],
-        discards=[_cards_from_json(discard) for discard in step["discards"]],
-        current_player=int(step["current_player"]),
-        phase=str(step["phase"]),
-        pending_discarded_color=step.get("pending_discarded_color"),
-        turn_count=int(step["turn_count"]),
-        terminal=bool(step["terminal"]),
-        legal_mask=list(step["legal_mask"]),
-    )
-
-
-def _cards_from_json(cards: list[dict[str, int]]) -> list[Card]:
-    return [Card.from_snapshot(card) for card in cards]
 
 
 def color_rgb(color: int) -> tuple[int, int, int]:
@@ -316,20 +70,6 @@ def card_value_label(card: Card, config: LostCitiesConfig) -> str:
 
 def card_label(card: Card, config: LostCitiesConfig) -> str:
     return f"{color_name(card.color)} {card_value_label(card, config)}"
-
-
-def snapshot_summary(snapshot: Snapshot) -> str:
-    scores = [snapshot.total_score(0), snapshot.total_score(1)]
-    hand_sizes = [len(hand) for hand in snapshot.hands]
-    discard_sizes = [len(discard) for discard in snapshot.discards]
-    phase = "카드" if snapshot.phase == "card" else "뽑기"
-    return (
-        f"플레이어={snapshot.current_player} 단계={phase} "
-        f"턴={snapshot.turn_count} 종료={snapshot.terminal} "
-        f"덱={len(snapshot.deck)} 손패수={hand_sizes} 점수={scores} "
-        f"직전버린색={snapshot.pending_discarded_color} "
-        f"버린더미수={discard_sizes}"
-    )
 
 
 def turn_identity_summary(identity: tuple[int, str, int] | None) -> str:
@@ -361,7 +101,9 @@ def preferred_font_path() -> Path | None:
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Play Lost Cities PVP in one pygame window.")
+    parser = argparse.ArgumentParser(description="Play Lost Cities in one pygame window.")
+    parser.add_argument("--mode", choices=("pvp", "pvc"), default="pvp")
+    parser.add_argument("--model", choices=available_model_names(), default=DEFAULT_MODEL)
     parser.add_argument("--backend", choices=("python", "rust"), default="python")
     parser.add_argument("--tier", choices=("tier0", "tier1", "tier2", "tier3"), default="tier3")
     parser.add_argument("--seed", type=int, default=None)
@@ -370,10 +112,12 @@ def build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
-class PvpApp:
+class LostCitiesGuiApp:
     def __init__(
         self,
         *,
+        mode: ModeName = "pvp",
+        model_name: str = DEFAULT_MODEL,
         backend_name: BackendName,
         tier_name: str = "tier3",
         seed: int | None = None,
@@ -385,7 +129,7 @@ class PvpApp:
 
         configure_debug_logging()
         pygame.init()
-        pygame.display.set_caption("COOLRL LOST CITIES PVP")
+        pygame.display.set_caption("COOLRL LOST CITIES")
         self.pygame = pygame
         self.pygame_gui = pygame_gui
         self.window_size = (width, height)
@@ -399,12 +143,19 @@ class PvpApp:
 
         self.seed = seed
         self.tier_name = tier_name
+        self.mode: ModeName = mode
+        self.model_name = model_name
+        self.computer_player = 1
+        self.computer_model: GuiModel = build_model(self.model_name, seed=self._model_seed())
+        self.next_computer_action_at_ms = 0
         self.selected_backend: BackendName = backend_name
         self.config = tier_config(tier_name)
         self.backend = build_backend(self.selected_backend, self.config, self.seed)
         self.ui_elements: list[Any] = []
         self.hand_card_rects: dict[int, Any] = {}
         self.board_targets: list[ActionTarget] = []
+        self.mode_dropdown: Any = None
+        self.model_dropdown: Any = None
         self.backend_dropdown: Any = None
         self.tier_dropdown: Any = None
         self.new_game_button: Any = None
@@ -415,7 +166,9 @@ class PvpApp:
         self.turn_flash_until_ms = 0
         self.rebuild_ui()
         LOGGER.debug(
-            "PVP 앱 초기화: 백엔드=%s 티어=%s 시드=%s 크기=%sx%s 색상수=%s 손패=%s 덱=%s",
+            "GUI 앱 초기화: 모드=%s 모델=%s 백엔드=%s 티어=%s 시드=%s 크기=%sx%s 색상수=%s 손패=%s 덱=%s",
+            self.mode,
+            self.model_name,
             self.selected_backend,
             self.tier_name,
             self.seed,
@@ -425,6 +178,11 @@ class PvpApp:
             self.config.hand_size,
             self.config.deck_size,
         )
+
+    def _model_seed(self) -> int | None:
+        if self.seed is None:
+            return None
+        return self.seed + 10_001
 
     def _configure_ui_theme(self, theme_path: Path) -> None:
         with open(theme_path, "r", encoding="utf-8") as handle:
@@ -456,6 +214,7 @@ class PvpApp:
                 self.manager.process_events(event)
                 self.handle_ui_event(event)
 
+            self.maybe_apply_computer_action()
             self.manager.update(time_delta)
             self.draw()
             self.manager.draw_ui(self.screen)
@@ -474,7 +233,16 @@ class PvpApp:
                 self.undo()
                 return
         elif event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
-            if event.ui_element == self.backend_dropdown:
+            if event.ui_element == self.mode_dropdown:
+                LOGGER.debug("모드 변경: %s -> %s", self.mode, event.text)
+                self.mode = event.text
+                self.reset_game()
+            elif event.ui_element == self.model_dropdown:
+                LOGGER.debug("모델 변경: %s -> %s", self.model_name, event.text)
+                self.model_name = event.text
+                self.computer_model = build_model(self.model_name, seed=self._model_seed())
+                self.reset_game()
+            elif event.ui_element == self.backend_dropdown:
                 LOGGER.debug("백엔드 변경: %s -> %s", self.selected_backend, event.text)
                 self.selected_backend = event.text
                 self.reset_game()
@@ -491,8 +259,45 @@ class PvpApp:
             LOGGER.debug("마우스 클릭: 위치=%s", event.pos)
             self.handle_board_click(event.pos)
 
+    def is_computer_turn(self, snapshot: Snapshot | None = None) -> bool:
+        snapshot = snapshot or self.backend.snapshot()
+        return (
+            self.mode == "pvc"
+            and not snapshot.terminal
+            and snapshot.current_player == self.computer_player
+        )
+
+    def maybe_apply_computer_action(self) -> None:
+        snapshot = self.backend.snapshot()
+        if not self.is_computer_turn(snapshot):
+            self.next_computer_action_at_ms = 0
+            return
+        now = self.pygame.time.get_ticks()
+        if self.next_computer_action_at_ms == 0:
+            self.next_computer_action_at_ms = now + 360
+            return
+        if now < self.next_computer_action_at_ms:
+            return
+        try:
+            action_id = self.computer_model.act(snapshot)
+            LOGGER.debug(
+                "컴퓨터 액션 선택: 모델=%s 액션=%s 상태={%s}",
+                self.model_name,
+                action_id,
+                snapshot_summary(snapshot),
+            )
+            self.apply_action(action_id, rebuild=False)
+        except Exception as exc:
+            self.error_text = str(exc)
+            LOGGER.exception("컴퓨터 액션 실패: 모델=%s", self.model_name)
+        self.next_computer_action_at_ms = self.pygame.time.get_ticks() + 360
+        self.rebuild_ui()
+
     def handle_board_click(self, pos: tuple[int, int]) -> None:
         snapshot = self.backend.snapshot()
+        if self.is_computer_turn(snapshot):
+            LOGGER.debug("보드 클릭 무시: 컴퓨터 턴 위치=%s 상태={%s}", pos, snapshot_summary(snapshot))
+            return
         if snapshot.terminal:
             LOGGER.debug("보드 클릭 무시: 종료 상태 위치=%s 상태={%s}", pos, snapshot_summary(snapshot))
             return
@@ -529,6 +334,8 @@ class PvpApp:
         self.board_targets = []
         self.last_turn_identity = None
         self.turn_flash_until_ms = 0
+        self.next_computer_action_at_ms = 0
+        self.computer_model = build_model(self.model_name, seed=self._model_seed())
         try:
             self.backend = build_backend(self.selected_backend, self.config, self.seed)
             self.error_text = None
@@ -543,7 +350,7 @@ class PvpApp:
             LOGGER.exception("게임 초기화 실패: 백엔드=%s 시드=%s", self.selected_backend, self.seed)
         self.rebuild_ui()
 
-    def apply_action(self, action_id: int) -> None:
+    def apply_action(self, action_id: int, *, rebuild: bool = True) -> None:
         try:
             before = self.backend.snapshot()
             LOGGER.debug("액션 적용 요청: 액션=%s 상태={%s}", action_id, snapshot_summary(before))
@@ -560,9 +367,14 @@ class PvpApp:
         except Exception as exc:
             self.error_text = str(exc)
             LOGGER.exception("액션 적용 실패: 액션=%s", action_id)
-        self.rebuild_ui()
+        if rebuild:
+            self.rebuild_ui()
 
     def undo(self) -> None:
+        if self.is_computer_turn():
+            self.error_text = "컴퓨터 턴에는 되돌릴 수 없음"
+            self.rebuild_ui()
+            return
         try:
             before = self.backend.snapshot()
             changed = self.backend.undo()
@@ -603,20 +415,34 @@ class PvpApp:
             element.kill()
         self.ui_elements = []
 
+        self.mode_dropdown = pygame_gui.elements.UIDropDownMenu(
+            options_list=["pvp", "pvc"],
+            starting_option=self.mode,
+            relative_rect=pygame.Rect(92, 17, 108, 46),
+            manager=self.manager,
+        )
+        self.model_dropdown = pygame_gui.elements.UIDropDownMenu(
+            options_list=available_model_names(),
+            starting_option=self.model_name,
+            relative_rect=pygame.Rect(288, 17, 138, 46),
+            manager=self.manager,
+        )
+        if self.mode != "pvc":
+            self.model_dropdown.disable()
         self.backend_dropdown = pygame_gui.elements.UIDropDownMenu(
             options_list=["python", "rust"],
             starting_option=self.selected_backend,
-            relative_rect=pygame.Rect(130, 17, 174, 46),
+            relative_rect=pygame.Rect(548, 17, 144, 46),
             manager=self.manager,
         )
         self.tier_dropdown = pygame_gui.elements.UIDropDownMenu(
             options_list=["tier0", "tier1", "tier2", "tier3"],
             starting_option=self.tier_name,
-            relative_rect=pygame.Rect(388, 17, 118, 46),
+            relative_rect=pygame.Rect(768, 17, 118, 46),
             manager=self.manager,
         )
         self.new_game_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(526, 17, 148, 46),
+            relative_rect=pygame.Rect(906, 17, 148, 46),
             text="NEW GAME",
             manager=self.manager,
         )
@@ -628,7 +454,14 @@ class PvpApp:
         if not self.backend.can_undo():
             self.undo_button.disable()
         self.ui_elements.extend(
-            [self.backend_dropdown, self.tier_dropdown, self.new_game_button, self.undo_button]
+            [
+                self.mode_dropdown,
+                self.model_dropdown,
+                self.backend_dropdown,
+                self.tier_dropdown,
+                self.new_game_button,
+                self.undo_button,
+            ]
         )
 
     def draw(self) -> None:
@@ -651,9 +484,11 @@ class PvpApp:
         compact = width < 1450
         pygame.draw.line(self.screen, LINE, (0, 0), (width, 0), 1)
         pygame.draw.line(self.screen, LINE, (0, 90), (width, 90), 1)
-        pygame.draw.line(self.screen, LINE, (700, 0), (700, 90), 1)
-        self._draw_text("BACKEND", (31, 31), MUTED, 18)
-        self._draw_text("TIER", (322, 31), MUTED, 18)
+        pygame.draw.line(self.screen, LINE, (1080, 0), (1080, 90), 1)
+        self._draw_text("MODE", (31, 31), MUTED, 18)
+        self._draw_text("MODEL", (220, 31), MUTED, 18)
+        self._draw_text("BACKEND", (448, 31), MUTED, 18)
+        self._draw_text("TIER", (704, 31), MUTED, 18)
         if snapshot.terminal:
             diff = snapshot.score_diff(0)
             if diff > 0:
@@ -665,7 +500,14 @@ class PvpApp:
             detail = "START A NEW GAME TO PLAY AGAIN."
         elif snapshot.phase == "card":
             card = self._selected_card(snapshot)
-            if card is None:
+            if self.is_computer_turn(snapshot):
+                status = (
+                    "CPU: CHOOSE CARD"
+                    if compact
+                    else f"COMPUTER ({self.model_name.upper()}): CHOOSE A CARD"
+                )
+                detail = "Waiting for model action."
+            elif card is None:
                 status = (
                     f"P{snapshot.current_player}: CHOOSE CARD"
                     if compact
@@ -684,20 +526,28 @@ class PvpApp:
                     else f"{card_label(card, snapshot.config)} selected. Click expedition or discard."
                 )
         else:
-            status = (
-                f"P{snapshot.current_player}: DRAW"
-                if compact
-                else f"PLAYER {snapshot.current_player}: DRAW A CARD"
-            )
-            detail = "Click deck/discard." if compact else "Click the deck or a highlighted discard pile."
+            if self.is_computer_turn(snapshot):
+                status = (
+                    "CPU: DRAW"
+                    if compact
+                    else f"COMPUTER ({self.model_name.upper()}): DRAW A CARD"
+                )
+                detail = "Waiting for model action."
+            else:
+                status = (
+                    f"P{snapshot.current_player}: DRAW"
+                    if compact
+                    else f"PLAYER {snapshot.current_player}: DRAW A CARD"
+                )
+                detail = "Click deck/discard." if compact else "Click the deck or a highlighted discard pile."
         title_size = 30 if not compact else 24
         detail_size = 18 if not compact else 14
-        title_x = 720
+        title_x = 1100
         self._draw_text(status, (title_x, 21), TEXT, title_size, bold=True)
         self._draw_text(detail, (title_x, 56), MUTED, detail_size)
         if width >= 1450:
-            meta = f"BACKEND: {self.selected_backend}   TURN: {snapshot.turn_count}"
-            meta_x = width - 465
+            meta = f"{self.mode.upper()}   TURN: {snapshot.turn_count}"
+            meta_x = width - 285
         else:
             meta = f"TURN: {snapshot.turn_count}"
             meta_x = width - 135
@@ -738,8 +588,11 @@ class PvpApp:
             status_box = pygame.Rect(width - 404, y + (45 if player == 0 else 42), 330, 92)
             pygame.draw.rect(self.screen, BG, status_box)
             pygame.draw.rect(self.screen, LINE, status_box, width=1)
-            self._draw_text("ACTIVE", (status_box.x + 22, status_box.y + 22), GOLD, 20)
-            if snapshot.phase == "card":
+            active_label = "COMPUTER" if self.is_computer_turn(snapshot) else "ACTIVE"
+            self._draw_text(active_label, (status_box.x + 22, status_box.y + 22), GOLD, 20)
+            if self.is_computer_turn(snapshot):
+                prompt = f"Model: {self.model_name}"
+            elif snapshot.phase == "card":
                 prompt = (
                     "Yellow border: expedition or discard"
                     if self.selected_card_slot is not None
@@ -1162,9 +1015,14 @@ class PvpApp:
         return self.font_cache[key]
 
 
+PvpApp = LostCitiesGuiApp
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_argparser().parse_args(argv)
-    app = PvpApp(
+    app = LostCitiesGuiApp(
+        mode=args.mode,
+        model_name=args.model,
         backend_name=args.backend,
         tier_name=args.tier,
         seed=args.seed,
