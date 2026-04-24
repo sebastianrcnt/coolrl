@@ -7,7 +7,7 @@ from pathlib import Path
 import random
 import subprocess
 import tempfile
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from .game import Card, GameState, LostCitiesConfig, build_deck, score_expedition
 
@@ -50,31 +50,27 @@ class Snapshot:
         return self.total_score(player) - self.total_score(1 - player)
 
 
-class GameBackend:
+@runtime_checkable
+class LostCitiesBackend(Protocol):
     name: BackendName
+    config: LostCitiesConfig
+    seed: int | None
+
+    def snapshot(self) -> Snapshot: ...
+
+    def apply(self, action_id: int) -> None: ...
+
+    def can_undo(self) -> bool: ...
+
+    def undo(self) -> bool: ...
+
+
+class PythonLostCitiesBackend:
+    name: BackendName = "python"
 
     def __init__(self, config: LostCitiesConfig, seed: int | None):
         self.config = config
         self.seed = seed
-
-    def snapshot(self) -> Snapshot:
-        raise NotImplementedError
-
-    def apply(self, action_id: int) -> None:
-        raise NotImplementedError
-
-    def can_undo(self) -> bool:
-        raise NotImplementedError
-
-    def undo(self) -> bool:
-        raise NotImplementedError
-
-
-class PythonBackend(GameBackend):
-    name: BackendName = "python"
-
-    def __init__(self, config: LostCitiesConfig, seed: int | None):
-        super().__init__(config, seed)
         self.state = GameState.new_game(config, seed=seed)
         self.history: list[GameState] = []
         LOGGER.debug("파이썬 백엔드 초기화: %s", snapshot_summary(self.snapshot()))
@@ -112,11 +108,12 @@ class PythonBackend(GameBackend):
         return True
 
 
-class RustBackend(GameBackend):
+class RustLostCitiesBackend:
     name: BackendName = "rust"
 
     def __init__(self, config: LostCitiesConfig, seed: int | None):
-        super().__init__(config, seed)
+        self.config = config
+        self.seed = seed
         self.initial_deck = _shuffled_deck(config, seed)
         self.actions: list[int] = []
         self._snapshot = self._run_trace()
@@ -198,15 +195,15 @@ class RustBackend(GameBackend):
         return _snapshot_from_trace(trace["config"], trace["steps"][-1])
 
 
-def build_backend(
+def build_lost_cities_backend(
     backend: BackendName,
     config: LostCitiesConfig,
     seed: int | None,
-) -> GameBackend:
+) -> LostCitiesBackend:
     if backend == "python":
-        return PythonBackend(config, seed)
+        return PythonLostCitiesBackend(config, seed)
     if backend == "rust":
-        return RustBackend(config, seed)
+        return RustLostCitiesBackend(config, seed)
     raise ValueError(f"unknown backend: {backend}")
 
 

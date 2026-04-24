@@ -10,7 +10,13 @@ from typing import Any, Literal
 
 from .game import Card, LostCitiesConfig, tier_config
 from .gui_models import DEFAULT_MODEL, GuiModel, available_model_names, build_model
-from .pygame_common import BackendName, Snapshot, build_backend, snapshot_summary
+from .pygame_common import (
+    BackendName,
+    LostCitiesBackend,
+    Snapshot,
+    build_lost_cities_backend,
+    snapshot_summary,
+)
 
 LOGGER = logging.getLogger("coolrl.lost_cities.pvp")
 ModeName = Literal["pvp", "pvc"]
@@ -150,7 +156,11 @@ class LostCitiesGuiApp:
         self.next_computer_action_at_ms = 0
         self.selected_backend: BackendName = backend_name
         self.config = tier_config(tier_name)
-        self.backend = build_backend(self.selected_backend, self.config, self.seed)
+        self.backend: LostCitiesBackend = build_lost_cities_backend(
+            self.selected_backend,
+            self.config,
+            self.seed,
+        )
         self.ui_elements: list[Any] = []
         self.hand_card_rects: dict[int, Any] = {}
         self.board_targets: list[ActionTarget] = []
@@ -337,7 +347,11 @@ class LostCitiesGuiApp:
         self.next_computer_action_at_ms = 0
         self.computer_model = build_model(self.model_name, seed=self._model_seed())
         try:
-            self.backend = build_backend(self.selected_backend, self.config, self.seed)
+            self.backend = build_lost_cities_backend(
+                self.selected_backend,
+                self.config,
+                self.seed,
+            )
             self.error_text = None
             LOGGER.debug(
                 "게임 초기화 완료: 백엔드=%s 시드=%s 상태={%s}",
