@@ -146,6 +146,7 @@ all = [
     { name = "torch" },
 ]
 lost-cities = [
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pygame-gui" },
     { name = "pyyaml" },
@@ -205,6 +206,7 @@ poker = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pygame-gui" },
     { name = "pytest" },
@@ -220,6 +222,7 @@ requires-dist = [
     { name = "coolrl", extras = ["poker", "omok", "omok-tui", "lost-cities"], marker = "extra == 'all'" },
     { name = "inquirer", marker = "extra == 'poker'", specifier = ">=3.4.1" },
     { name = "loguru", specifier = ">=0.7.3" },
+    { name = "matplotlib", marker = "extra == 'lost-cities'", specifier = ">=3.9.0" },
     { name = "matplotlib", marker = "extra == 'omok'", specifier = ">=3.9.0" },
     { name = "numpy", marker = "extra == 'lost-cities'", specifier = ">=1.26.0" },
     { name = "numpy", marker = "extra == 'omok'", specifier = ">=2.4.4" },
@@ -244,6 +247,7 @@ provides-extras = ["poker", "omok", "omok-tui", "omok-tui-cuda", "omok-tui-tenso
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "pygame-gui", specifier = ">=0.6.14" },
     { name = "pytest", specifier = ">=9.0.3" },

@@ -9,7 +9,7 @@ import torch
 from coolrl.lost_cities.deep_cfr.benchmark import benchmark_traversal_modes
 from coolrl.lost_cities.deep_cfr.config import config_from_dict
 from coolrl.lost_cities.deep_cfr.encoding import infer_input_dim
-from coolrl.lost_cities.deep_cfr.evaluate import StrategyNetBot
+from coolrl.lost_cities.deep_cfr.evaluate import StrategyNetBot, load_strategy_bot_from_checkpoint
 from coolrl.lost_cities.deep_cfr.memory import _Sample
 from coolrl.lost_cities.deep_cfr.trainer import DeepCFRTrainer
 from coolrl.lost_cities.deep_cfr.traversal import TraversalStats
@@ -219,4 +219,32 @@ def test_strategy_net_bot_returns_legal_phase_local_action(tmp_path: Path) -> No
     state = GameState.new_game(trainer.lc_config)
     bot = StrategyNetBot(trainer.strategy_net, trainer.lc_config, device="cpu")
     action = bot.act(state)
+    assert state.legal_mask()[action]
+
+
+def test_load_strategy_bot_from_checkpoint_returns_legal_action(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 1,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "traversal": {"traversals_per_player": 2, "max_depth": 2},
+            "optimization": {
+                "advantage_batch_size": 8,
+                "strategy_batch_size": 8,
+                "advantage_updates_per_iteration": 1,
+                "strategy_updates_per_iteration": 1,
+            },
+            "memory": {"advantage_capacity": 100, "strategy_capacity": 100},
+            "evaluation": {"eval_every": 0, "games": 1},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    trainer = DeepCFRTrainer(cfg)
+    trainer.run()
+
+    bot, lc_config = load_strategy_bot_from_checkpoint(tmp_path / "latest.pt", device="cpu", sample=False, seed=7)
+    state = GameState.new_game(lc_config, seed=11)
+    action = bot.act(state)
+
     assert state.legal_mask()[action]

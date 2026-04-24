@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -11,8 +12,24 @@ from ..bots.play import play_game
 from ..bots.random import RandomBot
 from ..game import GameState, LostCitiesConfig
 from ..interfaces import BotInput, LostCitiesBot
+from .config import config_from_dict
 from .encoding import encode_information_state, legal_mask_array
 from .networks import StrategyNet
+
+
+def _resolve_device(device: str | torch.device) -> torch.device:
+    if isinstance(device, torch.device):
+        return device
+    token = str(device).strip().lower()
+    if token == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if token == "cpu":
+        return torch.device("cpu")
+    if token == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested but torch.cuda is unavailable")
+        return torch.device("cuda")
+    raise ValueError(f"unsupported device: {device!r}")
 
 
 class StrategyNetBot(LostCitiesBot):
@@ -41,7 +58,7 @@ class StrategyNetBot(LostCitiesBot):
         legal_indices = np.flatnonzero(legal)
         if len(legal_indices) == 0:
             raise RuntimeError("no legal action available")
-        with torch.no_grad():
+        with torch.inference_mode():
             x = torch.as_tensor(info, dtype=torch.float32, device=self.device).unsqueeze(0)
             logits = self.strategy_net(x).squeeze(0).detach().cpu().numpy()
         masked = np.where(legal, logits, -np.inf)
@@ -53,6 +70,36 @@ class StrategyNetBot(LostCitiesBot):
         else:
             unified = int(np.argmax(masked))
         return state.from_unified_action(unified)
+
+
+def load_strategy_bot_from_checkpoint(
+    checkpoint_path: str | Path,
+    *,
+    device: str | torch.device = "cpu",
+    sample: bool = False,
+    seed: int | None = None,
+) -> tuple[StrategyNetBot, LostCitiesConfig]:
+    payload = torch.load(checkpoint_path, map_location="cpu")
+    config = config_from_dict(payload["config"])
+    resolved_device = _resolve_device(device)
+    strategy_net = StrategyNet(
+        int(payload["input_dim"]),
+        int(payload["action_size"]),
+        config.network,
+    ).to(resolved_device)
+    strategy_net.load_state_dict(payload["strategy_net"])
+    strategy_net.eval()
+    lc_config = config.rules.to_lost_cities_config(seed=config.seed)
+    return (
+        StrategyNetBot(
+            strategy_net,
+            lc_config,
+            device=resolved_device,
+            sample=sample,
+            seed=seed,
+        ),
+        lc_config,
+    )
 
 
 def make_opponent(name: str, seed: int | None = None) -> LostCitiesBot:

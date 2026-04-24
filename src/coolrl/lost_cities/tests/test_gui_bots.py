@@ -2,7 +2,7 @@ from coolrl.lost_cities.game import LostCitiesConfig
 from coolrl.lost_cities.backends import build_lost_cities_backend
 from coolrl.lost_cities.bots import SafeHeuristicBot, available_bot_names, build_bot
 from coolrl.lost_cities.game import GameState, tier_config
-from coolrl.lost_cities.pygame_pvp import snapshot_to_json, undo_until_player_card_phase
+from coolrl.lost_cities.pygame_pvp import build_argparser, snapshot_to_json, undo_until_player_card_phase
 
 
 def test_random_gui_bot_selects_unified_legal_action() -> None:
@@ -78,3 +78,22 @@ def test_pvc_undo_rewinds_full_human_and_bot_cycle() -> None:
 
     assert undo_count == 4
     assert backend.snapshot() == initial
+
+
+def test_pygame_argparser_accepts_deep_cfr_options() -> None:
+    args = build_argparser().parse_args(
+        [
+            "--mode",
+            "pvc",
+            "--deep-cfr-checkpoint",
+            "checkpoints/lost_cities/latest.pt",
+            "--deep-cfr-sample",
+            "--deep-cfr-device",
+            "cpu",
+        ]
+    )
+
+    assert args.mode == "pvc"
+    assert str(args.deep_cfr_checkpoint).endswith("checkpoints/lost_cities/latest.pt")
+    assert args.deep_cfr_sample is True
+    assert args.deep_cfr_device == "cpu"

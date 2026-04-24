@@ -1,3 +1,11 @@
+"""Lost Cities Deep CFR command-line tools.
+
+Examples:
+  uv run python -m coolrl.lost_cities.deep_cfr.cli status --checkpoint-dir checkpoints/lost_cities_deep_cfr_overnight
+  uv run python -m coolrl.lost_cities.deep_cfr.cli plot --checkpoint-dir checkpoints/lost_cities_deep_cfr_overnight
+  uv run python -m coolrl.lost_cities.deep_cfr.cli eval --checkpoint checkpoints/lost_cities_deep_cfr_overnight/latest.pt --games 500 --opponent safe_heuristic
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -12,6 +20,7 @@ from .config import config_from_dict, load_config
 from .evaluate import evaluate_against_bot, make_opponent
 from .networks import StrategyNet
 from .trainer import DeepCFRTrainer, _torch_device
+from .visualize import load_metrics, load_runtime_progress, plot_metrics, summarize_metrics
 
 
 def _configure_logging() -> None:
@@ -95,6 +104,59 @@ def benchmark_traversal_command(args: argparse.Namespace) -> None:
     )
 
 
+def status_command(args: argparse.Namespace) -> None:
+    metrics = load_metrics(args.checkpoint_dir)
+    runtime_progress = load_runtime_progress(args.checkpoint_dir)
+    summary = summarize_metrics(metrics)
+    latest = runtime_progress or summary
+
+    logger.info("Checkpoint dir: {}", Path(args.checkpoint_dir))
+    logger.info(
+        "Iteration={} elapsed_seconds={} nodes_per_second={} avg_nodes_per_traversal={}",
+        latest.get("iteration", "n/a"),
+        latest.get("elapsed_seconds", "n/a"),
+        latest.get("nodes_per_second", "n/a"),
+        latest.get("avg_nodes_per_traversal", "n/a"),
+    )
+    if "cutoff_rate" in latest or "node_limit_cutoff_rate" in latest:
+        logger.info(
+            "Cutoffs: cutoff_rate={} node_limit_cutoff_rate={}",
+            latest.get("cutoff_rate", "n/a"),
+            latest.get("node_limit_cutoff_rate", "n/a"),
+        )
+    if "advantage_loss_p0" in latest or "advantage_loss_p1" in latest or "strategy_loss" in latest:
+        logger.info(
+            "Losses: advantage_p0={} advantage_p1={} strategy={}",
+            latest.get("advantage_loss_p0", "n/a"),
+            latest.get("advantage_loss_p1", "n/a"),
+            latest.get("strategy_loss", "n/a"),
+        )
+    if "advantage_memory_size_p0" in latest or "advantage_memory_size_p1" in latest or "strategy_memory_size" in latest:
+        logger.info(
+            "Memory: advantage_p0={} advantage_p1={} strategy={}",
+            latest.get("advantage_memory_size_p0", "n/a"),
+            latest.get("advantage_memory_size_p1", "n/a"),
+            latest.get("strategy_memory_size", "n/a"),
+        )
+    if "eval_random_win_rate" in latest or "eval_random_avg_diff" in latest:
+        logger.info(
+            "Eval random: win_rate={} avg_diff={}",
+            latest.get("eval_random_win_rate", "n/a"),
+            latest.get("eval_random_avg_diff", "n/a"),
+        )
+    if "eval_safe_heuristic_win_rate" in latest or "eval_safe_heuristic_avg_diff" in latest:
+        logger.info(
+            "Eval safe_heuristic: win_rate={} avg_diff={}",
+            latest.get("eval_safe_heuristic_win_rate", "n/a"),
+            latest.get("eval_safe_heuristic_avg_diff", "n/a"),
+        )
+
+
+def plot_command(args: argparse.Namespace) -> None:
+    output_path = plot_metrics(args.checkpoint_dir, output=args.output)
+    logger.info("Saved training metrics plot to {}", output_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m coolrl.lost_cities.deep_cfr.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -116,6 +178,15 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--mp-workers", type=int, default=2)
     benchmark.add_argument("--iteration", type=int, default=1)
     benchmark.set_defaults(func=benchmark_traversal_command)
+
+    status = subparsers.add_parser("status")
+    status.add_argument("--checkpoint-dir", type=Path, required=True)
+    status.set_defaults(func=status_command)
+
+    plot = subparsers.add_parser("plot")
+    plot.add_argument("--checkpoint-dir", type=Path, required=True)
+    plot.add_argument("--output", type=Path, default=None)
+    plot.set_defaults(func=plot_command)
     return parser
 
 

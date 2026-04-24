@@ -1,3 +1,9 @@
+"""Lost Cities pygame GUI.
+
+Example:
+  uv run python -m coolrl.lost_cities.pygame_pvp --mode pvc --tier tier3 --backend python --deep-cfr-checkpoint checkpoints/lost_cities_deep_cfr_overnight/latest.pt
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -9,6 +15,7 @@ from pathlib import Path
 import sys
 from typing import Any, Literal
 
+from .deep_cfr.evaluate import load_strategy_bot_from_checkpoint
 from .game import Card, GameState, LostCitiesConfig, tier_config
 from .backends import build_lost_cities_backend
 from .backends.common import snapshot_summary
@@ -161,6 +168,9 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, default=1536)
     parser.add_argument("--height", type=int, default=964)
     parser.add_argument("--screenshot-on-start", action="store_true")
+    parser.add_argument("--deep-cfr-checkpoint", type=Path, default=None)
+    parser.add_argument("--deep-cfr-sample", action="store_true")
+    parser.add_argument("--deep-cfr-device", choices=("cpu", "cuda", "auto"), default="cpu")
     return parser
 
 
@@ -176,6 +186,9 @@ class LostCitiesGuiApp:
         width: int = 1536,
         height: int = 964,
         screenshot_on_start: bool = False,
+        deep_cfr_checkpoint: str | Path | None = None,
+        deep_cfr_sample: bool = False,
+        deep_cfr_device: str = "cpu",
     ):
         import pygame
         import pygame_gui
@@ -198,11 +211,15 @@ class LostCitiesGuiApp:
         self.tier_name = tier_name
         self.mode: ModeName = mode
         self.bot_name = bot_name
+        self.deep_cfr_checkpoint = None if deep_cfr_checkpoint is None else Path(deep_cfr_checkpoint)
+        self.deep_cfr_sample = bool(deep_cfr_sample)
+        self.deep_cfr_device = deep_cfr_device
+        self.deep_cfr_bot_config: LostCitiesConfig | None = None
         self.computer_player = 1
-        self.computer_bot: LostCitiesBot = build_bot(self.bot_name, seed=self._bot_seed())
         self.next_computer_action_at_ms = 0
         self.selected_backend: BackendName = backend_name
         self.config = tier_config(tier_name)
+        self.computer_bot, self.computer_bot_label = self._build_computer_bot()
         self.backend: LostCitiesBackend = build_lost_cities_backend(
             self.selected_backend,
             self.config,
@@ -231,7 +248,7 @@ class LostCitiesGuiApp:
         LOGGER.debug(
             "GUI 앱 초기화: 모드=%s 봇=%s 백엔드=%s 티어=%s 시드=%s 크기=%sx%s 색상수=%s 손패=%s 덱=%s",
             self.mode,
-            self.bot_name,
+            self.computer_bot_label,
             self.selected_backend,
             self.tier_name,
             self.seed,
@@ -246,6 +263,33 @@ class LostCitiesGuiApp:
         if self.seed is None:
             return None
         return self.seed + 10_001
+
+    def _computer_bot_display_name(self) -> str:
+        return self.computer_bot_label
+
+    def _config_shape_snapshot(self, config: LostCitiesConfig) -> dict[str, Any]:
+        payload = config.to_snapshot()
+        payload.pop("seed", None)
+        return payload
+
+    def _build_computer_bot(self) -> tuple[LostCitiesBot, str]:
+        self.deep_cfr_bot_config = None
+        if self.deep_cfr_checkpoint is None:
+            return build_bot(self.bot_name, seed=self._bot_seed()), self.bot_name
+        bot, checkpoint_config = load_strategy_bot_from_checkpoint(
+            self.deep_cfr_checkpoint,
+            device=self.deep_cfr_device,
+            sample=self.deep_cfr_sample,
+            seed=self._bot_seed(),
+        )
+        self.deep_cfr_bot_config = checkpoint_config
+        if self._config_shape_snapshot(checkpoint_config) != self._config_shape_snapshot(self.config):
+            LOGGER.warning(
+                "Deep CFR checkpoint config differs from selected GUI config; continuing with selected gameplay config. checkpoint=%s selected=%s",
+                self._config_shape_snapshot(checkpoint_config),
+                self._config_shape_snapshot(self.config),
+            )
+        return bot, f"deep_cfr:{self.deep_cfr_checkpoint.name}"
 
     def _configure_ui_theme(self, theme_path: Path) -> None:
         with open(theme_path, "r", encoding="utf-8") as handle:
@@ -310,7 +354,6 @@ class LostCitiesGuiApp:
             elif event.ui_element == self.bot_dropdown:
                 LOGGER.debug("봇 변경: %s -> %s", self.bot_name, event.text)
                 self.bot_name = event.text
-                self.computer_bot = build_bot(self.bot_name, seed=self._bot_seed())
                 self.reset_game()
             elif event.ui_element == self.backend_dropdown:
                 LOGGER.debug("백엔드 변경: %s -> %s", self.selected_backend, event.text)
@@ -361,7 +404,7 @@ class LostCitiesGuiApp:
                 action_id = bot_input.to_unified_action(action_id)
             LOGGER.debug(
                 "컴퓨터 액션 선택: 봇=%s 입력=%s 액션=%s 상태={%s}",
-                self.bot_name,
+                self._computer_bot_display_name(),
                 type(bot_input).__name__,
                 action_id,
                 snapshot_summary(snapshot),
@@ -369,7 +412,7 @@ class LostCitiesGuiApp:
             self.apply_action(action_id, rebuild=False)
         except Exception as exc:
             self.error_text = str(exc)
-            LOGGER.exception("컴퓨터 액션 실패: 봇=%s", self.bot_name)
+            LOGGER.exception("컴퓨터 액션 실패: 봇=%s", self._computer_bot_display_name())
         self.next_computer_action_at_ms = self.pygame.time.get_ticks() + 360
         self.rebuild_ui()
 
@@ -421,8 +464,8 @@ class LostCitiesGuiApp:
         self.turn_flash_until_ms = 0
         self.next_computer_action_at_ms = 0
         self.export_text = None
-        self.computer_bot = build_bot(self.bot_name, seed=self._bot_seed())
         try:
+            self.computer_bot, self.computer_bot_label = self._build_computer_bot()
             self.backend = build_lost_cities_backend(
                 self.selected_backend,
                 self.config,
@@ -564,7 +607,7 @@ class LostCitiesGuiApp:
             "format": "coolrl.lost_cities.match_trace.v1",
             "created_at": datetime.now().astimezone().isoformat(),
             "mode": self.mode,
-            "bot": self.bot_name if self.mode == "pvc" else None,
+            "bot": self._computer_bot_display_name() if self.mode == "pvc" else None,
             "backend": self.selected_backend,
             "tier": self.tier_name,
             "seed": self.seed,
@@ -712,7 +755,7 @@ class LostCitiesGuiApp:
                 status = (
                     "CPU: CHOOSE CARD"
                     if compact
-                    else f"COMPUTER ({self.bot_name.upper()}): CHOOSE A CARD"
+                    else f"COMPUTER ({self._computer_bot_display_name().upper()}): CHOOSE A CARD"
                 )
                 detail = "Waiting for bot action."
             elif card is None:
@@ -738,7 +781,7 @@ class LostCitiesGuiApp:
                 status = (
                     "CPU: DRAW"
                     if compact
-                    else f"COMPUTER ({self.bot_name.upper()}): DRAW A CARD"
+                    else f"COMPUTER ({self._computer_bot_display_name().upper()}): DRAW A CARD"
                 )
                 detail = "Waiting for bot action."
             else:
@@ -1260,6 +1303,9 @@ def main(argv: list[str] | None = None) -> None:
         width=args.width,
         height=args.height,
         screenshot_on_start=args.screenshot_on_start,
+        deep_cfr_checkpoint=args.deep_cfr_checkpoint,
+        deep_cfr_sample=args.deep_cfr_sample,
+        deep_cfr_device=args.deep_cfr_device,
     )
     app.run()
 
