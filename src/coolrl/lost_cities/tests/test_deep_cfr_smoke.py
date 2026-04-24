@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import torch
+
 from coolrl.lost_cities.deep_cfr.config import config_from_dict
 from coolrl.lost_cities.deep_cfr.evaluate import StrategyNetBot
 from coolrl.lost_cities.deep_cfr.trainer import DeepCFRTrainer
@@ -28,7 +30,10 @@ def test_tiny_training_run_completes(tmp_path: Path) -> None:
     )
     trainer = DeepCFRTrainer(cfg)
     trainer.run()
-    assert (tmp_path / "latest.pt").exists()
+    checkpoint_path = tmp_path / "latest.pt"
+    assert checkpoint_path.exists()
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    assert checkpoint["resume_semantics"] == "networks_optimizers_iteration_only"
 
 
 def test_strategy_net_bot_returns_legal_phase_local_action(tmp_path: Path) -> None:

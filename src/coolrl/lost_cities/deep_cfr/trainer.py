@@ -266,7 +266,7 @@ class DeepCFRTrainer:
         payload = {
             "config": self.config.to_dict(),
             "lost_cities_config": self.lc_config.to_snapshot(),
-            "resume_semantics": "weights_only",
+            "resume_semantics": "networks_optimizers_iteration_only",
             "iteration": self.iteration,
             "input_dim": self.input_dim,
             "action_size": self.action_size,
@@ -282,7 +282,7 @@ class DeepCFRTrainer:
         payload = torch.load(path, map_location=self.device)
         self.iteration = int(payload.get("iteration", 0))
         logger.warning(
-            "Resuming from {} restores networks, optimizers, and iteration only; reservoir memories are not restored",
+            "Resuming from {} restores networks, optimizers, and iteration only; reservoir memories and RNG state are not restored",
             path,
         )
         for net, state_dict in zip(self.advantage_nets, payload["advantage_nets"], strict=True):
