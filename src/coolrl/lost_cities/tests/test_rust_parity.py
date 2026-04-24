@@ -40,6 +40,7 @@ def _python_trace(path: Path) -> dict:
                 "current_player": state.current_player,
                 "turn_count": state.turn_count,
                 "terminal": state.terminal,
+                "pending_discarded_color": state.pending_discarded_color,
                 "score_diff_player0": state.score_diff(0),
                 "legal_mask": state.unified_legal_mask(),
                 "deck": snapshot["deck"],

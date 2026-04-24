@@ -54,6 +54,26 @@ def test_discarded_color_can_be_drawn_after_turn_advances() -> None:
     assert state.legal_draw_mask()[1 + 2] is True
 
 
+def test_discarded_card_is_removed_when_drawn_later() -> None:
+    config = LostCitiesConfig()
+    state = GameState.empty(config)
+    state.hands[0] = [Card(2, 2)]
+    state.hands[1] = [Card(0, 1)]
+    state.deck = [Card(1, 1), Card(1, 2)]
+
+    state.apply_action(1)
+    assert state.discards[2] == [Card(2, 2)]
+
+    state.apply_action(0)
+    assert state.current_player == 1
+
+    state.apply_action(1)
+    state.apply_action(1 + 2)
+
+    assert state.discards[2] == []
+    assert Card(2, 2) in state.hands[1]
+
+
 def test_deck_exhaustion_ends_after_last_deck_draw() -> None:
     config = LostCitiesConfig()
     state = GameState.empty(config)

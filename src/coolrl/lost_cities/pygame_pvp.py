@@ -287,7 +287,7 @@ def _snapshot_from_trace(config_data: dict[str, Any], step: dict[str, Any]) -> S
         discards=[_cards_from_json(discard) for discard in step["discards"]],
         current_player=int(step["current_player"]),
         phase=str(step["phase"]),
-        pending_discarded_color=None,
+        pending_discarded_color=step.get("pending_discarded_color"),
         turn_count=int(step["turn_count"]),
         terminal=bool(step["terminal"]),
         legal_mask=list(step["legal_mask"]),
@@ -873,12 +873,11 @@ class PvpApp:
             self._draw_zone(
                 discard_rect,
                 "Discard",
-                "Top card",
+                "Stack",
                 snapshot.discards[color],
                 snapshot.config,
                 target=discard_target,
                 target_label=discard_label,
-                top_only=True,
             )
             if discard_target and target_action is not None:
                 target_label = "버린 더미에 버리기" if discard_label == "Discard here" else "버린 더미에서 뽑기"
@@ -915,7 +914,6 @@ class PvpApp:
         *,
         target: bool = False,
         target_label: str | None = None,
-        top_only: bool = False,
     ) -> None:
         pygame = self.pygame
         border = GOLD if target else LINE
@@ -927,9 +925,6 @@ class PvpApp:
             if not cards:
                 self._draw_text(self._zone_title(title, rect.width), (rect.x + 18, rect.y + 12), TEXT, 14)
                 self._draw_text("EMPTY", (rect.right - 56, rect.y + 13), MUTED, 12)
-            elif top_only:
-                self._draw_text(self._zone_title(title, rect.width), (rect.x + 18, rect.y + 12), TEXT, 14)
-                self._draw_mini_card(cards[-1], (rect.right - 40, rect.y + 9), config, size=20)
             else:
                 self._draw_mini_card_row(
                     cards,
@@ -951,10 +946,9 @@ class PvpApp:
         # Once cards exist, reserve the bottom band exclusively for cards.
         # This prevents multi-card expeditions from covering score/top-card text.
         self._draw_text_right(subtitle, (rect.right - 18, rect.y + 20), MUTED, 12 if rect.width < 220 else 13)
-        visible = [cards[-1]] if top_only else cards
         row_size = min(30, max(18, rect.height - 70))
         row_rect = pygame.Rect(rect.x + 12, rect.bottom - row_size - 10, rect.width - 24, row_size)
-        self._draw_mini_card_row(visible, row_rect, config, preferred_size=row_size)
+        self._draw_mini_card_row(cards, row_rect, config, preferred_size=row_size)
 
     def _zone_title(self, title: str, width: int) -> str:
         text = title.upper()
