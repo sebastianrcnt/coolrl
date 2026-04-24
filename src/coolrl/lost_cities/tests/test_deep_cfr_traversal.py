@@ -9,7 +9,7 @@ from coolrl.lost_cities.deep_cfr.encoding import infer_input_dim
 from coolrl.lost_cities.deep_cfr.memory import AdvantageMemory, StrategyMemory
 from coolrl.lost_cities.deep_cfr.networks import AdvantageNet, regret_matching
 from coolrl.lost_cities.deep_cfr.config import NetworkConfig
-from coolrl.lost_cities.deep_cfr.traversal import cfr_traverse
+from coolrl.lost_cities.deep_cfr.traversal import TraversalTimingStats, cfr_traverse
 from coolrl.lost_cities.game import Card, GameState, tier_config
 
 
@@ -151,3 +151,70 @@ def test_cfr_traversal_stores_regrets_for_multiple_traverser_decisions() -> None
 
     assert saw_card_phase
     assert saw_draw_phase
+
+
+def test_cfr_traversal_can_skip_opponent_strategy_samples() -> None:
+    config = tier_config("tier1", seed=31)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+    strategy_memory = StrategyMemory(100)
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config),
+        0,
+        1,
+        nets,
+        memories,
+        strategy_memory,
+        device=torch.device("cpu"),
+        max_depth=2,
+        max_nodes_per_traversal=100,
+        strategy_sample_interval=1,
+        store_strategy_on_opponent_nodes=False,
+        store_strategy_on_traverser_nodes=True,
+        rng=np.random.default_rng(37),
+    )
+
+    assert math.isfinite(value)
+    assert stats.nodes > 0
+    assert len(strategy_memory) > 0
+    assert all(sample.player == 0 for sample in strategy_memory.samples)
+
+
+def test_cfr_traversal_optional_hotspot_timing_collects_nonnegative_values() -> None:
+    config = tier_config("tier1", seed=41)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+    timing_stats = TraversalTimingStats()
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config),
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=2,
+        max_nodes_per_traversal=100,
+        rng=np.random.default_rng(43),
+        timing_stats=timing_stats,
+    )
+
+    assert math.isfinite(value)
+    assert stats.nodes > 0
+    assert timing_stats.traversal_wall_seconds >= 0.0
+    assert timing_stats.encode_information_state_seconds >= 0.0
+    assert timing_stats.advantage_forward_seconds >= 0.0
+    assert timing_stats.regret_matching_seconds >= 0.0
+    assert timing_stats.clone_apply_seconds >= 0.0
+    assert timing_stats.memory_add_seconds >= 0.0
+    assert timing_stats.policy_calls > 0

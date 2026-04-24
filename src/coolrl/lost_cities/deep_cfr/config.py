@@ -50,10 +50,14 @@ class TraversalConfig:
     backend: str = "python"
     traversals_per_player: int = 100
     strategy_sample_interval: int = 1
+    store_strategy_on_opponent_nodes: bool = True
+    store_strategy_on_traverser_nodes: bool = True
     max_depth: int | None = 8
     max_nodes_per_traversal: int | None = 10_000
     progress_every_traversals: int = 10
     num_workers: int | str = 0
+    traversal_worker_chunk_size: int = 1
+    profile_hotspots: bool = False
     regret_matching_epsilon: float = 1.0e-8
 
     def resolved_num_workers(self) -> tuple[int, bool]:
@@ -98,6 +102,7 @@ class CheckpointConfig:
     directory: str = "checkpoints/lost_cities_deep_cfr_tier3"
     save_every_iteration: bool = True
     save_iteration_interval: int = 1
+    save_latest_only: bool = False
     progress_interval_seconds: float = 20.0
 
 

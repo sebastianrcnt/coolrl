@@ -25,10 +25,15 @@ traversal:
   backend: python
   traversals_per_player: 10
   strategy_sample_interval: 1
+  store_strategy_on_opponent_nodes: true
+  store_strategy_on_traverser_nodes: true
   max_depth: 12
-  max_nodes_per_traversal: 10000
-  progress_every_traversals: 2
+  max_nodes_per_traversal: 5000
+  progress_every_traversals: 1
   num_workers: 0
+  traversal_worker_chunk_size: 1
+  # Enable to write encode/forward/clone/apply/memory timing breakdowns into metrics.
+  profile_hotspots: false
   regret_matching_epsilon: 1.0e-8
 
 optimization:
@@ -45,6 +50,8 @@ memory:
   strategy_capacity: 5000
 
 evaluation:
+  # Set eval_every: 0 to disable evaluation entirely for fast probe runs.
+  # Keep games small when using this profile for timing or smoke tests.
   eval_every: 1
   games: 1
   opponents:
@@ -54,4 +61,5 @@ checkpoint:
   directory: checkpoints/lost_cities_deep_cfr_probe
   save_every_iteration: true
   save_iteration_interval: 1
+  save_latest_only: false
   progress_interval_seconds: 20.0

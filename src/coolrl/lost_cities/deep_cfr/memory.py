@@ -62,6 +62,17 @@ class _ReservoirMemory:
             "iteration": np.asarray([sample.iteration for sample in batch], dtype=np.int64),
         }
 
+    def extend_samples(self, samples: list[_Sample], rng: np.random.Generator) -> None:
+        for sample in samples:
+            self._add_sample(
+                sample.info_state,
+                sample.target,
+                sample.legal_mask,
+                sample.player,
+                sample.iteration,
+                rng,
+            )
+
 
 class AdvantageMemory(_ReservoirMemory):
     def add(
