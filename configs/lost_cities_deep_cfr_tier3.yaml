@@ -54,8 +54,11 @@ memory:
   strategy_capacity: 2000000
 
 evaluation:
+  # Evaluation timeouts are folded into metrics instead of aborting training.
   eval_every: 5
   games: 100
+  max_steps: 10000
+  on_max_steps: score_diff
   opponents:
     - random
     - safe_heuristic

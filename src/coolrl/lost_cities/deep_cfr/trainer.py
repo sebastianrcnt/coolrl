@@ -162,9 +162,12 @@ class DeepCFRTrainer:
                     self.config.evaluation.games,
                     self.config.seed + 50_000 + iteration * 100,
                     device=self.device,
+                    max_steps=self.config.evaluation.max_steps,
+                    on_max_steps=self.config.evaluation.on_max_steps,
                 )
                 eval_metrics[f"eval_{opponent_name}_win_rate"] = result["win_rate"]
                 eval_metrics[f"eval_{opponent_name}_avg_diff"] = result["avg_diff"]
+                eval_metrics[f"eval_{opponent_name}_max_step_timeouts"] = result["max_step_timeouts"]
         eval_seconds = time.monotonic() - eval_started
 
         nodes_per_second = total_stats.nodes / max(1.0e-9, traversal_seconds)

@@ -8,7 +8,6 @@ import torch
 
 from ..bots.base import first_legal
 from ..bots.heuristic import SafeHeuristicBot
-from ..bots.play import play_game
 from ..bots.random import RandomBot
 from ..game import GameState, LostCitiesConfig
 from ..interfaces import BotInput, LostCitiesBot
@@ -111,6 +110,25 @@ def make_opponent(name: str, seed: int | None = None) -> LostCitiesBot:
     raise ValueError(f"unsupported opponent: {name!r}")
 
 
+def _play_game_for_evaluation(
+    bot0: LostCitiesBot,
+    bot1: LostCitiesBot,
+    config: LostCitiesConfig,
+    *,
+    seed: int | None = None,
+    max_steps: int = 10_000,
+) -> tuple[GameState, bool]:
+    game_config = replace(config, seed=seed) if seed is not None else config
+    state = GameState.new_game(game_config)
+    bots = [bot0, bot1]
+    for _ in range(max_steps):
+        if state.terminal:
+            return state, False
+        action = bots[state.current_player].act(state)
+        state.apply_action(action)
+    return state, not state.terminal
+
+
 def evaluate_against_bot(
     strategy_net: StrategyNet,
     opponent_bot: LostCitiesBot,
@@ -119,19 +137,51 @@ def evaluate_against_bot(
     seed: int,
     *,
     device: torch.device | str = "cpu",
+    max_steps: int = 10_000,
+    on_max_steps: str = "score_diff",
 ) -> dict[str, float | int]:
     strategy_net.eval()
+    if max_steps <= 0:
+        raise ValueError(f"max_steps must be positive, got {max_steps}")
+    timeout_mode = str(on_max_steps).strip().lower()
+    if timeout_mode not in {"score_diff", "loss", "draw"}:
+        raise ValueError(
+            "on_max_steps must be one of 'score_diff', 'loss', or 'draw'"
+        )
     diffs: list[int] = []
     wins = losses = draws = 0
+    max_step_timeouts = 0
     for index in range(games):
         net_bot = StrategyNetBot(strategy_net, config, device=device, sample=False, seed=seed + index)
         game_seed = seed + index
         if index % 2 == 0:
-            final_state = play_game(net_bot, opponent_bot, replace(config, seed=game_seed))
-            diff = final_state.score_diff(0)
+            final_state, timed_out = _play_game_for_evaluation(
+                net_bot,
+                opponent_bot,
+                config,
+                seed=game_seed,
+                max_steps=max_steps,
+            )
+            deep_cfr_player = 0
         else:
-            final_state = play_game(opponent_bot, net_bot, replace(config, seed=game_seed))
-            diff = final_state.score_diff(1)
+            final_state, timed_out = _play_game_for_evaluation(
+                opponent_bot,
+                net_bot,
+                config,
+                seed=game_seed,
+                max_steps=max_steps,
+            )
+            deep_cfr_player = 1
+        if timed_out:
+            max_step_timeouts += 1
+            if timeout_mode == "score_diff":
+                diff = final_state.score_diff(deep_cfr_player)
+            elif timeout_mode == "loss":
+                diff = -1
+            else:
+                diff = 0
+        else:
+            diff = final_state.score_diff(deep_cfr_player)
         diffs.append(diff)
         if diff > 0:
             wins += 1
@@ -146,4 +196,5 @@ def evaluate_against_bot(
         "wins": wins,
         "losses": losses,
         "draws": draws,
+        "max_step_timeouts": max_step_timeouts,
     }

@@ -54,9 +54,11 @@ def eval_command(args: argparse.Namespace) -> None:
         args.games,
         config.seed + 123_000,
         device=device,
+        max_steps=config.evaluation.max_steps,
+        on_max_steps=config.evaluation.on_max_steps,
     )
     logger.info(
-        "Evaluation vs {}: games={} win_rate={:.3f} avg_diff={:.2f} wins={} losses={} draws={}",
+        "Evaluation vs {}: games={} win_rate={:.3f} avg_diff={:.2f} wins={} losses={} draws={} max_step_timeouts={}",
         args.opponent,
         result["games"],
         result["win_rate"],
@@ -64,6 +66,7 @@ def eval_command(args: argparse.Namespace) -> None:
         result["wins"],
         result["losses"],
         result["draws"],
+        result["max_step_timeouts"],
     )
 
 
@@ -140,15 +143,17 @@ def status_command(args: argparse.Namespace) -> None:
         )
     if "eval_random_win_rate" in latest or "eval_random_avg_diff" in latest:
         logger.info(
-            "Eval random: win_rate={} avg_diff={}",
+            "Eval random: win_rate={} avg_diff={} max_step_timeouts={}",
             latest.get("eval_random_win_rate", "n/a"),
             latest.get("eval_random_avg_diff", "n/a"),
+            latest.get("eval_random_max_step_timeouts", "n/a"),
         )
     if "eval_safe_heuristic_win_rate" in latest or "eval_safe_heuristic_avg_diff" in latest:
         logger.info(
-            "Eval safe_heuristic: win_rate={} avg_diff={}",
+            "Eval safe_heuristic: win_rate={} avg_diff={} max_step_timeouts={}",
             latest.get("eval_safe_heuristic_win_rate", "n/a"),
             latest.get("eval_safe_heuristic_avg_diff", "n/a"),
+            latest.get("eval_safe_heuristic_max_step_timeouts", "n/a"),
         )
 
 

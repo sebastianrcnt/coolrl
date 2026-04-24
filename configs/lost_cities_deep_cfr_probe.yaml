@@ -60,6 +60,9 @@ evaluation:
   # to compare workers=0 vs multiprocessing traversal_seconds on the same setup.
   eval_every: 1
   games: 1
+  # Evaluation timeouts are handled without aborting training.
+  max_steps: 10000
+  on_max_steps: score_diff
   opponents:
     - random
 

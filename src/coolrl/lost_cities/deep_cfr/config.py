@@ -95,6 +95,19 @@ class EvaluationConfig:
     eval_every: int = 5
     games: int = 100
     opponents: list[str] = field(default_factory=lambda: ["random", "safe_heuristic"])
+    max_steps: int = 10_000
+    on_max_steps: str = "score_diff"
+
+    def __post_init__(self) -> None:
+        self.max_steps = int(self.max_steps)
+        if self.max_steps <= 0:
+            raise ValueError(f"evaluation.max_steps must be positive, got {self.max_steps}")
+        token = str(self.on_max_steps).strip().lower()
+        if token not in {"score_diff", "loss", "draw"}:
+            raise ValueError(
+                "evaluation.on_max_steps must be one of 'score_diff', 'loss', or 'draw'"
+            )
+        self.on_max_steps = token
 
 
 @dataclass(slots=True)

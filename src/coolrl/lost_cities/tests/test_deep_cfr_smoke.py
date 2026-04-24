@@ -9,7 +9,11 @@ import torch
 from coolrl.lost_cities.deep_cfr.benchmark import benchmark_traversal_modes
 from coolrl.lost_cities.deep_cfr.config import config_from_dict
 from coolrl.lost_cities.deep_cfr.encoding import infer_input_dim
-from coolrl.lost_cities.deep_cfr.evaluate import StrategyNetBot, load_strategy_bot_from_checkpoint
+from coolrl.lost_cities.deep_cfr.evaluate import (
+    StrategyNetBot,
+    evaluate_against_bot,
+    load_strategy_bot_from_checkpoint,
+)
 from coolrl.lost_cities.deep_cfr.memory import _Sample
 from coolrl.lost_cities.deep_cfr.trainer import DeepCFRTrainer
 from coolrl.lost_cities.deep_cfr.traversal import TraversalStats
@@ -248,3 +252,66 @@ def test_load_strategy_bot_from_checkpoint_returns_legal_action(tmp_path: Path) 
     action = bot.act(state)
 
     assert state.legal_mask()[action]
+
+
+def test_evaluate_against_bot_handles_max_steps_timeout() -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 0,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "evaluation": {"max_steps": 1, "on_max_steps": "draw"},
+        }
+    )
+    trainer = DeepCFRTrainer(cfg)
+
+    result = evaluate_against_bot(
+        trainer.strategy_net,
+        StrategyNetBot(trainer.strategy_net, trainer.lc_config, device="cpu"),
+        trainer.lc_config,
+        games=2,
+        seed=123,
+        device="cpu",
+        max_steps=1,
+        on_max_steps="draw",
+    )
+
+    assert result["games"] == 2
+    assert result["max_step_timeouts"] == 2
+    assert result["draws"] == 2
+    assert result["avg_diff"] == 0.0
+
+
+def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 1,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "traversal": {"traversals_per_player": 2, "max_depth": 2},
+            "optimization": {
+                "advantage_batch_size": 8,
+                "strategy_batch_size": 8,
+                "advantage_updates_per_iteration": 1,
+                "strategy_updates_per_iteration": 1,
+            },
+            "memory": {"advantage_capacity": 100, "strategy_capacity": 100},
+            "evaluation": {
+                "eval_every": 1,
+                "games": 1,
+                "opponents": ["random"],
+                "max_steps": 1,
+                "on_max_steps": "draw",
+            },
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    trainer = DeepCFRTrainer(cfg)
+
+    trainer.run()
+
+    assert (tmp_path / "latest.pt").exists()
+    progress = json.loads((tmp_path / "runtime_progress.json").read_text(encoding="utf-8"))
+    assert progress["eval_random_max_step_timeouts"] == 1
+    assert progress["eval_random_win_rate"] == 0.0
+    assert progress["eval_random_avg_diff"] == 0.0
