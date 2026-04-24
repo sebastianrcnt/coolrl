@@ -11,19 +11,22 @@ import sys
 import tempfile
 from typing import Any, Literal
 
-from .game import Card, GameState, LostCitiesConfig, build_deck, score_expedition
+from .game import Card, GameState, LostCitiesConfig, build_deck, score_expedition, tier_config
 
 BackendName = Literal["python", "rust"]
 LOGGER = logging.getLogger("coolrl.lost_cities.pvp")
 
 
-CARD_COLORS = {
-    0: (255, 78, 83),
-    1: (83, 141, 244),
-    2: (116, 174, 82),
-    3: (232, 181, 59),
-    4: (164, 99, 202),
-}
+COLOR_PALETTE = [
+    (255, 78, 83),
+    (83, 141, 244),
+    (116, 174, 82),
+    (232, 181, 59),
+    (164, 99, 202),
+    (67, 205, 196),
+    (255, 139, 66),
+    (220, 92, 170),
+]
 
 BG = (0, 0, 0)
 CARD_BG = (3, 4, 5)
@@ -40,13 +43,7 @@ B612_FONT_PATH = (
     / "B612-Regular.ttf"
 )
 
-COLOR_NAMES = {
-    0: "Red",
-    1: "Blue",
-    2: "Green",
-    3: "Gold",
-    4: "Violet",
-}
+COLOR_NAME_PALETTE = ["Red", "Blue", "Green", "Gold", "Violet", "Cyan", "Orange", "Rose"]
 
 
 @dataclass
@@ -301,8 +298,14 @@ def _cards_from_json(cards: list[dict[str, int]]) -> list[Card]:
     return [Card.from_snapshot(card) for card in cards]
 
 
+def color_rgb(color: int) -> tuple[int, int, int]:
+    return COLOR_PALETTE[color % len(COLOR_PALETTE)]
+
+
 def color_name(color: int) -> str:
-    return COLOR_NAMES.get(color, f"Color {color}")
+    if color < len(COLOR_NAME_PALETTE):
+        return COLOR_NAME_PALETTE[color]
+    return f"Color {color}"
 
 
 def card_value_label(card: Card, config: LostCitiesConfig) -> str:
@@ -360,6 +363,7 @@ def preferred_font_path() -> Path | None:
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Play Lost Cities PVP in one pygame window.")
     parser.add_argument("--backend", choices=("python", "rust"), default="python")
+    parser.add_argument("--tier", choices=("tier0", "tier1", "tier2", "tier3"), default="tier3")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--width", type=int, default=1536)
     parser.add_argument("--height", type=int, default=964)
@@ -371,9 +375,10 @@ class PvpApp:
         self,
         *,
         backend_name: BackendName,
-        seed: int | None,
-        width: int,
-        height: int,
+        tier_name: str = "tier3",
+        seed: int | None = None,
+        width: int = 1536,
+        height: int = 964,
     ):
         import pygame
         import pygame_gui
@@ -393,13 +398,15 @@ class PvpApp:
         self.clock = pygame.time.Clock()
 
         self.seed = seed
+        self.tier_name = tier_name
         self.selected_backend: BackendName = backend_name
-        self.config = LostCitiesConfig()
+        self.config = tier_config(tier_name)
         self.backend = build_backend(self.selected_backend, self.config, self.seed)
         self.ui_elements: list[Any] = []
         self.hand_card_rects: dict[int, Any] = {}
         self.board_targets: list[ActionTarget] = []
         self.backend_dropdown: Any = None
+        self.tier_dropdown: Any = None
         self.new_game_button: Any = None
         self.undo_button: Any = None
         self.selected_card_slot: int | None = None
@@ -408,11 +415,15 @@ class PvpApp:
         self.turn_flash_until_ms = 0
         self.rebuild_ui()
         LOGGER.debug(
-            "PVP 앱 초기화: 백엔드=%s 시드=%s 크기=%sx%s",
+            "PVP 앱 초기화: 백엔드=%s 티어=%s 시드=%s 크기=%sx%s 색상수=%s 손패=%s 덱=%s",
             self.selected_backend,
+            self.tier_name,
             self.seed,
             width,
             height,
+            self.config.n_colors,
+            self.config.hand_size,
+            self.config.deck_size,
         )
 
     def _configure_ui_theme(self, theme_path: Path) -> None:
@@ -466,6 +477,11 @@ class PvpApp:
             if event.ui_element == self.backend_dropdown:
                 LOGGER.debug("백엔드 변경: %s -> %s", self.selected_backend, event.text)
                 self.selected_backend = event.text
+                self.reset_game()
+            elif event.ui_element == self.tier_dropdown:
+                LOGGER.debug("티어 변경: %s -> %s", self.tier_name, event.text)
+                self.tier_name = event.text
+                self.config = tier_config(self.tier_name)
                 self.reset_game()
         elif event.type == self.pygame.KEYDOWN:
             if event.key == self.pygame.K_z and (event.mod & self.pygame.KMOD_CTRL):
@@ -565,6 +581,20 @@ class PvpApp:
             LOGGER.exception("되돌리기 실패")
         self.rebuild_ui()
 
+    def _hand_layout(self, snapshot: Snapshot, player: int, y: int) -> tuple[int, int, int, int, int]:
+        width, _ = self.window_size
+        status_x = width - 404
+        card_x = 340
+        available = max(360, status_x - card_x - 40)
+        count = max(1, snapshot.config.hand_size)
+        gap = 14
+        card_w = min(126, max(54, (available - gap * (count - 1)) // count))
+        card_h = max(70, int(card_w * 1.22))
+        if count > 1:
+            gap = max(8, min(18, (available - card_w * count) // (count - 1)))
+        card_y = y + (14 if player == 1 else 28)
+        return card_x, card_y, card_w, card_h, gap
+
     def rebuild_ui(self) -> None:
         pygame = self.pygame
         pygame_gui = self.pygame_gui
@@ -579,8 +609,14 @@ class PvpApp:
             relative_rect=pygame.Rect(130, 17, 174, 46),
             manager=self.manager,
         )
+        self.tier_dropdown = pygame_gui.elements.UIDropDownMenu(
+            options_list=["tier0", "tier1", "tier2", "tier3"],
+            starting_option=self.tier_name,
+            relative_rect=pygame.Rect(388, 17, 118, 46),
+            manager=self.manager,
+        )
         self.new_game_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(323, 17, 148, 46),
+            relative_rect=pygame.Rect(526, 17, 148, 46),
             text="NEW GAME",
             manager=self.manager,
         )
@@ -591,7 +627,9 @@ class PvpApp:
         )
         if not self.backend.can_undo():
             self.undo_button.disable()
-        self.ui_elements.extend([self.backend_dropdown, self.new_game_button, self.undo_button])
+        self.ui_elements.extend(
+            [self.backend_dropdown, self.tier_dropdown, self.new_game_button, self.undo_button]
+        )
 
     def draw(self) -> None:
         pygame = self.pygame
@@ -605,15 +643,17 @@ class PvpApp:
         self._draw_center(snapshot)
         self._draw_player_area(snapshot, player=0, y=self.window_size[1] - 257)
         if self.error_text:
-            self._draw_text(self.error_text.upper(), (740, 50), CARD_COLORS[0], 18, bold=True)
+            self._draw_text(self.error_text.upper(), (740, 50), color_rgb(0), 18, bold=True)
 
     def _draw_header(self, snapshot: Snapshot) -> None:
         pygame = self.pygame
         width, _ = self.window_size
+        compact = width < 1450
         pygame.draw.line(self.screen, LINE, (0, 0), (width, 0), 1)
         pygame.draw.line(self.screen, LINE, (0, 90), (width, 90), 1)
-        pygame.draw.line(self.screen, LINE, (488, 0), (488, 90), 1)
+        pygame.draw.line(self.screen, LINE, (700, 0), (700, 90), 1)
         self._draw_text("BACKEND", (31, 31), MUTED, 18)
+        self._draw_text("TIER", (322, 31), MUTED, 18)
         if snapshot.terminal:
             diff = snapshot.score_diff(0)
             if diff > 0:
@@ -626,22 +666,42 @@ class PvpApp:
         elif snapshot.phase == "card":
             card = self._selected_card(snapshot)
             if card is None:
-                status = f"PLAYER {snapshot.current_player}: CHOOSE A CARD"
-                detail = "Click a card in the active hand."
+                status = (
+                    f"P{snapshot.current_player}: CHOOSE CARD"
+                    if compact
+                    else f"PLAYER {snapshot.current_player}: CHOOSE A CARD"
+                )
+                detail = "Click active hand." if compact else "Click a card in the active hand."
             else:
-                status = f"PLAYER {snapshot.current_player}: CHOOSE CARD DESTINATION"
-                detail = f"{card_label(card, snapshot.config)} selected. Click expedition or discard."
+                status = (
+                    f"P{snapshot.current_player}: CHOOSE TARGET"
+                    if compact
+                    else f"PLAYER {snapshot.current_player}: CHOOSE CARD DESTINATION"
+                )
+                detail = (
+                    f"{card_label(card, snapshot.config)} selected."
+                    if compact
+                    else f"{card_label(card, snapshot.config)} selected. Click expedition or discard."
+                )
         else:
-            status = f"PLAYER {snapshot.current_player}: DRAW A CARD"
-            detail = "Click the deck or a highlighted discard pile."
-        self._draw_text(status, (520, 21), TEXT, 30, bold=True)
-        self._draw_text(detail, (520, 56), MUTED, 18)
-        self._draw_text(
-            f"BACKEND: {self.selected_backend}   TURN: {snapshot.turn_count}",
-            (width - 465, 56),
-            MUTED,
-            18,
-        )
+            status = (
+                f"P{snapshot.current_player}: DRAW"
+                if compact
+                else f"PLAYER {snapshot.current_player}: DRAW A CARD"
+            )
+            detail = "Click deck/discard." if compact else "Click the deck or a highlighted discard pile."
+        title_size = 30 if not compact else 24
+        detail_size = 18 if not compact else 14
+        title_x = 720
+        self._draw_text(status, (title_x, 21), TEXT, title_size, bold=True)
+        self._draw_text(detail, (title_x, 56), MUTED, detail_size)
+        if width >= 1450:
+            meta = f"BACKEND: {self.selected_backend}   TURN: {snapshot.turn_count}"
+            meta_x = width - 465
+        else:
+            meta = f"TURN: {snapshot.turn_count}"
+            meta_x = width - 135
+        self._draw_text(meta, (meta_x, 56), MUTED, detail_size)
 
     def _draw_player_area(self, snapshot: Snapshot, *, player: int, y: int) -> None:
         pygame = self.pygame
@@ -657,18 +717,17 @@ class PvpApp:
         pygame.draw.line(self.screen, LINE, (44, y + 77), (67, y + 77), 1)
         pygame.draw.line(self.screen, LINE, (49, y + 72), (49, y + 87), 1)
 
-        card_y = y + (14 if player == 1 else 28)
-        card_x = 340 if player == 0 else 390
-        card_gap = 140
+        card_x, card_y, card_w, card_h, card_gap = self._hand_layout(snapshot, player, y)
 
         for slot, card in enumerate(snapshot.hands[player]):
             selectable = active and snapshot.phase == "card"
             selected = selectable and slot == self.selected_card_slot
             rect = self._draw_card(
                 card,
-                (card_x + slot * card_gap, card_y),
+                (card_x + slot * (card_w + card_gap), card_y),
                 snapshot.config,
                 large=True,
+                size=(card_w, card_h),
                 selected=selected,
                 selectable=selectable,
             )
@@ -681,7 +740,11 @@ class PvpApp:
             pygame.draw.rect(self.screen, LINE, status_box, width=1)
             self._draw_text("ACTIVE", (status_box.x + 22, status_box.y + 22), GOLD, 20)
             if snapshot.phase == "card":
-                prompt = "Select card, then click a target"
+                prompt = (
+                    "Yellow border: expedition or discard"
+                    if self.selected_card_slot is not None
+                    else "Select card, then click a target"
+                )
             else:
                 prompt = "Click deck or discard"
             self._draw_text(prompt, (status_box.x + 22, status_box.y + 56), MUTED, 16)
@@ -715,7 +778,7 @@ class PvpApp:
         width, height = self.window_size
         bottom_panel_y = height - 257
         board_y = 313
-        board_h = max(290, bottom_panel_y - board_y - 20)
+        board_h = max(220, bottom_panel_y - board_y - 20)
         board_x = 263 if width >= 1450 else 196
         board_rect = pygame.Rect(board_x, board_y, width - board_x - 30, board_h)
         pygame.draw.rect(self.screen, BG, board_rect)
@@ -738,24 +801,24 @@ class PvpApp:
         lane_x = board_rect.x + 26
         lane_y = board_rect.y + 63
         lane_w = (board_rect.width - 52 - lane_gap * (lane_count - 1)) // lane_count
-        zone_h = max(58, (board_rect.height - 86 - 24) // 3)
+        zone_h = max(42, (board_rect.height - 86 - 24) // 3)
 
         for color in range(lane_count):
             x = lane_x + color * (lane_w + lane_gap)
             lane_rect = pygame.Rect(x, board_rect.y, lane_w, board_rect.height)
-            color_rgb = CARD_COLORS.get(color, (170, 170, 170))
+            lane_color = color_rgb(color)
             if color > 0:
                 pygame.draw.line(self.screen, LINE, (x - 8, board_rect.y), (x - 8, board_rect.bottom), 1)
             self._draw_text(
                 color_name(color).upper(),
                 (x + 12, board_rect.y + 24),
-                color_rgb,
+                lane_color,
                 23,
                 bold=True,
             )
             pygame.draw.line(
                 self.screen,
-                color_rgb,
+                lane_color,
                 (x + 12, board_rect.y + 51),
                 (x + lane_w - 12, board_rect.y + 51),
                 2,
@@ -826,14 +889,21 @@ class PvpApp:
         border = GOLD if target else LINE
         pygame.draw.rect(self.screen, BG, rect)
         pygame.draw.rect(self.screen, border, rect, width=2 if target else 1)
-        self._draw_text_center("DECK", pygame.Rect(rect.x, rect.y + 20, rect.width, 40), TEXT, 22)
-        card_back = pygame.Rect(rect.centerx - 42, rect.y + 72, 52, 72)
+        compact = rect.height < 230
+        self._draw_text_center("DECK", pygame.Rect(rect.x, rect.y + 18, rect.width, 36), TEXT, 20 if compact else 22)
+        card_w, card_h = (42, 58) if compact else (52, 72)
+        card_back = pygame.Rect(rect.centerx - card_w // 2 - 4, rect.y + (68 if compact else 72), card_w, card_h)
         pygame.draw.rect(self.screen, BG, card_back)
         pygame.draw.rect(self.screen, TEXT, card_back, width=2)
         pygame.draw.rect(self.screen, LINE, card_back.move(8, 8), width=2)
-        self._draw_text_center(str(len(snapshot.deck)), pygame.Rect(rect.x, rect.bottom - 92, rect.width, 64), TEXT, 42, bold=True)
+        count_rect = (
+            pygame.Rect(rect.x, card_back.bottom + 8, rect.width, 40)
+            if compact
+            else pygame.Rect(rect.x, rect.bottom - 92, rect.width, 64)
+        )
+        self._draw_text_center(str(len(snapshot.deck)), count_rect, TEXT, 36 if compact else 42, bold=True)
         if target:
-            self._draw_text_center("DRAW", pygame.Rect(rect.x, rect.bottom - 42, rect.width, 26), GOLD, 17)
+            self._draw_text_center("DRAW", pygame.Rect(rect.x, rect.bottom - 34, rect.width, 24), GOLD, 15 if compact else 17)
 
     def _draw_zone(
         self,
@@ -851,22 +921,107 @@ class PvpApp:
         border = GOLD if target else LINE
         pygame.draw.rect(self.screen, BG, rect)
         pygame.draw.rect(self.screen, border, width=2 if target else 1, rect=rect)
-        self._draw_text(title.upper(), (rect.x + 20, rect.y + 16), TEXT, 18)
-        self._draw_text(subtitle, (rect.x + 20, rect.y + 51), MUTED, 15)
+        if rect.height < 58:
+            if target and target_label:
+                self._draw_target_badge(rect, target_label)
+            if not cards:
+                self._draw_text(self._zone_title(title, rect.width), (rect.x + 18, rect.y + 12), TEXT, 14)
+                self._draw_text("EMPTY", (rect.right - 56, rect.y + 13), MUTED, 12)
+            elif top_only:
+                self._draw_text(self._zone_title(title, rect.width), (rect.x + 18, rect.y + 12), TEXT, 14)
+                self._draw_mini_card(cards[-1], (rect.right - 40, rect.y + 9), config, size=20)
+            else:
+                self._draw_mini_card_row(
+                    cards,
+                    pygame.Rect(rect.x + 8, rect.y + 9, rect.width - 16, 24),
+                    config,
+                    preferred_size=24,
+                    min_size=14,
+                )
+            return
+        title_text = self._zone_title(title, rect.width)
+        self._draw_text(title_text, (rect.x + 20, rect.y + 16), TEXT, 17 if rect.width < 220 else 18)
         if target and target_label:
-            self._draw_text(
-                target_label.upper(),
-                (rect.right - 138, rect.y + 16),
-                GOLD,
-                15,
-            )
+            self._draw_target_badge(rect, target_label)
         if not cards:
+            self._draw_text(subtitle, (rect.x + 20, rect.y + 51), MUTED, 15)
             self._draw_text("EMPTY", (rect.right - 72, rect.y + 51), MUTED, 15)
             return
-        visible = [cards[-1]] if top_only else cards[-5:]
-        start_x = max(rect.x + 20, rect.right - len(visible) * 35 - 18)
-        for index, card in enumerate(visible):
-            self._draw_mini_card(card, (start_x + index * 35, rect.y + 48), config)
+
+        # Once cards exist, reserve the bottom band exclusively for cards.
+        # This prevents multi-card expeditions from covering score/top-card text.
+        self._draw_text_right(subtitle, (rect.right - 18, rect.y + 20), MUTED, 12 if rect.width < 220 else 13)
+        visible = [cards[-1]] if top_only else cards
+        row_size = min(30, max(18, rect.height - 70))
+        row_rect = pygame.Rect(rect.x + 12, rect.bottom - row_size - 10, rect.width - 24, row_size)
+        self._draw_mini_card_row(visible, row_rect, config, preferred_size=row_size)
+
+    def _zone_title(self, title: str, width: int) -> str:
+        text = title.upper()
+        if width >= 220:
+            return text
+        return text.replace(" EXPEDITION", " EXP")
+
+    def _mini_card_layout(
+        self,
+        width: int,
+        count: int,
+        *,
+        preferred_size: int = 30,
+        min_size: int = 16,
+    ) -> tuple[int, int]:
+        gap = 5
+        usable = max(32, width)
+        if count <= 1:
+            return min(preferred_size, usable), gap
+
+        size = min(preferred_size, (usable - gap * (count - 1)) // count)
+        if size >= min_size:
+            return size, gap
+
+        # Keep cards readable before shrinking too hard: negative gap means overlap.
+        size = min(preferred_size, max(min_size, usable // min(count, 5)))
+        gap = (usable - size * count) // (count - 1)
+        return size, min(5, gap)
+
+    def _draw_mini_card_row(
+        self,
+        cards: list[Card],
+        row_rect: Any,
+        config: LostCitiesConfig,
+        *,
+        preferred_size: int = 30,
+        min_size: int = 16,
+    ) -> None:
+        if not cards:
+            return
+        size, gap = self._mini_card_layout(
+            row_rect.width,
+            len(cards),
+            preferred_size=preferred_size,
+            min_size=min_size,
+        )
+        step = size + gap
+        total_width = size + max(0, len(cards) - 1) * step
+        start_x = row_rect.x + max(0, (row_rect.width - total_width) // 2)
+        y = row_rect.y + max(0, (row_rect.height - size) // 2)
+        for index, card in enumerate(cards):
+            self._draw_mini_card(card, (start_x + index * step, y), config, size=size)
+
+    def _draw_target_badge(self, rect: Any, label: str) -> None:
+        if rect.width < 220:
+            return
+        pygame = self.pygame
+        text = label.upper()
+        font = self._font(12)
+        surface = font.render(text, True, GOLD)
+        badge = surface.get_rect()
+        badge.width += 12
+        badge.height += 6
+        badge.topright = (rect.right - 8, rect.y - 11)
+        pygame.draw.rect(self.screen, BG, badge)
+        pygame.draw.rect(self.screen, GOLD, badge, width=1)
+        self.screen.blit(surface, (badge.x + 6, badge.y + 3))
 
     def _draw_card(
         self,
@@ -875,13 +1030,14 @@ class PvpApp:
         config: LostCitiesConfig,
         *,
         large: bool = False,
+        size: tuple[int, int] | None = None,
         selected: bool = False,
         selectable: bool = False,
     ) -> Any:
         pygame = self.pygame
         x, y = pos
-        width, height = (126, 154) if large else (30, 30)
-        color = CARD_COLORS.get(card.color, (160, 160, 160))
+        width, height = size or ((126, 154) if large else (30, 30))
+        color = color_rgb(card.color)
         rect = pygame.Rect(x, y, width, height)
         if selected:
             pygame.draw.rect(
@@ -893,12 +1049,14 @@ class PvpApp:
         pygame.draw.rect(self.screen, CARD_BG, rect)
         pygame.draw.rect(self.screen, color, rect, width=2)
         if large:
-            self._draw_text(color_name(card.color).upper(), (x + 12, y + 12), color, 19)
+            label_size = max(10, min(19, width // 6))
+            value_size = max(26, min(62, int(width * 0.48)))
+            self._draw_text(color_name(card.color).upper(), (x + 10, y + 10), color, label_size)
             self._draw_text_center(
                 card_value_label(card, config),
-                pygame.Rect(x, y + 38, width, height - 46),
+                pygame.Rect(x, y + max(24, height // 4), width, height - max(32, height // 3)),
                 color,
-                62,
+                value_size,
                 bold=True,
             )
         else:
@@ -916,14 +1074,16 @@ class PvpApp:
         card: Card,
         pos: tuple[int, int],
         config: LostCitiesConfig,
+        *,
+        size: int = 30,
     ) -> None:
         pygame = self.pygame
         x, y = pos
-        rect = pygame.Rect(x, y, 30, 30)
-        color = CARD_COLORS.get(card.color, (160, 160, 160))
+        rect = pygame.Rect(x, y, size, size)
+        color = color_rgb(card.color)
         pygame.draw.rect(self.screen, CARD_BG, rect)
         pygame.draw.rect(self.screen, color, rect, width=1)
-        self._draw_text_center(card_value_label(card, config), rect, color, 16, bold=True)
+        self._draw_text_center(card_value_label(card, config), rect, color, max(11, size // 2), bold=True)
 
     def _selected_card(self, snapshot: Snapshot) -> Card | None:
         if snapshot.phase != "card" or self.selected_card_slot is None:
@@ -983,6 +1143,19 @@ class PvpApp:
         surface = font.render(text, True, color)
         self.screen.blit(surface, surface.get_rect(center=rect.center))
 
+    def _draw_text_right(
+        self,
+        text: str,
+        top_right: tuple[int, int],
+        color: tuple[int, int, int],
+        size: int,
+        *,
+        bold: bool = False,
+    ) -> None:
+        font = self._font(size, bold=bold)
+        surface = font.render(text, True, color)
+        self.screen.blit(surface, surface.get_rect(topright=top_right))
+
     def _font(self, size: int, *, bold: bool = False) -> Any:
         key = (size, bold)
         if key not in self.font_cache:
@@ -999,6 +1172,7 @@ def main(argv: list[str] | None = None) -> None:
     args = build_argparser().parse_args(argv)
     app = PvpApp(
         backend_name=args.backend,
+        tier_name=args.tier,
         seed=args.seed,
         width=args.width,
         height=args.height,
