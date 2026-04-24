@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Protocol, TypeAlias, runtime_checkable
 
 from .game import Card, GameState, LostCitiesConfig
 
@@ -10,17 +11,26 @@ except ImportError as exc:  # pragma: no cover
     raise RuntimeError("numpy is required for Lost Cities bots") from exc
 
 
-def _legal_from_obs(obs_or_state: dict | GameState) -> np.ndarray:
+BotInput: TypeAlias = dict | GameState
+
+
+@runtime_checkable
+class LostCitiesBot(Protocol):
+    def act(self, obs_or_state: BotInput) -> int:
+        """Choose an action id from the current state or observation."""
+
+
+def _legal_from_obs(obs_or_state: BotInput) -> np.ndarray:
     if isinstance(obs_or_state, GameState):
         return np.asarray(obs_or_state.legal_mask(), dtype=bool)
     return np.asarray(obs_or_state["legal_mask"], dtype=bool)
 
 
-class RandomBot:
+class RandomBot(LostCitiesBot):
     def __init__(self, seed: int | None = None):
         self.rng = np.random.default_rng(seed)
 
-    def act(self, obs_or_state: dict | GameState) -> int:
+    def act(self, obs_or_state: BotInput) -> int:
         legal = _legal_from_obs(obs_or_state)
         legal_indices = np.nonzero(legal)[0]
         if len(legal_indices) == 0:
@@ -28,8 +38,8 @@ class RandomBot:
         return int(self.rng.choice(legal_indices))
 
 
-class SafeHeuristicBot:
-    def act(self, obs_or_state: dict | GameState) -> int:
+class SafeHeuristicBot(LostCitiesBot):
+    def act(self, obs_or_state: BotInput) -> int:
         if not isinstance(obs_or_state, GameState):
             legal = _legal_from_obs(obs_or_state)
             legal_indices = np.nonzero(legal)[0]
@@ -121,8 +131,8 @@ class SafeHeuristicBot:
 
 
 def play_game(
-    bot0: RandomBot | SafeHeuristicBot,
-    bot1: RandomBot | SafeHeuristicBot,
+    bot0: LostCitiesBot,
+    bot1: LostCitiesBot,
     config: LostCitiesConfig,
     *,
     seed: int | None = None,
@@ -140,8 +150,8 @@ def play_game(
 
 
 def run_series(
-    bot0: RandomBot | SafeHeuristicBot,
-    bot1: RandomBot | SafeHeuristicBot,
+    bot0: LostCitiesBot,
+    bot1: LostCitiesBot,
     config: LostCitiesConfig,
     *,
     games: int = 100,
