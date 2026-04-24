@@ -4,7 +4,7 @@ from coolrl.lost_cities.bots import (
     SafeHeuristicBot,
     play_game,
 )
-from coolrl.lost_cities.game import tier_config
+from coolrl.lost_cities.game import Card, GameState, LostCitiesConfig, tier_config
 
 
 def test_builtin_bots_implement_lost_cities_bot() -> None:
@@ -21,3 +21,65 @@ def test_safe_heuristic_mirror_match_finishes() -> None:
         max_steps=200,
     )
     assert state.terminal is True
+
+
+def test_safe_heuristic_opponent_value_ignores_hidden_hand() -> None:
+    config = LostCitiesConfig(n_colors=2, n_ranks=8, hand_size=3)
+    bot = SafeHeuristicBot()
+    discard_card = Card(color=0, rank=6)
+
+    state_a = GameState.empty(config)
+    state_a.expeditions[1][0] = [Card(color=0, rank=0), Card(color=0, rank=4)]
+    state_a.discards[0] = [discard_card]
+    state_a.hands[1] = [Card(color=0, rank=5)]
+
+    state_b = GameState.empty(config)
+    state_b.expeditions[1][0] = [Card(color=0, rank=0), Card(color=0, rank=4)]
+    state_b.discards[0] = [discard_card]
+    state_b.hands[1] = [Card(color=0, rank=5), Card(color=0, rank=7), Card(color=0, rank=8)]
+
+    value_a = bot._card_value_for_opponent(
+        state=state_a,
+        opponent=1,
+        card=discard_card,
+        derived=bot._derived(state_a),
+    )
+    value_b = bot._card_value_for_opponent(
+        state=state_b,
+        opponent=1,
+        card=discard_card,
+        derived=bot._derived(state_b),
+    )
+
+    assert value_a == value_b
+
+
+def test_safe_heuristic_started_expedition_value_ignores_invalid_lower_followup() -> None:
+    config = LostCitiesConfig(n_colors=2, n_ranks=8, hand_size=3)
+    bot = SafeHeuristicBot()
+    high_card = Card(color=0, rank=8)
+
+    base_state = GameState.empty(config)
+    base_state.expeditions[0][0] = [Card(color=0, rank=4)]
+    base_state.hands[0] = [high_card]
+
+    lower_followup_state = GameState.empty(config)
+    lower_followup_state.expeditions[0][0] = [Card(color=0, rank=4)]
+    lower_followup_state.hands[0] = [Card(color=0, rank=5), high_card]
+
+    base_value = bot._started_expedition_play_value(
+        state=base_state,
+        player=0,
+        card=high_card,
+        derived=bot._derived(base_state),
+        deck_left=config.deck_size,
+    )
+    lower_followup_value = bot._started_expedition_play_value(
+        state=lower_followup_state,
+        player=0,
+        card=high_card,
+        derived=bot._derived(lower_followup_state),
+        deck_left=config.deck_size,
+    )
+
+    assert lower_followup_value == base_value

@@ -338,8 +338,13 @@ class SafeHeuristicBot(LostCitiesBot):
 
         followups = [
             followup
-            for followup in self._playable_followup_numbers(state, player, color)
-            if followup != card
+            for followup in state.hands[player]
+            if (
+                followup is not card
+                and followup.color == color
+                and not followup.is_handshake
+                and followup.rank > card.rank
+            )
         ]
 
         projected_sum = current_sum + numeric_value + sum(
@@ -707,9 +712,9 @@ class SafeHeuristicBot(LostCitiesBot):
         if not state.can_play_card(opponent, card):
             return 0.0
 
-        interest = self._color_commitment(
+        interest = self._public_color_commitment_for_opponent(
             state=state,
-            player=opponent,
+            opponent=opponent,
             color=card.color,
             derived=derived,
         )
@@ -763,6 +768,46 @@ class SafeHeuristicBot(LostCitiesBot):
             extra_cards=0,
             derived=derived,
         )
+
+        return value
+
+    def _public_color_commitment_for_opponent(
+        self,
+        *,
+        state: GameState,
+        opponent: int,
+        color: int,
+        derived: DerivedHeuristicConfig,
+    ) -> float:
+        expedition = state.expeditions[opponent][color]
+        discard = state.discards[color]
+
+        value = 0.0
+
+        if expedition:
+            value += 5.0
+
+        handshake_count = sum(1 for card in expedition if card.is_handshake)
+        value += 2.0 * handshake_count
+
+        numeric_cards = [card for card in expedition if not card.is_handshake]
+        value += 0.25 * sum(self._num(state, card) for card in numeric_cards)
+
+        if numeric_cards:
+            value += 0.4 * self._num(state, numeric_cards[-1])
+
+        if discard:
+            top_card = discard[-1]
+            if state.can_play_card(opponent, top_card):
+                if top_card.is_handshake:
+                    value += 1.5
+                else:
+                    value += 1.0 + 0.1 * self._num(state, top_card)
+
+        if derived.bonus_possible:
+            expedition_len = len(expedition)
+            if expedition_len + 1 >= state.config.bonus_threshold:
+                value += 0.2 * float(state.config.bonus_amount)
 
         return value
 
