@@ -25,7 +25,8 @@ traversal:
   backend: python
   traversals_per_player: 1000
   strategy_sample_interval: 1
-  max_depth: null
+  # For smoke/probe runs, prefer max_depth in the 50-80 range.
+  max_depth: 120
   num_workers: 0
   regret_matching_epsilon: 1.0e-8
 

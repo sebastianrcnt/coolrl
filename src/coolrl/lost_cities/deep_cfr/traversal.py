@@ -15,6 +15,7 @@ from .networks import AdvantageNet, regret_matching
 class TraversalStats:
     nodes: int = 0
     terminals: int = 0
+    cutoffs: int = 0
     max_depth_reached: int = 0
 
 
@@ -84,8 +85,9 @@ class DeepCFRTraverser:
             stats.terminals += 1
             return float(state.score_diff(traverser))
         if self.max_depth is not None and depth >= self.max_depth:
+            stats.cutoffs += 1
             stats.max_depth_reached = max(stats.max_depth_reached, depth)
-            return 0.0
+            return float(state.score_diff(traverser))
 
         player = state.current_player
         info, legal, policy = self._policy(state, player)

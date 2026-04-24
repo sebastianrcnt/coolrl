@@ -10,7 +10,7 @@ from coolrl.lost_cities.deep_cfr.memory import AdvantageMemory, StrategyMemory
 from coolrl.lost_cities.deep_cfr.networks import AdvantageNet, regret_matching
 from coolrl.lost_cities.deep_cfr.config import NetworkConfig
 from coolrl.lost_cities.deep_cfr.traversal import cfr_traverse
-from coolrl.lost_cities.game import GameState, tier_config
+from coolrl.lost_cities.game import Card, GameState, tier_config
 
 
 def test_regret_matching_respects_legal_mask() -> None:
@@ -46,6 +46,40 @@ def test_cfr_traversal_tier3_completes() -> None:
     assert stats.nodes > 0
 
 
+def test_cfr_traversal_max_depth_cutoff_returns_current_score_diff() -> None:
+    config = tier_config("tier1", seed=13)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+    state = GameState.empty(config)
+    state.hands = [[Card(0, 1)], [Card(1, 1)]]
+    state.expeditions[0][0].append(Card(0, 2))
+    state.expeditions[0][0].append(Card(0, 3))
+    state.current_player = 0
+    state.phase = "card"
+    expected_value = float(state.score_diff(0))
+
+    value, stats = cfr_traverse(
+        state,
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=0,
+        rng=np.random.default_rng(19),
+    )
+
+    assert math.isfinite(value)
+    assert value == expected_value
+    assert stats.cutoffs == 1
+    assert stats.nodes == 1
+
+
 def test_cfr_traversal_stores_regrets_for_multiple_traverser_decisions() -> None:
     config = tier_config("tier1", seed=11)
     input_dim = infer_input_dim(config)
@@ -69,6 +103,7 @@ def test_cfr_traversal_stores_regrets_for_multiple_traverser_decisions() -> None
 
     assert math.isfinite(value)
     assert stats.nodes > 0
+    assert stats.cutoffs > 0
     assert len(memories[0]) > 1
 
     saw_card_phase = False

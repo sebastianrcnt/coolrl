@@ -147,6 +147,7 @@ class DeepCFRTrainer:
                 _, stats = traverser.traverse(state, player, iteration)
                 total_stats.nodes += stats.nodes
                 total_stats.terminals += stats.terminals
+                total_stats.cutoffs += stats.cutoffs
                 total_stats.max_depth_reached = max(total_stats.max_depth_reached, stats.max_depth_reached)
                 traversals += 1
         traversal_seconds = time.monotonic() - traversal_started
@@ -180,6 +181,7 @@ class DeepCFRTrainer:
         eval_seconds = time.monotonic() - eval_started
 
         nodes_per_second = total_stats.nodes / max(1.0e-9, traversal_seconds)
+        cutoff_rate = total_stats.cutoffs / max(1, total_stats.nodes)
         metrics: dict[str, Any] = {
             "iteration": iteration,
             "elapsed_seconds": self.elapsed_seconds,
@@ -188,6 +190,8 @@ class DeepCFRTrainer:
             "train_strategy_seconds": train_strategy_seconds,
             "eval_seconds": eval_seconds,
             "total_nodes": total_stats.nodes,
+            "total_cutoffs": total_stats.cutoffs,
+            "cutoff_rate": cutoff_rate,
             "nodes_per_second": nodes_per_second,
             "traversals_per_second": traversals / max(1.0e-9, traversal_seconds),
             "avg_nodes_per_traversal": total_stats.nodes / max(1, traversals),
@@ -200,9 +204,11 @@ class DeepCFRTrainer:
             **eval_metrics,
         }
         logger.info(
-            "Iteration {}: nodes={} nps={:.1f} adv_loss=({:.4f},{:.4f}) strategy_loss={:.4f}",
+            "Iteration {}: nodes={} cutoffs={} cutoff_rate={:.4f} nps={:.1f} adv_loss=({:.4f},{:.4f}) strategy_loss={:.4f}",
             iteration,
             total_stats.nodes,
+            total_stats.cutoffs,
+            cutoff_rate,
             nodes_per_second,
             advantage_losses[0],
             advantage_losses[1],
