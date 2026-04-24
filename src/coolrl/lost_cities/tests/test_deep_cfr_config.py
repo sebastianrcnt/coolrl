@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from coolrl.lost_cities.deep_cfr.config import RulesConfig, load_config
+
+
+def test_load_default_config_is_tier3() -> None:
+    cfg = load_config(None)
+    assert cfg.rules.tier == "tier3"
+    assert cfg.rules.to_lost_cities_config().n_colors == 5
+
+
+def test_load_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_tier3.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_tier3"
+    assert cfg.traversal.backend == "python"
+
+
+def test_rules_config_default_tier3_shape() -> None:
+    lc_cfg = RulesConfig().to_lost_cities_config()
+    assert lc_cfg.n_colors == 5
+    assert lc_cfg.n_ranks == 9
+    assert lc_cfg.n_handshakes == 3
+    assert lc_cfg.hand_size == 8
+
+
+def test_rules_config_overrides() -> None:
+    lc_cfg = RulesConfig(bonus_threshold=7, expedition_penalty=-15).to_lost_cities_config()
+    assert lc_cfg.bonus_threshold == 7
+    assert lc_cfg.expedition_penalty == -15
