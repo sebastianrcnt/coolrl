@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import logging
 
 from ..game import Card, GameState, LostCitiesConfig
 from ..interfaces import BotInput, LostCitiesBot
@@ -29,6 +30,9 @@ def draw_from_discard_action(color: int) -> int:
     return 1 + color
 
 
+LOGGER = logging.getLogger("coolrl.lost_cities.bots.safe_heuristic")
+
+
 @dataclass(frozen=True)
 class SafeHeuristicParams:
     # Expedition opening.
@@ -50,9 +54,15 @@ class SafeHeuristicParams:
     unusable_discard_bonus: float = 20.00
 
     # Draw preferences.
-    deck_draw_early_value: float = 5.00
-    deck_draw_mid_value: float = 3.00
-    deck_draw_late_value: float = 1.00
+    deck_draw_early_value: float = 2.00
+    deck_draw_mid_value: float = 1.00
+    deck_draw_late_value: float = -1.00
+    deny_opponent_weight: float = 0.40
+    winning_deck_bonus: float = 0.75
+    losing_deck_penalty: float = 1.25
+    losing_visible_draw_bonus: float = 1.50
+    speculative_visible_draw_bonus: float = 1.50
+    dead_visible_draw_penalty: float = 2.00
 
     # General behavior.
     late_open_block_ratio: float = 0.20
@@ -140,8 +150,18 @@ class SafeHeuristicBot(LostCitiesBot):
 
     def act(self, obs_or_state: BotInput) -> int:
         if not isinstance(obs_or_state, GameState):
+            LOGGER.debug(
+                "SafeHeuristicBot fallback to first legal: input_type=%s",
+                type(obs_or_state).__name__,
+            )
             return first_legal(legal_from_obs(obs_or_state))
 
+        LOGGER.debug(
+            "SafeHeuristicBot heuristic path: player=%s phase=%s turn=%s",
+            obs_or_state.current_player,
+            obs_or_state.phase,
+            obs_or_state.turn_count,
+        )
         if obs_or_state.phase == "card":
             return self._act_card(obs_or_state)
 
@@ -569,20 +589,29 @@ class SafeHeuristicBot(LostCitiesBot):
         card: Card,
         derived: DerivedHeuristicConfig,
     ) -> float:
-        if not state.can_play_card(player, card):
-            return -5.0
-
         color = card.color
+        opponent = 1 - player
         commitment = self._color_commitment(
             state=state,
             player=player,
             color=color,
             derived=derived,
         )
+        opponent_value = self._card_value_for_opponent(
+            state=state,
+            opponent=opponent,
+            card=card,
+            derived=derived,
+        )
+        score_diff = state.score_diff(player)
+
+        value = self.params.deny_opponent_weight * opponent_value
+        if score_diff <= 0:
+            value += self.params.losing_visible_draw_bonus
 
         if card.is_handshake:
             if state.has_numeric(player, color):
-                return -5.0
+                return value - self.params.dead_visible_draw_penalty
             if not state.expeditions[player][color]:
                 playable_numbers = [
                     other
@@ -601,21 +630,38 @@ class SafeHeuristicBot(LostCitiesBot):
                     len(playable_numbers) < derived.min_handshake_numeric_cards
                     or number_sum < required_sum
                 ):
-                    return -5.0
-            return 6.0 + commitment
+                    support = self._visible_open_support_value(
+                        state=state,
+                        player=player,
+                        card=card,
+                        derived=derived,
+                    )
+                    return value + support - 0.5
+            return value + 6.0 + commitment
 
-        value = float(self._num(state, card))
-        value += 0.7 * commitment
+        immediate_playable = state.can_play_card(player, card)
+        if immediate_playable:
+            value += float(self._num(state, card))
+            value += 0.7 * commitment
 
-        if state.expeditions[player][color]:
-            value += 5.0
-        elif not self._visible_number_can_help_open(
-            state=state,
-            player=player,
-            card=card,
-            derived=derived,
-        ):
-            return -5.0
+            if state.expeditions[player][color]:
+                value += 5.0
+            else:
+                value += self._visible_open_support_value(
+                    state=state,
+                    player=player,
+                    card=card,
+                    derived=derived,
+                )
+        else:
+            value -= self.params.dead_visible_draw_penalty
+            if not state.expeditions[player][color]:
+                value += self._visible_open_support_value(
+                    state=state,
+                    player=player,
+                    card=card,
+                    derived=derived,
+                )
 
         value += self._bonus_potential(
             state=state,
@@ -624,6 +670,50 @@ class SafeHeuristicBot(LostCitiesBot):
             extra_cards=1,
             derived=derived,
         )
+
+        return value
+
+    def _visible_open_support_value(
+        self,
+        *,
+        state: GameState,
+        player: int,
+        card: Card,
+        derived: DerivedHeuristicConfig,
+    ) -> float:
+        color = card.color
+        same_color_numbers = [
+            other
+            for other in state.hands[player]
+            if other.color == color and not other.is_handshake
+        ]
+        same_color_handshakes = [
+            other
+            for other in state.hands[player]
+            if other.color == color and other.is_handshake
+        ]
+        future_numbers = [
+            other
+            for other in same_color_numbers
+            if other is not card and other.rank >= card.rank
+        ]
+
+        value = 0.0
+        value += 0.8 * len(future_numbers)
+        value += 1.0 * len(same_color_handshakes)
+
+        if card.rank <= derived.middle_rank:
+            value += self.params.speculative_visible_draw_bonus
+
+        if self._visible_number_can_help_open(
+            state=state,
+            player=player,
+            card=card,
+            derived=derived,
+        ):
+            value += 4.0
+        elif future_numbers or same_color_handshakes:
+            value += self.params.speculative_visible_draw_bonus
 
         return value
 
@@ -661,12 +751,21 @@ class SafeHeuristicBot(LostCitiesBot):
         derived: DerivedHeuristicConfig,
     ) -> float:
         deck_left = len(state.deck)
+        score_diff = state.score_diff(state.current_player)
 
         if deck_left > derived.mid_deck_threshold:
-            return self.params.deck_draw_early_value
-        if deck_left > derived.late_deck_threshold:
-            return self.params.deck_draw_mid_value
-        return self.params.deck_draw_late_value
+            value = self.params.deck_draw_early_value
+        elif deck_left > derived.late_deck_threshold:
+            value = self.params.deck_draw_mid_value
+        else:
+            value = self.params.deck_draw_late_value
+
+        if score_diff > 0:
+            value += self.params.winning_deck_bonus
+        else:
+            value -= self.params.losing_deck_penalty
+
+        return value
 
     def _card_value_for_me(
         self,

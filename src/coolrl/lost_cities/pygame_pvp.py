@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from typing import Any, Literal
 
-from .game import Card, LostCitiesConfig, tier_config
+from .game import Card, GameState, LostCitiesConfig, tier_config
 from .backends import build_lost_cities_backend
 from .backends.common import snapshot_summary
 from .bots import DEFAULT_BOT, LostCitiesBot, available_bot_names, build_bot
@@ -355,10 +355,14 @@ class LostCitiesGuiApp:
         if now < self.next_computer_action_at_ms:
             return
         try:
-            action_id = self.computer_bot.act(snapshot)
+            bot_input = self._computer_bot_input(snapshot)
+            action_id = self.computer_bot.act(bot_input)
+            if isinstance(bot_input, GameState):
+                action_id = bot_input.to_unified_action(action_id)
             LOGGER.debug(
-                "컴퓨터 액션 선택: 봇=%s 액션=%s 상태={%s}",
+                "컴퓨터 액션 선택: 봇=%s 입력=%s 액션=%s 상태={%s}",
                 self.bot_name,
+                type(bot_input).__name__,
                 action_id,
                 snapshot_summary(snapshot),
             )
@@ -368,6 +372,11 @@ class LostCitiesGuiApp:
             LOGGER.exception("컴퓨터 액션 실패: 봇=%s", self.bot_name)
         self.next_computer_action_at_ms = self.pygame.time.get_ticks() + 360
         self.rebuild_ui()
+
+    def _computer_bot_input(self, snapshot: Snapshot) -> Snapshot | GameState:
+        if self.mode == "pvc":
+            return GameState.from_snapshot(snapshot_to_json(snapshot))
+        return snapshot
 
     def handle_board_click(self, pos: tuple[int, int]) -> None:
         snapshot = self.backend.snapshot()

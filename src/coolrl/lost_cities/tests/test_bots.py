@@ -5,6 +5,7 @@ from coolrl.lost_cities.bots import (
     play_game,
 )
 from coolrl.lost_cities.game import Card, GameState, LostCitiesConfig, tier_config
+from coolrl.lost_cities.bots.heuristic import draw_from_discard_action
 
 
 def test_builtin_bots_implement_lost_cities_bot() -> None:
@@ -83,3 +84,40 @@ def test_safe_heuristic_started_expedition_value_ignores_invalid_lower_followup(
     )
 
     assert lower_followup_value == base_value
+
+
+def test_safe_heuristic_draws_playable_discard_instead_of_deck() -> None:
+    config = LostCitiesConfig(n_colors=2, n_ranks=8, hand_size=3)
+    bot = SafeHeuristicBot()
+
+    state = GameState.empty(config)
+    state.current_player = 0
+    state.phase = "draw"
+    state.expeditions[0][0] = [Card(color=0, rank=4)]
+    state.discards[0] = [Card(color=0, rank=6)]
+    state.deck = [Card(color=1, rank=8)]
+
+    assert bot._act_draw(state) == draw_from_discard_action(0)
+
+
+def test_safe_heuristic_can_draw_discard_to_deny_opponent_when_losing() -> None:
+    config = LostCitiesConfig(n_colors=2, n_ranks=8, hand_size=4)
+    bot = SafeHeuristicBot()
+
+    state = GameState.empty(config)
+    state.current_player = 0
+    state.phase = "draw"
+    state.deck = [Card(color=1, rank=8), Card(color=1, rank=7)]
+    state.hands[0] = [Card(color=0, rank=0), Card(color=0, rank=7)]
+    state.expeditions[0][1] = [Card(color=1, rank=8)]
+    state.expeditions[1][0] = [
+        Card(color=0, rank=0),
+        Card(color=0, rank=5),
+        Card(color=0, rank=6),
+        Card(color=0, rank=7),
+        Card(color=0, rank=8),
+    ]
+    state.discards[0] = [Card(color=0, rank=6)]
+
+    assert state.score_diff(0) < 0
+    assert bot._act_draw(state) == draw_from_discard_action(0)
