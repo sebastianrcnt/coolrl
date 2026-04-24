@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import logging
 from pathlib import Path
@@ -72,6 +73,31 @@ def card_value_label(card: Card, config: LostCitiesConfig) -> str:
 
 def card_label(card: Card, config: LostCitiesConfig) -> str:
     return f"{color_name(card.color)} {card_value_label(card, config)}"
+
+
+def cards_to_json(cards: list[Card]) -> list[dict[str, int]]:
+    return [card.to_snapshot() for card in cards]
+
+
+def snapshot_to_json(snapshot: Snapshot) -> dict[str, Any]:
+    return {
+        "config": snapshot.config.to_snapshot(),
+        "deck": cards_to_json(snapshot.deck),
+        "hands": [cards_to_json(hand) for hand in snapshot.hands],
+        "expeditions": [
+            [cards_to_json(expedition) for expedition in player_expeditions]
+            for player_expeditions in snapshot.expeditions
+        ],
+        "discards": [cards_to_json(discard) for discard in snapshot.discards],
+        "current_player": snapshot.current_player,
+        "phase": snapshot.phase,
+        "pending_discarded_color": snapshot.pending_discarded_color,
+        "turn_count": snapshot.turn_count,
+        "terminal": snapshot.terminal,
+        "legal_mask": list(snapshot.legal_mask),
+        "scores": [snapshot.total_score(0), snapshot.total_score(1)],
+        "score_diff_player0": snapshot.score_diff(0),
+    }
 
 
 def turn_identity_summary(identity: tuple[int, str, int] | None) -> str:
@@ -172,10 +198,14 @@ class LostCitiesGuiApp:
         self.tier_dropdown: Any = None
         self.new_game_button: Any = None
         self.undo_button: Any = None
+        self.export_button: Any = None
         self.selected_card_slot: int | None = None
         self.error_text: str | None = None
+        self.export_text: str | None = None
+        self.match_trace: list[dict[str, Any]] = []
         self.last_turn_identity: tuple[int, str, int] | None = None
         self.turn_flash_until_ms = 0
+        self._reset_match_trace()
         self.rebuild_ui()
         LOGGER.debug(
             "GUI 앱 초기화: 모드=%s 봇=%s 백엔드=%s 티어=%s 시드=%s 크기=%sx%s 색상수=%s 손패=%s 덱=%s",
@@ -243,6 +273,10 @@ class LostCitiesGuiApp:
             if event.ui_element == self.undo_button:
                 LOGGER.debug("되돌리기 버튼 클릭")
                 self.undo()
+                return
+            if event.ui_element == self.export_button:
+                LOGGER.debug("내보내기 버튼 클릭")
+                self.export_match_trace()
                 return
         elif event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
             if event.ui_element == self.mode_dropdown:
@@ -347,6 +381,7 @@ class LostCitiesGuiApp:
         self.last_turn_identity = None
         self.turn_flash_until_ms = 0
         self.next_computer_action_at_ms = 0
+        self.export_text = None
         self.computer_bot = build_bot(self.bot_name, seed=self._bot_seed())
         try:
             self.backend = build_lost_cities_backend(
@@ -354,6 +389,7 @@ class LostCitiesGuiApp:
                 self.config,
                 self.seed,
             )
+            self._reset_match_trace()
             self.error_text = None
             LOGGER.debug(
                 "게임 초기화 완료: 백엔드=%s 시드=%s 상태={%s}",
@@ -371,14 +407,17 @@ class LostCitiesGuiApp:
             before = self.backend.snapshot()
             LOGGER.debug("액션 적용 요청: 액션=%s 상태={%s}", action_id, snapshot_summary(before))
             self.backend.apply(action_id)
+            after = self.backend.snapshot()
+            self._append_match_trace_step(action_id=action_id, before=before, after=after)
             self.selected_card_slot = None
             self.hand_card_rects = {}
             self.board_targets = []
             self.error_text = None
+            self.export_text = None
             LOGGER.debug(
                 "액션 적용 완료: 액션=%s 상태={%s}",
                 action_id,
-                snapshot_summary(self.backend.snapshot()),
+                snapshot_summary(after),
             )
         except Exception as exc:
             self.error_text = str(exc)
@@ -398,6 +437,9 @@ class LostCitiesGuiApp:
             self.hand_card_rects = {}
             self.board_targets = []
             self.error_text = None if changed else "되돌릴 수 없음"
+            if changed and len(self.match_trace) > 1:
+                self.match_trace.pop()
+                self.export_text = None
             LOGGER.debug(
                 "되돌리기 요청: 변경됨=%s 이전={%s} 이후={%s}",
                 changed,
@@ -407,6 +449,96 @@ class LostCitiesGuiApp:
         except Exception as exc:
             self.error_text = str(exc)
             LOGGER.exception("되돌리기 실패")
+        self.rebuild_ui()
+
+    def _reset_match_trace(self) -> None:
+        snapshot = self.backend.snapshot()
+        self.match_trace = [
+            self._trace_record(
+                step_index=0,
+                action_id=None,
+                actor=None,
+                phase_before=None,
+                snapshot=snapshot,
+            )
+        ]
+
+    def _append_match_trace_step(
+        self,
+        *,
+        action_id: int,
+        before: Snapshot,
+        after: Snapshot,
+    ) -> None:
+        self.match_trace.append(
+            self._trace_record(
+                step_index=len(self.match_trace),
+                action_id=action_id,
+                actor=before.current_player,
+                phase_before=before.phase,
+                snapshot=after,
+            )
+        )
+
+    def _trace_record(
+        self,
+        *,
+        step_index: int,
+        action_id: int | None,
+        actor: int | None,
+        phase_before: str | None,
+        snapshot: Snapshot,
+    ) -> dict[str, Any]:
+        return {
+            "type": "step",
+            "step_index": step_index,
+            "action_id": action_id,
+            "actor": actor,
+            "phase_before": phase_before,
+            "state": snapshot_to_json(snapshot),
+        }
+
+    def export_match_trace(self) -> None:
+        snapshot = self.backend.snapshot()
+        if not snapshot.terminal:
+            self.error_text = "대국 종료 후 내보낼 수 있음"
+            self.rebuild_ui()
+            return
+
+        export_dir = Path.cwd() / "lost_cities_exports"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        seed_label = "none" if self.seed is None else str(self.seed)
+        path = export_dir / (
+            f"lost-cities-{self.tier_name}-{self.mode}-{self.selected_backend}-"
+            f"seed-{seed_label}-{timestamp}.jsonl"
+        )
+        metadata = {
+            "type": "metadata",
+            "format": "coolrl.lost_cities.match_trace.v1",
+            "created_at": datetime.now().astimezone().isoformat(),
+            "mode": self.mode,
+            "bot": self.bot_name if self.mode == "pvc" else None,
+            "backend": self.selected_backend,
+            "tier": self.tier_name,
+            "seed": self.seed,
+            "config": self.config.to_snapshot(),
+            "step_count": len(self.match_trace),
+            "score": [snapshot.total_score(0), snapshot.total_score(1)],
+            "score_diff_player0": snapshot.score_diff(0),
+        }
+        try:
+            export_dir.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(metadata, ensure_ascii=False) + "\n")
+                for record in self.match_trace:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            self.error_text = None
+            self.export_text = f"Exported {path}"
+            LOGGER.debug("대국 내보내기 완료: %s", path)
+        except Exception as exc:
+            self.error_text = str(exc)
+            self.export_text = None
+            LOGGER.exception("대국 내보내기 실패: %s", path)
         self.rebuild_ui()
 
     def _hand_layout(self, snapshot: Snapshot, player: int, y: int) -> tuple[int, int, int, int, int]:
@@ -469,6 +601,13 @@ class LostCitiesGuiApp:
         )
         if not self.backend.can_undo():
             self.undo_button.disable()
+        self.export_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(width - 128, 17, 110, 46),
+            text="EXPORT",
+            manager=self.manager,
+        )
+        if not self.backend.snapshot().terminal:
+            self.export_button.disable()
         self.ui_elements.extend(
             [
                 self.mode_dropdown,
@@ -477,6 +616,7 @@ class LostCitiesGuiApp:
                 self.tier_dropdown,
                 self.new_game_button,
                 self.undo_button,
+                self.export_button,
             ]
         )
 
@@ -493,6 +633,8 @@ class LostCitiesGuiApp:
         self._draw_player_area(snapshot, player=0, y=self.window_size[1] - 257)
         if self.error_text:
             self._draw_text(self.error_text.upper(), (740, 50), color_rgb(0), 18, bold=True)
+        elif self.export_text:
+            self._draw_text(self.export_text, (740, 50), GOLD, 16, bold=True)
 
     def _draw_header(self, snapshot: Snapshot) -> None:
         pygame = self.pygame
