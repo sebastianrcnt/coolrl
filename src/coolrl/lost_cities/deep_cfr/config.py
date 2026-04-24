@@ -56,7 +56,7 @@ class TraversalConfig:
     max_nodes_per_traversal: int | None = 10_000
     progress_every_traversals: int = 10
     num_workers: int | str = 0
-    traversal_worker_chunk_size: int = 1
+    traversal_worker_chunk_size: int = 4
     profile_hotspots: bool = False
     regret_matching_epsilon: float = 1.0e-8
 

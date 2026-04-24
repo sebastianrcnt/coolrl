@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 from loguru import logger
 
+from .benchmark import benchmark_traversal_modes
 from .config import config_from_dict, load_config
 from .evaluate import evaluate_against_bot, make_opponent
 from .networks import StrategyNet
@@ -57,6 +58,43 @@ def eval_command(args: argparse.Namespace) -> None:
     )
 
 
+def benchmark_traversal_command(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    result = benchmark_traversal_modes(
+        config,
+        mp_workers=args.mp_workers,
+        iteration=args.iteration,
+    )
+    single = result["single_process"]
+    multiprocessing = result["multiprocessing"]
+    logger.info(
+        "Traversal benchmark uses device={} for both modes so the comparison reflects traversal multiprocessing overhead/speedup.",
+        result["device_used"],
+    )
+    logger.info(
+        "Single-process: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f}",
+        single["num_workers"],
+        single["traversal_seconds"],
+        single["total_nodes"],
+        single["traversals"],
+        single["avg_nodes_per_traversal"],
+        single["nodes_per_second"],
+    )
+    logger.info(
+        "Multiprocessing: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f}",
+        multiprocessing["num_workers"],
+        multiprocessing["traversal_seconds"],
+        multiprocessing["total_nodes"],
+        multiprocessing["traversals"],
+        multiprocessing["avg_nodes_per_traversal"],
+        multiprocessing["nodes_per_second"],
+    )
+    logger.info(
+        "Traversal benchmark speedup vs single-process: {:.3f}x",
+        result["speedup_vs_single_process"],
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m coolrl.lost_cities.deep_cfr.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -72,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--games", type=int, default=100)
     eval_parser.add_argument("--opponent", choices=["random", "safe_heuristic"], default="random")
     eval_parser.set_defaults(func=eval_command)
+
+    benchmark = subparsers.add_parser("benchmark-traversal")
+    benchmark.add_argument("--config", type=Path, default=Path("configs/lost_cities_deep_cfr_probe.yaml"))
+    benchmark.add_argument("--mp-workers", type=int, default=2)
+    benchmark.add_argument("--iteration", type=int, default=1)
+    benchmark.set_defaults(func=benchmark_traversal_command)
     return parser
 
 

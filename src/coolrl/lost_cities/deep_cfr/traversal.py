@@ -81,6 +81,9 @@ class DeepCFRTraverser:
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
 
+    def _node_budget_reached(self, stats: TraversalStats) -> bool:
+        return self.max_nodes_per_traversal is not None and stats.nodes >= self.max_nodes_per_traversal
+
     def traverse(self, state: GameState, traverser: int, iteration: int) -> tuple[float, TraversalStats]:
         stats = TraversalStats()
         if self.timing_stats is None:
@@ -162,7 +165,7 @@ class DeepCFRTraverser:
         stats: TraversalStats,
     ) -> float:
         stats.nodes += 1
-        if self.max_nodes_per_traversal is not None and stats.nodes >= self.max_nodes_per_traversal:
+        if self._node_budget_reached(stats):
             stats.node_limit_cutoffs += 1
             return float(state.score_diff(traverser))
         stats.max_depth_reached = max(stats.max_depth_reached, depth)
@@ -184,7 +187,16 @@ class DeepCFRTraverser:
 
         if player == traverser:
             action_values = np.zeros(state.action_size, dtype=np.float32)
-            for action in legal_actions:
+            fallback_value = float(state.score_diff(traverser))
+            for index, action in enumerate(legal_actions):
+                if self._node_budget_reached(stats):
+                    remaining_actions = legal_actions[index:]
+                    action_values[remaining_actions] = fallback_value
+                    # Treat every unexpanded traverser action as a budget cutoff
+                    # without recursing further, so max_nodes_per_traversal acts as
+                    # a hard cap instead of a soft budget.
+                    stats.node_limit_cutoffs += len(remaining_actions)
+                    break
                 child = self._child_after_action(state, int(action))
                 action_values[action] = self._traverse(
                     child,

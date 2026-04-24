@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from coolrl.lost_cities.deep_cfr.benchmark import benchmark_traversal_modes
 from coolrl.lost_cities.deep_cfr.config import config_from_dict
 from coolrl.lost_cities.deep_cfr.encoding import infer_input_dim
 from coolrl.lost_cities.deep_cfr.evaluate import StrategyNetBot
@@ -53,7 +54,7 @@ def test_tiny_training_run_completes_with_parallel_traversal(tmp_path: Path) -> 
                 "max_depth": 2,
                 "max_nodes_per_traversal": 32,
                 "num_workers": 2,
-                "traversal_worker_chunk_size": 1,
+                "traversal_worker_chunk_size": 4,
             },
             "optimization": {
                 "advantage_batch_size": 8,
@@ -112,6 +113,38 @@ def test_tiny_training_run_profiles_hotspots_and_can_save_latest_only(tmp_path: 
     assert progress["traversal_profile_regret_matching_seconds"] >= 0.0
     assert progress["traversal_profile_clone_apply_seconds"] >= 0.0
     assert progress["traversal_profile_memory_add_seconds"] >= 0.0
+
+
+def test_traversal_benchmark_compares_single_and_multiprocessing(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 0,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "traversal": {
+                "traversals_per_player": 1,
+                "max_depth": 2,
+                "max_nodes_per_traversal": 32,
+                "num_workers": 2,
+                "traversal_worker_chunk_size": 4,
+            },
+            "optimization": {
+                "advantage_updates_per_iteration": 0,
+                "strategy_updates_per_iteration": 0,
+            },
+            "evaluation": {"eval_every": 0, "games": 1},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+
+    result = benchmark_traversal_modes(cfg, mp_workers=2, iteration=1)
+
+    assert result["device_used"] == "cpu"
+    assert result["single_process"]["num_workers"] == 0
+    assert result["multiprocessing"]["num_workers"] == 2
+    assert result["single_process"]["traversal_seconds"] >= 0.0
+    assert result["multiprocessing"]["traversal_seconds"] >= 0.0
+    assert result["speedup_vs_single_process"] >= 0.0
 
 
 def test_parallel_traversal_result_merge_aggregates_stats(tmp_path: Path) -> None:

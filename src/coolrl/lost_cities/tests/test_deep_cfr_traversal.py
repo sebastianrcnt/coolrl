@@ -111,6 +111,33 @@ def test_cfr_traversal_node_limit_cutoff_returns_current_score_diff() -> None:
     assert stats.nodes == 1
 
 
+def test_cfr_traversal_node_limit_is_hard_cap_for_traverser_expansion() -> None:
+    config = tier_config("tier1", seed=27)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config),
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=None,
+        max_nodes_per_traversal=2,
+        rng=np.random.default_rng(29),
+    )
+
+    assert math.isfinite(value)
+    assert stats.nodes == 2
+    assert stats.node_limit_cutoffs > 0
+
+
 def test_cfr_traversal_stores_regrets_for_multiple_traverser_decisions() -> None:
     config = tier_config("tier1", seed=11)
     input_dim = infer_input_dim(config)

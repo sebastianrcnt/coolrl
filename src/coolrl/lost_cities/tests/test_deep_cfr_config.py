@@ -20,7 +20,7 @@ def test_load_yaml_profile() -> None:
     assert cfg.traversal.max_nodes_per_traversal == 10_000
     assert cfg.traversal.progress_every_traversals == 10
     assert cfg.traversal.num_workers == 0
-    assert cfg.traversal.traversal_worker_chunk_size == 1
+    assert cfg.traversal.traversal_worker_chunk_size == 4
     assert cfg.traversal.profile_hotspots is False
     assert cfg.checkpoint.save_latest_only is False
 
@@ -33,7 +33,7 @@ def test_load_probe_yaml_profile() -> None:
     assert cfg.traversal.max_nodes_per_traversal == 5_000
     assert cfg.traversal.progress_every_traversals == 1
     assert cfg.traversal.num_workers == 0
-    assert cfg.traversal.traversal_worker_chunk_size == 1
+    assert cfg.traversal.traversal_worker_chunk_size == 4
     assert cfg.traversal.profile_hotspots is False
     assert cfg.checkpoint.save_latest_only is False
 
