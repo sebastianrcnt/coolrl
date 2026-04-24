@@ -67,7 +67,6 @@ dev = [
 omok-train = "coolrl.omok.train:main"
 omok-plot = "coolrl.omok.plot_metrics:main"
 omok-tui = "coolrl.omok.tui:main"
-lost-cities-pvp = "coolrl.lost_cities.pygame_pvp:main"
 lost-cities-gui = "coolrl.lost_cities.pygame_pvp:main"
 
 [tool.setuptools.packages.find]
