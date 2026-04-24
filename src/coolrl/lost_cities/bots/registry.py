@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..interfaces import LostCitiesBot
+from .heuristic import SafeHeuristicBot
 from .random import RandomBot
 
 BotName = str
@@ -11,6 +12,7 @@ BotFactory = Callable[[int | None], LostCitiesBot]
 
 BOT_REGISTRY: dict[BotName, BotFactory] = {
     DEFAULT_BOT: RandomBot,
+    "safe-heuristic": lambda seed: SafeHeuristicBot(),
 }
 
 

@@ -1,6 +1,6 @@
 from coolrl.lost_cities.game import LostCitiesConfig
 from coolrl.lost_cities.backends import build_lost_cities_backend
-from coolrl.lost_cities.bots import available_bot_names, build_bot
+from coolrl.lost_cities.bots import SafeHeuristicBot, available_bot_names, build_bot
 
 
 def test_random_gui_bot_selects_unified_legal_action() -> None:
@@ -16,3 +16,8 @@ def test_random_gui_bot_selects_unified_legal_action() -> None:
 
 def test_bot_registry_lists_random_bot() -> None:
     assert "random" in available_bot_names()
+    assert "safe-heuristic" in available_bot_names()
+
+
+def test_bot_registry_builds_safe_heuristic_bot() -> None:
+    assert isinstance(build_bot("safe-heuristic"), SafeHeuristicBot)
