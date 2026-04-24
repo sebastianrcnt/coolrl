@@ -23,3 +23,5 @@ exports
 **/target/
 src/coolrl/omok/web/dist/
 src/coolrl/omok/web/node_modules/
+
+logs/
