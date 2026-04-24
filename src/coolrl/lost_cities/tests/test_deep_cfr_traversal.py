@@ -80,6 +80,37 @@ def test_cfr_traversal_max_depth_cutoff_returns_current_score_diff() -> None:
     assert stats.nodes == 1
 
 
+def test_cfr_traversal_node_limit_cutoff_returns_current_score_diff() -> None:
+    config = tier_config("tier1", seed=21)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+    state = GameState.new_game(config)
+    expected_value = float(state.score_diff(0))
+
+    value, stats = cfr_traverse(
+        state,
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=None,
+        max_nodes_per_traversal=1,
+        rng=np.random.default_rng(23),
+    )
+
+    assert math.isfinite(value)
+    assert value == expected_value
+    assert stats.node_limit_cutoffs == 1
+    assert stats.terminals == 0
+    assert stats.nodes == 1
+
+
 def test_cfr_traversal_stores_regrets_for_multiple_traverser_decisions() -> None:
     config = tier_config("tier1", seed=11)
     input_dim = infer_input_dim(config)
@@ -98,6 +129,7 @@ def test_cfr_traversal_stores_regrets_for_multiple_traverser_decisions() -> None
         StrategyMemory(100),
         device=torch.device("cpu"),
         max_depth=2,
+        max_nodes_per_traversal=100,
         rng=np.random.default_rng(17),
     )
 

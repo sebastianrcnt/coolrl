@@ -16,6 +16,7 @@ class TraversalStats:
     nodes: int = 0
     terminals: int = 0
     cutoffs: int = 0
+    node_limit_cutoffs: int = 0
     max_depth_reached: int = 0
 
 
@@ -34,6 +35,7 @@ class DeepCFRTraverser:
         epsilon: float = 1.0e-8,
         strategy_sample_interval: int = 1,
         max_depth: int | None = None,
+        max_nodes_per_traversal: int | None = None,
         rng: np.random.Generator | None = None,
     ) -> None:
         self.advantage_nets = advantage_nets
@@ -43,6 +45,7 @@ class DeepCFRTraverser:
         self.epsilon = float(epsilon)
         self.strategy_sample_interval = max(1, int(strategy_sample_interval))
         self.max_depth = max_depth
+        self.max_nodes_per_traversal = max_nodes_per_traversal
         self.rng = rng or np.random.default_rng()
 
     def traverse(self, state: GameState, traverser: int, iteration: int) -> tuple[float, TraversalStats]:
@@ -80,6 +83,9 @@ class DeepCFRTraverser:
         stats: TraversalStats,
     ) -> float:
         stats.nodes += 1
+        if self.max_nodes_per_traversal is not None and stats.nodes >= self.max_nodes_per_traversal:
+            stats.node_limit_cutoffs += 1
+            return float(state.score_diff(traverser))
         stats.max_depth_reached = max(stats.max_depth_reached, depth)
         if state.terminal:
             stats.terminals += 1
@@ -144,6 +150,7 @@ def cfr_traverse(
     device: torch.device | None = None,
     epsilon: float = 1.0e-8,
     max_depth: int | None = None,
+    max_nodes_per_traversal: int | None = None,
     rng: np.random.Generator | None = None,
 ) -> tuple[float, TraversalStats]:
     traverser_obj = DeepCFRTraverser(
@@ -153,6 +160,7 @@ def cfr_traverse(
         device=device or torch.device("cpu"),
         epsilon=epsilon,
         max_depth=max_depth,
+        max_nodes_per_traversal=max_nodes_per_traversal,
         rng=rng,
     )
     return traverser_obj.traverse(state, traverser, iteration)

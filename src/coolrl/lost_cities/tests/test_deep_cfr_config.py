@@ -15,6 +15,15 @@ def test_load_yaml_profile() -> None:
     cfg = load_config(Path("configs/lost_cities_deep_cfr_tier3.yaml"))
     assert cfg.experiment_name == "lost_cities_deep_cfr_tier3"
     assert cfg.traversal.backend == "python"
+    assert cfg.traversal.max_nodes_per_traversal == 10_000
+    assert cfg.traversal.progress_every_traversals == 10
+
+
+def test_load_probe_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_probe.yaml"))
+    assert cfg.rules.tier == "tier3"
+    assert cfg.traversal.max_nodes_per_traversal == 5_000
+    assert cfg.traversal.progress_every_traversals == 1
 
 
 def test_rules_config_default_tier3_shape() -> None:

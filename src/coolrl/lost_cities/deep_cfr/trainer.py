@@ -136,11 +136,13 @@ class DeepCFRTrainer:
             epsilon=self.config.traversal.regret_matching_epsilon,
             strategy_sample_interval=self.config.traversal.strategy_sample_interval,
             max_depth=self.config.traversal.max_depth,
+            max_nodes_per_traversal=self.config.traversal.max_nodes_per_traversal,
             rng=self.rng,
         )
         traversals = 0
         for player in (0, 1):
             self.advantage_nets[player].eval()
+            player_traversal_started = time.monotonic()
             for index in range(self.config.traversal.traversals_per_player):
                 seed = self.config.seed + iteration * 1_000_003 + player * 100_003 + index
                 state = GameState.new_game(self.lc_config, seed=seed)
@@ -148,8 +150,21 @@ class DeepCFRTrainer:
                 total_stats.nodes += stats.nodes
                 total_stats.terminals += stats.terminals
                 total_stats.cutoffs += stats.cutoffs
+                total_stats.node_limit_cutoffs += stats.node_limit_cutoffs
                 total_stats.max_depth_reached = max(total_stats.max_depth_reached, stats.max_depth_reached)
                 traversals += 1
+                progress_every = self.config.traversal.progress_every_traversals
+                if progress_every > 0 and (index + 1) % progress_every == 0:
+                    elapsed = time.monotonic() - player_traversal_started
+                    avg_nodes = total_stats.nodes / max(1, traversals)
+                    logger.info(
+                        "Traversal progress: player={} completed={} elapsed_seconds={:.2f} total_nodes={} avg_nodes_per_traversal={:.1f}",
+                        player,
+                        index + 1,
+                        elapsed,
+                        total_stats.nodes,
+                        avg_nodes,
+                    )
         traversal_seconds = time.monotonic() - traversal_started
 
         adv_started = time.monotonic()
@@ -182,6 +197,7 @@ class DeepCFRTrainer:
 
         nodes_per_second = total_stats.nodes / max(1.0e-9, traversal_seconds)
         cutoff_rate = total_stats.cutoffs / max(1, total_stats.nodes)
+        node_limit_cutoff_rate = total_stats.node_limit_cutoffs / max(1, total_stats.nodes)
         metrics: dict[str, Any] = {
             "iteration": iteration,
             "elapsed_seconds": self.elapsed_seconds,
@@ -192,6 +208,8 @@ class DeepCFRTrainer:
             "total_nodes": total_stats.nodes,
             "total_cutoffs": total_stats.cutoffs,
             "cutoff_rate": cutoff_rate,
+            "total_node_limit_cutoffs": total_stats.node_limit_cutoffs,
+            "node_limit_cutoff_rate": node_limit_cutoff_rate,
             "nodes_per_second": nodes_per_second,
             "traversals_per_second": traversals / max(1.0e-9, traversal_seconds),
             "avg_nodes_per_traversal": total_stats.nodes / max(1, traversals),
@@ -204,11 +222,13 @@ class DeepCFRTrainer:
             **eval_metrics,
         }
         logger.info(
-            "Iteration {}: nodes={} cutoffs={} cutoff_rate={:.4f} nps={:.1f} adv_loss=({:.4f},{:.4f}) strategy_loss={:.4f}",
+            "Iteration {}: nodes={} cutoffs={} node_limit_cutoffs={} cutoff_rate={:.4f} node_limit_cutoff_rate={:.4f} nps={:.1f} adv_loss=({:.4f},{:.4f}) strategy_loss={:.4f}",
             iteration,
             total_stats.nodes,
             total_stats.cutoffs,
+            total_stats.node_limit_cutoffs,
             cutoff_rate,
+            node_limit_cutoff_rate,
             nodes_per_second,
             advantage_losses[0],
             advantage_losses[1],

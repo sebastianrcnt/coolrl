@@ -48,9 +48,11 @@ class NetworkConfig:
 @dataclass(slots=True)
 class TraversalConfig:
     backend: str = "python"
-    traversals_per_player: int = 1000
+    traversals_per_player: int = 100
     strategy_sample_interval: int = 1
-    max_depth: int | None = None
+    max_depth: int | None = 8
+    max_nodes_per_traversal: int | None = 10_000
+    progress_every_traversals: int = 10
     num_workers: int | str = 0
     regret_matching_epsilon: float = 1.0e-8
 
