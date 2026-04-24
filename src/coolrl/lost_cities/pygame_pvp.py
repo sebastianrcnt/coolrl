@@ -143,6 +143,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--width", type=int, default=1536)
     parser.add_argument("--height", type=int, default=964)
+    parser.add_argument("--screenshot-on-start", action="store_true")
     return parser
 
 
@@ -157,6 +158,7 @@ class LostCitiesGuiApp:
         seed: int | None = None,
         width: int = 1536,
         height: int = 964,
+        screenshot_on_start: bool = False,
     ):
         import pygame
         import pygame_gui
@@ -205,6 +207,8 @@ class LostCitiesGuiApp:
         self.match_trace: list[dict[str, Any]] = []
         self.last_turn_identity: tuple[int, str, int] | None = None
         self.turn_flash_until_ms = 0
+        self.screenshot_on_start = screenshot_on_start
+        self.pending_startup_screenshot = screenshot_on_start
         self._reset_match_trace()
         self.rebuild_ui()
         LOGGER.debug(
@@ -260,6 +264,9 @@ class LostCitiesGuiApp:
             self.manager.update(time_delta)
             self.draw()
             self.manager.draw_ui(self.screen)
+            if self.pending_startup_screenshot:
+                self.pending_startup_screenshot = False
+                self.save_screenshot()
             pygame.display.flip()
         pygame.quit()
 
@@ -301,6 +308,12 @@ class LostCitiesGuiApp:
             if event.key == self.pygame.K_z and (event.mod & self.pygame.KMOD_CTRL):
                 LOGGER.debug("컨트롤+Z 입력")
                 self.undo()
+            elif event.key == self.pygame.K_F12:
+                LOGGER.debug("F12 입력: 전체 스크린샷 저장")
+                self.save_screenshot()
+            elif event.key == self.pygame.K_F11:
+                LOGGER.debug("F11 입력: 헤더 스크린샷 저장")
+                self.save_header_screenshot()
         elif event.type == self.pygame.MOUSEBUTTONDOWN and event.button == 1:
             LOGGER.debug("마우스 클릭: 위치=%s", event.pos)
             self.handle_board_click(event.pos)
@@ -639,7 +652,10 @@ class LostCitiesGuiApp:
     def _draw_header(self, snapshot: Snapshot) -> None:
         pygame = self.pygame
         width, _ = self.window_size
-        compact = width < 1450
+        compact = width < 1700
+        header_left = 1098
+        header_right = width - 266
+        show_meta = header_right - header_left >= 280
         pygame.draw.line(self.screen, LINE, (0, 0), (width, 0), 1)
         pygame.draw.line(self.screen, LINE, (0, 90), (width, 90), 1)
         pygame.draw.line(self.screen, LINE, (1080, 0), (1080, 90), 1)
@@ -650,12 +666,12 @@ class LostCitiesGuiApp:
         if snapshot.terminal:
             diff = snapshot.score_diff(0)
             if diff > 0:
-                status = "PLAYER 0 WINS"
+                status = "P0 WINS" if compact else "PLAYER 0 WINS"
             elif diff < 0:
-                status = "PLAYER 1 WINS"
+                status = "P1 WINS" if compact else "PLAYER 1 WINS"
             else:
                 status = "DRAW"
-            detail = "START A NEW GAME TO PLAY AGAIN."
+            detail = "Start a new game." if compact else "START A NEW GAME TO PLAY AGAIN."
         elif snapshot.phase == "card":
             card = self._selected_card(snapshot)
             if self.is_computer_turn(snapshot):
@@ -698,18 +714,41 @@ class LostCitiesGuiApp:
                     else f"PLAYER {snapshot.current_player}: DRAW A CARD"
                 )
                 detail = "Click deck/discard." if compact else "Click the deck or a highlighted discard pile."
-        title_size = 30 if not compact else 24
-        detail_size = 18 if not compact else 14
-        title_x = 1100
-        self._draw_text(status, (title_x, 21), TEXT, title_size, bold=True)
-        self._draw_text(detail, (title_x, 56), MUTED, detail_size)
-        if width >= 1450:
+        title_size = 24 if compact else 30
+        detail_size = 14 if compact else 18
+        header_clip = pygame.Rect(header_left, 0, max(0, header_right - header_left), 90)
+        previous_clip = self.screen.get_clip()
+        self.screen.set_clip(header_clip)
+        self._draw_text(status, (header_left, 19), TEXT, title_size, bold=True)
+        self._draw_text(detail, (header_left, 54), MUTED, detail_size)
+        if show_meta:
             meta = f"{self.mode.upper()}   TURN: {snapshot.turn_count}"
-            meta_x = width - 285
-        else:
-            meta = f"TURN: {snapshot.turn_count}"
-            meta_x = width - 135
-        self._draw_text(meta, (meta_x, 56), MUTED, detail_size)
+            self._draw_text_right(meta, (header_right, 54), MUTED, detail_size)
+        self.screen.set_clip(previous_clip)
+
+    def _screenshot_dir(self) -> Path:
+        return Path("/tmp")
+
+    def _screenshot_path(self, suffix: str) -> Path:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        return self._screenshot_dir() / f"lost-cities-{suffix}-{timestamp}.png"
+
+    def save_screenshot(self) -> Path:
+        path = self._screenshot_path("full")
+        self._screenshot_dir().mkdir(parents=True, exist_ok=True)
+        self.pygame.image.save(self.screen, str(path))
+        self.export_text = f"Saved {path}"
+        LOGGER.debug("전체 스크린샷 저장: %s", path)
+        return path
+
+    def save_header_screenshot(self) -> Path:
+        path = self._screenshot_path("header")
+        self._screenshot_dir().mkdir(parents=True, exist_ok=True)
+        header_surface = self.screen.subsurface(self.pygame.Rect(0, 0, self.window_size[0], 90)).copy()
+        self.pygame.image.save(header_surface, str(path))
+        self.export_text = f"Saved {path}"
+        LOGGER.debug("헤더 스크린샷 저장: %s", path)
+        return path
 
     def _draw_player_area(self, snapshot: Snapshot, *, player: int, y: int) -> None:
         pygame = self.pygame
@@ -1186,6 +1225,7 @@ def main(argv: list[str] | None = None) -> None:
         seed=args.seed,
         width=args.width,
         height=args.height,
+        screenshot_on_start=args.screenshot_on_start,
     )
     app.run()
 
