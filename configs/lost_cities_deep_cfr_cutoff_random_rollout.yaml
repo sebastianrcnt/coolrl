@@ -34,8 +34,8 @@ traversal:
   cutoff_rollout_policy: random
   cutoff_rollout_max_steps: 10000
   progress_every_traversals: 10
-  num_workers: 4
-  traversal_worker_chunk_size: 4
+  num_workers: auto
+  traversal_worker_chunk_size: 1
   profile_hotspots: false
   regret_matching_epsilon: 1.0e-8
 
