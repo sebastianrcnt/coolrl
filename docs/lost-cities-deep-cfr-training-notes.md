@@ -136,6 +136,30 @@ traversal:
 
 이 조건이 유지되면 단순히 더 오래 학습하지 말고 cutoff/value intervention으로 넘어갑니다.
 
+### 1 결과: depth/node budget 단독 실험
+
+`configs/lost_cities_deep_cfr_diagnostic_depth16_nodes20k.yaml`로 depth/node budget만 늘린 diagnostic run을 실행했습니다.
+
+설정:
+
+- `max_depth: 16`
+- `max_nodes_per_traversal: 20000`
+- `traversals_per_player: 20`
+- opponents: `random`, `safe_heuristic`, `passive_discard`
+
+결과:
+
+- iteration 30 eval에서 `avg_opened_colors=0`, `avg_expedition_cards=0`, `play_action_rate=0`
+- latest checkpoint 500-game eval도 `random`, `safe_heuristic`, `passive_discard` 모두에서 expedition play가 0이었습니다.
+- `random` 상대 `win_rate=0.998`였지만 own `avg_final_score=0.00`이고 opponent가 `-55.27`을 기록했기 때문입니다.
+- `safe_heuristic` 상대로는 `win_rate=0.030`, `avg_diff=-35.83`
+- `passive_discard` 상대로는 500 games 모두 draw
+
+판정:
+
+- depth 16과 20k node budget만으로는 passive no-expedition collapse를 해결하지 못했습니다.
+- 따라서 단순히 더 깊게/더 오래 학습하는 방향보다 cutoff/value semantics를 바꾸는 실험으로 넘어가는 것이 맞습니다.
+
 ### 2. Cutoff value intervention 후보
 
 Depth/node budget만으로 passive collapse가 해소되지 않으면 현재 cutoff fallback인 current `score_diff`를 바꾸는 실험을 설계합니다.
@@ -149,6 +173,61 @@ Depth/node budget만으로 passive collapse가 해소되지 않으면 현재 cut
 - curriculum으로 낮은 tier 또는 완화된 penalty/bonus에서 시작
 
 가장 먼저 고려할 intervention은 short rollout-to-terminal cutoff입니다. 이는 handcrafted Lost Cities heuristic을 직접 넣는 대신 terminal utility를 더 자주 보게 하는 방법이므로, heuristic contamination이 상대적으로 작습니다.
+
+### 2 진행 상황: random rollout cutoff
+
+`random_rollout` cutoff value mode를 추가했습니다.
+
+설정:
+
+```yaml
+traversal:
+  cutoff_value_mode: random_rollout
+  cutoff_rollouts: 1
+  cutoff_rollout_policy: random
+  cutoff_rollout_max_steps: 10000
+```
+
+의도:
+
+- 기존 기본값은 계속 `score_diff`입니다.
+- `random_rollout`은 depth cutoff와 node-budget fallback에서 현재 `score_diff` 대신 cutoff state를 복사한 뒤 random legal action으로 terminal 또는 max steps까지 진행하고, traverser 기준 final `score_diff`를 반환합니다.
+- handwritten Lost Cities heuristic이나 reward shaping은 넣지 않았습니다.
+
+초기 관찰:
+
+- rollout stats는 정상 기록됩니다: `cutoff_rollouts`, `cutoff_rollout_steps`, `cutoff_rollout_max_step_timeouts`, `avg_cutoff_rollout_steps`
+- terminal random rollout은 매우 비쌉니다.
+- Conservative rollout config 기준 iteration당 약 `4.7분`
+- iteration당 약 `158k~164k` cutoff rollouts
+- iteration당 약 `42M~45M` rollout action steps
+- rollout max-step timeout은 현재 관찰된 early iterations에서 `0`
+
+Benchmark 관련:
+
+- `origin/main`에는 `benchmark-traversal --mode {compare,single,mp}`가 추가되었습니다.
+- rollout config에서는 `--mode compare`가 single-process benchmark까지 먼저 실행하므로 매우 느립니다.
+- 빠른 multiprocessing benchmark만 보려면 다음 형태를 사용합니다.
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli benchmark-traversal \
+  --config configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml \
+  --mp-workers 4 \
+  --iteration 1 \
+  --mode mp
+```
+
+주의:
+
+- `--mode mp`는 benchmark 시간을 줄일 뿐 training 자체를 빠르게 만들지는 않습니다.
+- terminal random rollout을 그대로 30 iterations까지 미는 것은 가능하지만 비용이 큽니다.
+
+다음 실용적 스텝:
+
+- latest early checkpoint라도 500-game eval을 실행해 nonzero expedition play가 이미 나타나는지 확인합니다.
+- 효과 신호가 없거나 비용이 너무 크면 capped rollout config를 별도 실험으로 만듭니다. 예: `cutoff_rollout_max_steps: 100` 또는 `300`
+- capped rollout도 passive collapse를 깨지 못하면 value network bootstrap을 다음 후보로 검토합니다.
+- `cutoff_rollouts`를 2 또는 4로 늘리는 것은 terminal rollout 비용이 너무 커서, 먼저 capped rollout 또는 더 싼 value estimate가 필요합니다.
 
 ### 3. 성공 판정
 
