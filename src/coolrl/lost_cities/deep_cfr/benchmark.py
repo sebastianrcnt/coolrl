@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class TraversalBenchmarkResult:
-    num_workers: int
     requested_workers: int
     effective_workers: int
     num_batches: int
@@ -67,7 +66,6 @@ def _run_traversal_benchmark_once(config: RunConfig, *, iteration: int) -> Trave
         total_stats, traversals, _ = trainer._run_traversals_parallel(iteration)
     traversal_seconds = time.monotonic() - started
     return TraversalBenchmarkResult(
-        num_workers=requested_workers,
         requested_workers=requested_workers,
         effective_workers=effective_workers,
         num_batches=num_batches,
@@ -88,7 +86,6 @@ def _run_traversal_benchmark_once(config: RunConfig, *, iteration: int) -> Trave
 
 def _result_to_dict(r: TraversalBenchmarkResult) -> dict[str, Any]:
     return {
-        "num_workers": r.num_workers,
         "requested_workers": r.requested_workers,
         "effective_workers": r.effective_workers,
         "num_batches": r.num_batches,
