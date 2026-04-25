@@ -240,6 +240,35 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli benchmark-traversal \
 - `safe_heuristic` 상대로 `avg_diff` 또는 `win_rate`가 개선됨
 - GUI trace에서 expedition을 열고 확장하는 행동이 보임
 
+## Traversal Worker 튜닝 노트
+
+Deep CFR traversal multiprocessing에서 실제 executor worker 수는 요청한 worker 수와 다를 수 있습니다.
+
+- `requested_workers`: 설정/CLI에서 요청한 worker 수
+- `effective_workers`: 실제 사용된 worker 수
+- `effective_workers = min(requested_workers, num_batches)`
+
+`num_batches`는 아래 값으로 결정됩니다.
+
+```text
+num_batches = 2 players * ceil(traversals_per_player / traversal_worker_chunk_size)
+```
+
+예시:
+
+```yaml
+traversals_per_player: 20
+traversal_worker_chunk_size: 4
+num_workers: 12
+```
+
+위 설정의 배치 수는 `2 * ceil(20 / 4) = 10`이므로 실제 worker는 최대 10입니다.
+
+worker를 더 사용하고 싶다면:
+
+- `traversal_worker_chunk_size`를 줄여 배치 수를 늘리거나
+- `traversals_per_player`를 늘려 배치 수를 늘립니다.
+
 ## Commands
 
 Status:

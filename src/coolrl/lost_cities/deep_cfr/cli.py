@@ -76,10 +76,15 @@ def eval_command(args: argparse.Namespace) -> None:
 
 
 def _log_traversal_result(label: str, r: dict) -> None:
+    requested_workers = r.get("requested_workers", r["num_workers"])
+    effective_workers = r.get("effective_workers", r["num_workers"])
+    num_batches = r.get("num_batches", "n/a")
     logger.info(
-        "{}: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f} cutoffs={} cutoff_rate={:.4f} node_limit_cutoffs={} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_steps={} rollout_timeouts={}",
+        "{}: requested_workers={} effective_workers={} batches={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f} cutoffs={} cutoff_rate={:.4f} node_limit_cutoffs={} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_steps={} rollout_timeouts={}",
         label,
-        r["num_workers"],
+        requested_workers,
+        effective_workers,
+        num_batches,
         r["traversal_seconds"],
         r["total_nodes"],
         r["traversals"],

@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class TraversalBenchmarkResult:
     num_workers: int
+    requested_workers: int
+    effective_workers: int
+    num_batches: int
     traversal_seconds: float
     total_nodes: int
     traversals: int
@@ -50,14 +53,26 @@ def _benchmark_config_variant(config: RunConfig, *, num_workers: int, checkpoint
 
 def _run_traversal_benchmark_once(config: RunConfig, *, iteration: int) -> TraversalBenchmarkResult:
     trainer = DeepCFRTrainer(config)
+    requested_workers = trainer.num_workers
+    effective_workers = requested_workers
+    num_batches = 0
+    if requested_workers > 1:
+        advantage_net_state_dicts = trainer._frozen_advantage_state_dicts()
+        batches = trainer._build_traversal_worker_batches(iteration, advantage_net_state_dicts)
+        num_batches = len(batches)
+        effective_workers = min(requested_workers, num_batches)
+
     started = time.monotonic()
-    if trainer.num_workers <= 1:
+    if requested_workers <= 1:
         total_stats, traversals, _ = trainer._run_traversals_single_process(iteration)
     else:
         total_stats, traversals, _ = trainer._run_traversals_parallel(iteration)
     traversal_seconds = time.monotonic() - started
     return TraversalBenchmarkResult(
-        num_workers=trainer.num_workers,
+        num_workers=requested_workers,
+        requested_workers=requested_workers,
+        effective_workers=effective_workers,
+        num_batches=num_batches,
         traversal_seconds=traversal_seconds,
         total_nodes=total_stats.nodes,
         traversals=traversals,
@@ -76,6 +91,9 @@ def _run_traversal_benchmark_once(config: RunConfig, *, iteration: int) -> Trave
 def _result_to_dict(r: TraversalBenchmarkResult) -> dict[str, Any]:
     return {
         "num_workers": r.num_workers,
+        "requested_workers": r.requested_workers,
+        "effective_workers": r.effective_workers,
+        "num_batches": r.num_batches,
         "traversal_seconds": r.traversal_seconds,
         "total_nodes": r.total_nodes,
         "traversals": r.traversals,

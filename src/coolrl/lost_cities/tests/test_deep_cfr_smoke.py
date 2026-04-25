@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 import coolrl.lost_cities.deep_cfr.benchmark as benchmark_module
+import coolrl.lost_cities.deep_cfr.trainer as trainer_module
 from coolrl.lost_cities.deep_cfr.benchmark import benchmark_traversal_modes
 from coolrl.lost_cities.deep_cfr.config import config_from_dict
 from coolrl.lost_cities.deep_cfr.encoding import infer_input_dim
@@ -221,6 +222,35 @@ def test_traversal_benchmark_mp_mode(tmp_path: Path) -> None:
     assert result["speedup_vs_single_process"] == "n/a"
 
 
+def test_traversal_benchmark_mp_mode_reports_requested_and_effective_workers(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 0,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "traversal": {
+                "traversals_per_player": 20,
+                "max_depth": 2,
+                "max_nodes_per_traversal": 32,
+                "num_workers": 12,
+                "traversal_worker_chunk_size": 4,
+                "progress_every_traversals": 0,
+            },
+            "optimization": {
+                "advantage_updates_per_iteration": 0,
+                "strategy_updates_per_iteration": 0,
+            },
+            "evaluation": {"eval_every": 0, "games": 1},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    result = benchmark_traversal_modes(cfg, mp_workers=12, iteration=1, mode="mp")
+
+    assert result["multiprocessing"]["requested_workers"] == 12
+    assert result["multiprocessing"]["effective_workers"] == 10
+    assert result["multiprocessing"]["num_batches"] == 10
+
+
 def test_traversal_benchmark_mp_mode_does_not_emit_logging_error(
     tmp_path: Path,
     monkeypatch,
@@ -232,6 +262,9 @@ def test_traversal_benchmark_mp_mode_does_not_emit_logging_error(
     def _fake_run_traversal_benchmark_once(*_args, **_kwargs) -> benchmark_module.TraversalBenchmarkResult:
         return benchmark_module.TraversalBenchmarkResult(
             num_workers=2,
+            requested_workers=2,
+            effective_workers=2,
+            num_batches=2,
             traversal_seconds=0.01,
             total_nodes=10,
             traversals=2,
@@ -257,6 +290,79 @@ def test_traversal_benchmark_mp_mode_does_not_emit_logging_error(
 
     assert "requested_workers=2" in caplog.text
     assert "--- Logging error ---" not in capsys.readouterr().err
+
+
+def test_parallel_traversal_logs_warning_when_requested_workers_exceed_batches(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 0,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "traversal": {
+                "traversals_per_player": 1,
+                "max_depth": 2,
+                "num_workers": 12,
+                "traversal_worker_chunk_size": 4,
+                "progress_every_traversals": 0,
+            },
+            "optimization": {
+                "advantage_updates_per_iteration": 0,
+                "strategy_updates_per_iteration": 0,
+            },
+            "evaluation": {"eval_every": 0, "games": 1},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    trainer = DeepCFRTrainer(cfg)
+
+    warnings: list[str] = []
+
+    def _capture_warning(message: str, *args) -> None:
+        warnings.append(message.format(*args))
+
+    class _FakeFuture:
+        def __init__(self, result: TraversalWorkerBatchResult) -> None:
+            self._result = result
+
+        def result(self) -> TraversalWorkerBatchResult:
+            return self._result
+
+    class _FakeExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def submit(self, _func, batch):
+            return _FakeFuture(
+                TraversalWorkerBatchResult(
+                    batch_index=batch.batch_index,
+                    traverser=batch.traverser,
+                    seeds_completed=len(batch.seeds),
+                    stats=TraversalStats(nodes=1),
+                    advantage_samples=[],
+                    strategy_samples=[],
+                )
+            )
+
+    monkeypatch.setattr(trainer_module.logger, "warning", _capture_warning)
+    monkeypatch.setattr(trainer_module, "ProcessPoolExecutor", _FakeExecutor)
+    monkeypatch.setattr(trainer_module, "as_completed", lambda futures: futures)
+
+    _, traversals, _ = trainer._run_traversals_parallel(iteration=1)
+
+    assert traversals == 2
+    assert any(
+        "Requested 12 traversal workers but only 2 batches are available; using 2 workers." in warning
+        for warning in warnings
+    )
 
 
 def test_parallel_traversal_result_merge_aggregates_stats(tmp_path: Path) -> None:

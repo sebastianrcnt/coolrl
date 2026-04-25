@@ -402,6 +402,13 @@ class DeepCFRTrainer:
             len(batches),
             self.traversal_worker_chunk_size,
         )
+        if max_workers < self.num_workers:
+            logger.warning(
+                "Requested {} traversal workers but only {} batches are available; using {} workers. To use more workers, decrease traversal_worker_chunk_size or increase traversals_per_player.",
+                self.num_workers,
+                len(batches),
+                max_workers,
+            )
 
         total_stats = TraversalStats()
         traversals = 0
