@@ -19,6 +19,19 @@ class TraversalStats:
     cutoffs: int = 0
     node_limit_cutoffs: int = 0
     max_depth_reached: int = 0
+    cutoff_rollouts: int = 0
+    cutoff_rollout_steps: int = 0
+    cutoff_rollout_max_step_timeouts: int = 0
+
+    def accumulate(self, other: TraversalStats) -> None:
+        self.nodes += other.nodes
+        self.terminals += other.terminals
+        self.cutoffs += other.cutoffs
+        self.node_limit_cutoffs += other.node_limit_cutoffs
+        self.max_depth_reached = max(self.max_depth_reached, other.max_depth_reached)
+        self.cutoff_rollouts += other.cutoff_rollouts
+        self.cutoff_rollout_steps += other.cutoff_rollout_steps
+        self.cutoff_rollout_max_step_timeouts += other.cutoff_rollout_max_step_timeouts
 
 
 @dataclass(slots=True)
@@ -65,6 +78,10 @@ class DeepCFRTraverser:
         store_strategy_on_traverser_nodes: bool = True,
         max_depth: int | None = None,
         max_nodes_per_traversal: int | None = None,
+        cutoff_value_mode: str = "score_diff",
+        cutoff_rollouts: int = 0,
+        cutoff_rollout_policy: str = "random",
+        cutoff_rollout_max_steps: int = 10_000,
         rng: np.random.Generator | None = None,
         timing_stats: TraversalTimingStats | None = None,
     ) -> None:
@@ -78,6 +95,10 @@ class DeepCFRTraverser:
         self.store_strategy_on_traverser_nodes = bool(store_strategy_on_traverser_nodes)
         self.max_depth = max_depth
         self.max_nodes_per_traversal = max_nodes_per_traversal
+        self.cutoff_value_mode = cutoff_value_mode
+        self.cutoff_rollouts = max(0, int(cutoff_rollouts))
+        self.cutoff_rollout_policy = cutoff_rollout_policy
+        self.cutoff_rollout_max_steps = max(1, int(cutoff_rollout_max_steps))
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
 
@@ -156,6 +177,34 @@ class DeepCFRTraverser:
         self.timing_stats.clone_apply_calls += 1
         return child
 
+    def _random_rollout_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
+        rollout_state = clone_state(state)
+        steps = 0
+        while not rollout_state.terminal and steps < self.cutoff_rollout_max_steps:
+            legal_actions = np.flatnonzero(rollout_state.unified_legal_mask())
+            if len(legal_actions) == 0:
+                break
+            action = int(self.rng.choice(legal_actions))
+            rollout_state.apply_unified_action(action)
+            steps += 1
+        stats.cutoff_rollouts += 1
+        stats.cutoff_rollout_steps += steps
+        if not rollout_state.terminal:
+            stats.cutoff_rollout_max_step_timeouts += 1
+        return float(rollout_state.score_diff(traverser))
+
+    def _cutoff_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
+        if self.cutoff_value_mode == "score_diff" or self.cutoff_rollouts <= 0:
+            return float(state.score_diff(traverser))
+        if self.cutoff_value_mode != "random_rollout":
+            raise ValueError(f"unsupported cutoff_value_mode: {self.cutoff_value_mode!r}")
+        if self.cutoff_rollout_policy != "random":
+            raise ValueError(f"unsupported cutoff_rollout_policy: {self.cutoff_rollout_policy!r}")
+        total = 0.0
+        for _ in range(self.cutoff_rollouts):
+            total += self._random_rollout_value(state, traverser, stats)
+        return total / float(self.cutoff_rollouts)
+
     def _traverse(
         self,
         state: GameState,
@@ -167,7 +216,7 @@ class DeepCFRTraverser:
         stats.nodes += 1
         if self._node_budget_reached(stats):
             stats.node_limit_cutoffs += 1
-            return float(state.score_diff(traverser))
+            return self._cutoff_value(state, traverser, stats)
         stats.max_depth_reached = max(stats.max_depth_reached, depth)
         if state.terminal:
             stats.terminals += 1
@@ -175,7 +224,7 @@ class DeepCFRTraverser:
         if self.max_depth is not None and depth >= self.max_depth:
             stats.cutoffs += 1
             stats.max_depth_reached = max(stats.max_depth_reached, depth)
-            return float(state.score_diff(traverser))
+            return self._cutoff_value(state, traverser, stats)
 
         player = state.current_player
         info, legal, policy = self._policy(state, player)
@@ -187,15 +236,16 @@ class DeepCFRTraverser:
 
         if player == traverser:
             action_values = np.zeros(state.action_size, dtype=np.float32)
-            fallback_value = float(state.score_diff(traverser))
             for index, action in enumerate(legal_actions):
                 if self._node_budget_reached(stats):
                     remaining_actions = legal_actions[index:]
-                    action_values[remaining_actions] = fallback_value
                     # Treat every unexpanded traverser action as a budget cutoff
                     # without recursing further, so max_nodes_per_traversal acts as
                     # a hard cap instead of a soft budget.
                     stats.node_limit_cutoffs += len(remaining_actions)
+                    for remaining_action in remaining_actions:
+                        child = self._child_after_action(state, int(remaining_action))
+                        action_values[remaining_action] = self._cutoff_value(child, traverser, stats)
                     break
                 child = self._child_after_action(state, int(action))
                 action_values[action] = self._traverse(
@@ -256,6 +306,10 @@ def cfr_traverse(
     store_strategy_on_traverser_nodes: bool = True,
     max_depth: int | None = None,
     max_nodes_per_traversal: int | None = None,
+    cutoff_value_mode: str = "score_diff",
+    cutoff_rollouts: int = 0,
+    cutoff_rollout_policy: str = "random",
+    cutoff_rollout_max_steps: int = 10_000,
     rng: np.random.Generator | None = None,
     timing_stats: TraversalTimingStats | None = None,
 ) -> tuple[float, TraversalStats]:
@@ -270,6 +324,10 @@ def cfr_traverse(
         store_strategy_on_traverser_nodes=store_strategy_on_traverser_nodes,
         max_depth=max_depth,
         max_nodes_per_traversal=max_nodes_per_traversal,
+        cutoff_value_mode=cutoff_value_mode,
+        cutoff_rollouts=cutoff_rollouts,
+        cutoff_rollout_policy=cutoff_rollout_policy,
+        cutoff_rollout_max_steps=cutoff_rollout_max_steps,
         rng=rng,
         timing_stats=timing_stats,
     )

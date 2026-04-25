@@ -84,6 +84,43 @@ def test_tiny_training_run_completes_with_parallel_traversal(tmp_path: Path) -> 
     assert len(trainer.strategy_memory) > 0
 
 
+def test_tiny_parallel_training_run_completes_with_cutoff_rollouts(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 1,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "traversal": {
+                "traversals_per_player": 1,
+                "max_depth": 1,
+                "max_nodes_per_traversal": 32,
+                "cutoff_value_mode": "random_rollout",
+                "cutoff_rollouts": 1,
+                "cutoff_rollout_max_steps": 50,
+                "num_workers": 2,
+                "traversal_worker_chunk_size": 1,
+                "progress_every_traversals": 0,
+            },
+            "optimization": {
+                "advantage_batch_size": 8,
+                "strategy_batch_size": 8,
+                "advantage_updates_per_iteration": 1,
+                "strategy_updates_per_iteration": 1,
+            },
+            "memory": {"advantage_capacity": 100, "strategy_capacity": 100},
+            "evaluation": {"eval_every": 0, "games": 1},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    trainer = DeepCFRTrainer(cfg)
+    trainer.run()
+
+    progress = json.loads((tmp_path / "runtime_progress.json").read_text(encoding="utf-8"))
+    assert progress["cutoff_rollouts"] > 0
+    assert progress["cutoff_rollout_steps"] > 0
+    assert "cutoff_rollout_max_step_timeouts" in progress
+
+
 def test_tiny_training_run_profiles_hotspots_and_can_save_latest_only(tmp_path: Path) -> None:
     cfg = config_from_dict(
         {
@@ -184,7 +221,16 @@ def test_parallel_traversal_result_merge_aggregates_stats(tmp_path: Path) -> Non
         batch_index=1,
         traverser=0,
         seeds_completed=1,
-        stats=TraversalStats(nodes=5, terminals=1, cutoffs=2, node_limit_cutoffs=0, max_depth_reached=3),
+        stats=TraversalStats(
+            nodes=5,
+            terminals=1,
+            cutoffs=2,
+            node_limit_cutoffs=0,
+            max_depth_reached=3,
+            cutoff_rollouts=2,
+            cutoff_rollout_steps=10,
+            cutoff_rollout_max_step_timeouts=1,
+        ),
         advantage_samples=[make_sample(0, 1, 1.0)],
         strategy_samples=[make_sample(0, 1, 2.0)],
     )
@@ -192,7 +238,16 @@ def test_parallel_traversal_result_merge_aggregates_stats(tmp_path: Path) -> Non
         batch_index=0,
         traverser=1,
         seeds_completed=2,
-        stats=TraversalStats(nodes=7, terminals=0, cutoffs=0, node_limit_cutoffs=4, max_depth_reached=2),
+        stats=TraversalStats(
+            nodes=7,
+            terminals=0,
+            cutoffs=0,
+            node_limit_cutoffs=4,
+            max_depth_reached=2,
+            cutoff_rollouts=4,
+            cutoff_rollout_steps=20,
+            cutoff_rollout_max_step_timeouts=2,
+        ),
         advantage_samples=[make_sample(1, 1, 3.0)],
         strategy_samples=[make_sample(1, 1, 4.0), make_sample(0, 1, 5.0)],
     )
@@ -205,6 +260,9 @@ def test_parallel_traversal_result_merge_aggregates_stats(tmp_path: Path) -> Non
     assert total_stats.cutoffs == 2
     assert total_stats.node_limit_cutoffs == 4
     assert total_stats.max_depth_reached == 3
+    assert total_stats.cutoff_rollouts == 6
+    assert total_stats.cutoff_rollout_steps == 30
+    assert total_stats.cutoff_rollout_max_step_timeouts == 3
     assert len(trainer.advantage_memories[0]) == 1
     assert len(trainer.advantage_memories[1]) == 1
     assert len(trainer.strategy_memory) == 3
