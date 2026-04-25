@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
 import torch
 
+import coolrl.lost_cities.deep_cfr.benchmark as benchmark_module
 from coolrl.lost_cities.deep_cfr.benchmark import benchmark_traversal_modes
 from coolrl.lost_cities.deep_cfr.config import config_from_dict
 from coolrl.lost_cities.deep_cfr.encoding import infer_input_dim
@@ -217,6 +219,44 @@ def test_traversal_benchmark_mp_mode(tmp_path: Path) -> None:
     assert result["multiprocessing"]["num_workers"] == 2
     assert result["multiprocessing"]["traversal_seconds"] >= 0.0
     assert result["speedup_vs_single_process"] == "n/a"
+
+
+def test_traversal_benchmark_mp_mode_does_not_emit_logging_error(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+    capsys,
+) -> None:
+    cfg = _minimal_benchmark_cfg(tmp_path)
+
+    def _fake_run_traversal_benchmark_once(*_args, **_kwargs) -> benchmark_module.TraversalBenchmarkResult:
+        return benchmark_module.TraversalBenchmarkResult(
+            num_workers=2,
+            traversal_seconds=0.01,
+            total_nodes=10,
+            traversals=2,
+            nodes_per_second=1000.0,
+            avg_nodes_per_traversal=5.0,
+            cutoffs=0,
+            cutoff_rate=0.0,
+            node_limit_cutoffs=0,
+            node_limit_cutoff_rate=0.0,
+            cutoff_rollouts=0,
+            cutoff_rollout_steps=0,
+            cutoff_rollout_max_step_timeouts=0,
+        )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "_run_traversal_benchmark_once",
+        _fake_run_traversal_benchmark_once,
+    )
+
+    with caplog.at_level(logging.INFO, logger=benchmark_module.__name__):
+        benchmark_traversal_modes(cfg, mp_workers=2, iteration=1, mode="mp")
+
+    assert "requested_workers=2" in caplog.text
+    assert "--- Logging error ---" not in capsys.readouterr().err
 
 
 def test_parallel_traversal_result_merge_aggregates_stats(tmp_path: Path) -> None:

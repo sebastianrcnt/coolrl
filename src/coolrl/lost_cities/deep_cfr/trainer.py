@@ -396,7 +396,8 @@ class DeepCFRTrainer:
 
         max_workers = min(self.num_workers, len(batches))
         logger.info(
-            "Traversal multiprocessing enabled: num_workers={} batches={} chunk_size={}",
+            "Traversal multiprocessing enabled: requested_workers={} effective_workers={} batches={} chunk_size={}",
+            self.num_workers,
             max_workers,
             len(batches),
             self.traversal_worker_chunk_size,
