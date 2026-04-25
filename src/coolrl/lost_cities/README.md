@@ -58,29 +58,32 @@ CLI 진입점은 `python -m coolrl.lost_cities.deep_cfr.cli` 다.
 | 파일 | 용도 |
 | --- | --- |
 | `lost_cities_deep_cfr_probe.yaml` | 1 iteration짜리 스모크 — 파이프라인 점검용 |
-| `lost_cities_deep_cfr_small_run.yaml` | 10 iteration, hidden=128 — 빠른 sanity |
-| `lost_cities_deep_cfr_tier3.yaml` | 100 iteration, hidden=256, CUDA + AMP — 표준 학습 |
-| `lost_cities_deep_cfr_overnight.yaml` | 8시간 wall-clock, hidden=128, CPU — 장시간 실행 |
+| `lost_cities_deep_cfr_tier3.yaml` | 기존 score-diff cutoff 기반 tier3 baseline / CLI 기본 config |
+| `lost_cities_deep_cfr_cutoff_random_rollout.yaml` | 현재 active diagnostic config — `random_rollout` cutoff, CPU, auto workers |
+
+과거 실험용 `overnight`, `small_run`, `diagnostic_depth16_nodes20k` config는 결과가 문서화된 뒤 제거했다. 관련 기록은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)와 [`docs/lost-cities-deep-cfr-worker-benchmark-notes.md`](../../../docs/lost-cities-deep-cfr-worker-benchmark-notes.md)를 참고한다.
 
 ### 학습 시작
 
+현재 passive-collapse intervention 실험은 `random_rollout` cutoff config를 사용한다:
+
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities_deep_cfr_tier3.yaml
+  --config configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml
 ```
 
-체크포인트는 config의 `checkpoint.directory`(기본 `checkpoints/lost_cities_deep_cfr_tier3/`)에 저장된다. 디렉터리에 이미 `metrics.jsonl`이 있는데 `--resume` 없이 train을 다시 돌리면 트레이너가 막아준다.
+체크포인트는 config의 `checkpoint.directory`에 저장된다. 디렉터리에 이미 `metrics.jsonl`이 있는데 `--resume` 없이 train을 다시 돌리면 트레이너가 기존 metrics를 timestamp suffix로 archive한다.
 
 ### 학습 이어가기
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities_deep_cfr_overnight.yaml \
-  --resume checkpoints/lost_cities_deep_cfr_overnight/latest.pt
+  --config configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml \
+  --resume checkpoints/lost_cities_deep_cfr_cutoff_random_rollout/latest.pt
 ```
 
 - `--config`는 처음 돌릴 때와 같은 YAML을 그대로 지정한다.
-- `--resume`에는 보통 `latest.pt`를 준다. `checkpoint.save_latest_only=false`(기본값)면 `iteration_XXXXX.pt` 스냅샷도 같이 저장되므로 그중 하나를 골라도 된다.
+- `--resume`에는 보통 `latest.pt`를 준다. `checkpoint.save_latest_only=false`면 `iteration_XXXXX.pt` 스냅샷도 같이 저장되므로 그중 하나를 골라도 된다.
 - **복원되는 것**: advantage / strategy 네트워크 weight, 옵티마이저 state, `iteration` 카운터.
 - **복원되지 않는 것**: reservoir 메모리(샘플 버퍼)와 RNG 상태. traversal 샘플은 처음부터 다시 쌓인다 (`trainer.py`의 `load_checkpoint` 경고 참고).
 
@@ -89,15 +92,15 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 ```bash
 # 메트릭 요약
 uv run python -m coolrl.lost_cities.deep_cfr.cli status \
-  --checkpoint-dir checkpoints/lost_cities_deep_cfr_overnight
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_cutoff_random_rollout
 
 # 학습 곡선 플롯
 uv run python -m coolrl.lost_cities.deep_cfr.cli plot \
-  --checkpoint-dir checkpoints/lost_cities_deep_cfr_overnight
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_cutoff_random_rollout
 
 # 봇과 N판 평가
 uv run python -m coolrl.lost_cities.deep_cfr.cli eval \
-  --checkpoint checkpoints/lost_cities_deep_cfr_overnight/latest.pt \
+  --checkpoint checkpoints/lost_cities_deep_cfr_cutoff_random_rollout/latest.pt \
   --games 500 --opponent safe_heuristic
 ```
 
