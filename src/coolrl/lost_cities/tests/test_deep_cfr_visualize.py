@@ -44,8 +44,14 @@ def test_summarize_metrics_returns_latest_values() -> None:
                 "node_limit_cutoff_rate": 0.2,
                 "eval_random_win_rate": 0.7,
                 "eval_random_avg_diff": 3.0,
+                "eval_random_avg_final_score": 12.0,
+                "eval_random_avg_opened_colors": 2.0,
+                "eval_random_play_action_rate": 0.4,
                 "eval_safe_heuristic_win_rate": 0.6,
                 "eval_safe_heuristic_avg_diff": 2.0,
+                "eval_safe_heuristic_avg_final_score": 8.0,
+                "eval_safe_heuristic_avg_opened_colors": 1.0,
+                "eval_safe_heuristic_play_action_rate": 0.3,
                 "advantage_loss_p0": 0.4,
                 "advantage_loss_p1": 0.5,
                 "strategy_loss": 0.3,
@@ -61,7 +67,13 @@ def test_summarize_metrics_returns_latest_values() -> None:
     assert summary["cutoff_rate"] == 0.1
     assert summary["node_limit_cutoff_rate"] == 0.2
     assert summary["eval_random_win_rate"] == 0.7
+    assert summary["eval_random_avg_final_score"] == 12.0
+    assert summary["eval_random_avg_opened_colors"] == 2.0
+    assert summary["eval_random_play_action_rate"] == 0.4
     assert summary["eval_safe_heuristic_win_rate"] == 0.6
+    assert summary["eval_safe_heuristic_avg_final_score"] == 8.0
+    assert summary["eval_safe_heuristic_avg_opened_colors"] == 1.0
+    assert summary["eval_safe_heuristic_play_action_rate"] == 0.3
     assert summary["advantage_loss_p0"] == 0.4
     assert summary["advantage_loss_p1"] == 0.5
     assert summary["strategy_loss"] == 0.3

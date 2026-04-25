@@ -62,6 +62,26 @@ class ActionTarget:
     label: str
 
 
+def deep_cfr_bot_label(checkpoint: str | Path) -> str:
+    return f"deep_cfr:{Path(checkpoint).name}"
+
+
+def config_shape_snapshot(config: LostCitiesConfig) -> dict[str, Any]:
+    payload = config.to_snapshot()
+    payload.pop("seed", None)
+    return payload
+
+
+def checkpoint_config_differs(
+    checkpoint_config: LostCitiesConfig | None,
+    selected_config: LostCitiesConfig,
+) -> bool:
+    return (
+        checkpoint_config is not None
+        and config_shape_snapshot(checkpoint_config) != config_shape_snapshot(selected_config)
+    )
+
+
 def color_rgb(color: int) -> tuple[int, int, int]:
     return COLOR_PALETTE[color % len(COLOR_PALETTE)]
 
@@ -268,9 +288,12 @@ class LostCitiesGuiApp:
         return self.computer_bot_label
 
     def _config_shape_snapshot(self, config: LostCitiesConfig) -> dict[str, Any]:
-        payload = config.to_snapshot()
-        payload.pop("seed", None)
-        return payload
+        return config_shape_snapshot(config)
+
+    def _checkpoint_config_warning_text(self) -> str | None:
+        if checkpoint_config_differs(self.deep_cfr_bot_config, self.config):
+            return "Checkpoint config differs from selected GUI tier; using selected gameplay config."
+        return None
 
     def _build_computer_bot(self) -> tuple[LostCitiesBot, str]:
         self.deep_cfr_bot_config = None
@@ -283,13 +306,13 @@ class LostCitiesGuiApp:
             seed=self._bot_seed(),
         )
         self.deep_cfr_bot_config = checkpoint_config
-        if self._config_shape_snapshot(checkpoint_config) != self._config_shape_snapshot(self.config):
+        if checkpoint_config_differs(checkpoint_config, self.config):
             LOGGER.warning(
                 "Deep CFR checkpoint config differs from selected GUI config; continuing with selected gameplay config. checkpoint=%s selected=%s",
                 self._config_shape_snapshot(checkpoint_config),
                 self._config_shape_snapshot(self.config),
             )
-        return bot, f"deep_cfr:{self.deep_cfr_checkpoint.name}"
+        return bot, deep_cfr_bot_label(self.deep_cfr_checkpoint)
 
     def _configure_ui_theme(self, theme_path: Path) -> None:
         with open(theme_path, "r", encoding="utf-8") as handle:
@@ -665,7 +688,7 @@ class LostCitiesGuiApp:
             relative_rect=pygame.Rect(288, 17, 138, 46),
             manager=self.manager,
         )
-        if self.mode != "pvc":
+        if self.mode != "pvc" or self.deep_cfr_checkpoint is not None:
             self.bot_dropdown.disable()
         self.backend_dropdown = pygame_gui.elements.UIDropDownMenu(
             options_list=["python", "rust"],
@@ -721,10 +744,13 @@ class LostCitiesGuiApp:
         self._draw_player_area(snapshot, player=1, y=110)
         self._draw_center(snapshot)
         self._draw_player_area(snapshot, player=0, y=self.window_size[1] - 257)
+        checkpoint_warning = self._checkpoint_config_warning_text()
         if self.error_text:
             self._draw_text(self.error_text.upper(), (740, 50), color_rgb(0), 18, bold=True)
         elif self.export_text:
             self._draw_text(self.export_text, (740, 50), GOLD, 16, bold=True)
+        elif checkpoint_warning:
+            self._draw_text(checkpoint_warning, (740, 50), GOLD, 15, bold=True)
 
     def _draw_header(self, snapshot: Snapshot) -> None:
         pygame = self.pygame
@@ -799,7 +825,11 @@ class LostCitiesGuiApp:
         self._draw_text(status, (header_left, 19), TEXT, title_size, bold=True)
         self._draw_text(detail, (header_left, 54), MUTED, detail_size)
         if show_meta:
-            meta = f"{self.mode.upper()}   TURN: {snapshot.turn_count}"
+            bot_meta = ""
+            if self.mode == "pvc":
+                sample = "ON" if self.deep_cfr_sample else "OFF"
+                bot_meta = f"   BOT: {self._computer_bot_display_name()}   SAMPLE: {sample}"
+            meta = f"{self.mode.upper()}   TURN: {snapshot.turn_count}{bot_meta}"
             self._draw_text_right(meta, (header_right, 54), MUTED, detail_size)
         self.screen.set_clip(previous_clip)
 
@@ -865,7 +895,8 @@ class LostCitiesGuiApp:
             active_label = "COMPUTER" if self.is_computer_turn(snapshot) else "ACTIVE"
             self._draw_text(active_label, (status_box.x + 22, status_box.y + 22), GOLD, 20)
             if self.is_computer_turn(snapshot):
-                prompt = f"Bot: {self.bot_name}"
+                sample = "ON" if self.deep_cfr_sample else "OFF"
+                prompt = f"Bot: {self._computer_bot_display_name()} | sample {sample}"
             elif snapshot.phase == "card":
                 prompt = (
                     "Yellow border: expedition or discard"

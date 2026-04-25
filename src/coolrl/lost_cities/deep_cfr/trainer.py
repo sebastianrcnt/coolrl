@@ -167,6 +167,15 @@ class DeepCFRTrainer:
                 )
                 eval_metrics[f"eval_{opponent_name}_win_rate"] = result["win_rate"]
                 eval_metrics[f"eval_{opponent_name}_avg_diff"] = result["avg_diff"]
+                eval_metrics[f"eval_{opponent_name}_avg_final_score"] = result["avg_final_score"]
+                eval_metrics[f"eval_{opponent_name}_avg_opponent_score"] = result["avg_opponent_score"]
+                eval_metrics[f"eval_{opponent_name}_avg_opened_colors"] = result["avg_opened_colors"]
+                eval_metrics[f"eval_{opponent_name}_avg_opponent_opened_colors"] = result["avg_opponent_opened_colors"]
+                eval_metrics[f"eval_{opponent_name}_avg_expedition_cards"] = result["avg_expedition_cards"]
+                eval_metrics[f"eval_{opponent_name}_avg_play_actions"] = result["avg_play_actions"]
+                eval_metrics[f"eval_{opponent_name}_avg_discard_actions"] = result["avg_discard_actions"]
+                eval_metrics[f"eval_{opponent_name}_play_action_rate"] = result["play_action_rate"]
+                eval_metrics[f"eval_{opponent_name}_discard_action_rate"] = result["discard_action_rate"]
                 eval_metrics[f"eval_{opponent_name}_max_step_timeouts"] = result["max_step_timeouts"]
         eval_seconds = time.monotonic() - eval_started
 

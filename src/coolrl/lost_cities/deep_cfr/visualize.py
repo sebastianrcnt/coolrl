@@ -40,7 +40,7 @@ def summarize_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
         return {}
     latest = metrics[-1]
     summary: dict[str, Any] = {}
-    for key in (
+    static_keys = (
         "iteration",
         "elapsed_seconds",
         "total_nodes",
@@ -60,8 +60,26 @@ def summarize_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
         "advantage_memory_size_p0",
         "advantage_memory_size_p1",
         "strategy_memory_size",
-    ):
+    )
+    diagnostic_suffixes = (
+        "_win_rate",
+        "_avg_diff",
+        "_avg_final_score",
+        "_avg_opponent_score",
+        "_avg_opened_colors",
+        "_avg_opponent_opened_colors",
+        "_avg_expedition_cards",
+        "_avg_play_actions",
+        "_avg_discard_actions",
+        "_play_action_rate",
+        "_discard_action_rate",
+        "_max_step_timeouts",
+    )
+    for key in static_keys:
         if key in latest:
+            summary[key] = latest[key]
+    for key in latest:
+        if key.startswith("eval_") and key.endswith(diagnostic_suffixes):
             summary[key] = latest[key]
     return summary
 
@@ -77,6 +95,22 @@ def _metrics_series(metrics: list[dict[str, Any]], key: str) -> tuple[list[int],
     return xs, ys
 
 
+def _eval_series_specs(metrics: list[dict[str, Any]], suffix: str) -> list[tuple[str, str]]:
+    keys = sorted({key for item in metrics for key in item if key.startswith("eval_") and key.endswith(suffix)})
+    return [(key.removeprefix("eval_").removesuffix(suffix), key) for key in keys]
+
+
+def _eval_series_specs_for_suffixes(
+    metrics: list[dict[str, Any]],
+    suffix_labels: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    specs: list[tuple[str, str]] = []
+    for suffix, label_suffix in suffix_labels:
+        for label, key in _eval_series_specs(metrics, suffix):
+            specs.append((f"{label} {label_suffix}", key))
+    return specs
+
+
 def plot_metrics(checkpoint_dir: str | Path, output: str | Path | None = None) -> Path:
     import matplotlib
 
@@ -90,13 +124,19 @@ def plot_metrics(checkpoint_dir: str | Path, output: str | Path | None = None) -
 
     panels = [
         ("Losses", "Iteration", [("advantage_loss_p0", "advantage_loss_p0"), ("advantage_loss_p1", "advantage_loss_p1"), ("strategy_loss", "strategy_loss")]),
-        ("Evaluation Win Rates", "Iteration", [("eval_random_win_rate", "eval_random_win_rate"), ("eval_safe_heuristic_win_rate", "eval_safe_heuristic_win_rate")]),
-        ("Evaluation Avg Diff", "Iteration", [("eval_random_avg_diff", "eval_random_avg_diff"), ("eval_safe_heuristic_avg_diff", "eval_safe_heuristic_avg_diff")]),
+        ("Evaluation Win Rates", "Iteration", _eval_series_specs(metrics, "_win_rate")),
+        ("Evaluation Avg Diff", "Iteration", _eval_series_specs(metrics, "_avg_diff")),
+        ("Evaluation Scores", "Iteration", _eval_series_specs_for_suffixes(metrics, [("_avg_final_score", "strategy"), ("_avg_opponent_score", "opponent")])),
+        ("Evaluation Opened Colors", "Iteration", _eval_series_specs_for_suffixes(metrics, [("_avg_opened_colors", "strategy"), ("_avg_opponent_opened_colors", "opponent")])),
+        ("Evaluation Expedition Cards", "Iteration", _eval_series_specs(metrics, "_avg_expedition_cards")),
+        ("Evaluation Action Rates", "Iteration", _eval_series_specs_for_suffixes(metrics, [("_play_action_rate", "play"), ("_discard_action_rate", "discard")])),
+        ("Evaluation Avg Actions", "Iteration", _eval_series_specs_for_suffixes(metrics, [("_avg_play_actions", "play"), ("_avg_discard_actions", "discard")])),
+        ("Evaluation Timeouts", "Iteration", _eval_series_specs(metrics, "_max_step_timeouts")),
         ("Throughput", "Iteration", [("nodes_per_second", "nodes_per_second"), ("avg_nodes_per_traversal", "avg_nodes_per_traversal")]),
         ("Cutoffs", "Iteration", [("cutoff_rate", "cutoff_rate"), ("node_limit_cutoff_rate", "node_limit_cutoff_rate")]),
         ("Memory Sizes", "Iteration", [("advantage_memory_size_p0", "advantage_memory_size_p0"), ("advantage_memory_size_p1", "advantage_memory_size_p1"), ("strategy_memory_size", "strategy_memory_size")]),
     ]
-    fig, axes = plt.subplots(3, 2, figsize=(14, 12))
+    fig, axes = plt.subplots(4, 3, figsize=(18, 18))
     axes_flat = list(axes.flat)
     for axis, (title, xlabel, series_specs) in zip(axes_flat, panels, strict=True):
         plotted = False

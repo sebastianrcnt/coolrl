@@ -58,11 +58,16 @@ def eval_command(args: argparse.Namespace) -> None:
         on_max_steps=config.evaluation.on_max_steps,
     )
     logger.info(
-        "Evaluation vs {}: games={} win_rate={:.3f} avg_diff={:.2f} wins={} losses={} draws={} max_step_timeouts={}",
+        "Evaluation vs {}: games={} win_rate={:.3f} avg_diff={:.2f} avg_final_score={:.2f} avg_opponent_score={:.2f} avg_opened_colors={:.2f} play_action_rate={:.3f} discard_action_rate={:.3f} wins={} losses={} draws={} max_step_timeouts={}",
         args.opponent,
         result["games"],
         result["win_rate"],
         result["avg_diff"],
+        result["avg_final_score"],
+        result["avg_opponent_score"],
+        result["avg_opened_colors"],
+        result["play_action_rate"],
+        result["discard_action_rate"],
         result["wins"],
         result["losses"],
         result["draws"],
@@ -141,19 +146,30 @@ def status_command(args: argparse.Namespace) -> None:
             latest.get("advantage_memory_size_p1", "n/a"),
             latest.get("strategy_memory_size", "n/a"),
         )
-    if "eval_random_win_rate" in latest or "eval_random_avg_diff" in latest:
+    eval_opponents = sorted(
+        {
+            key.removeprefix("eval_").removesuffix("_win_rate")
+            for key in latest
+            if key.startswith("eval_") and key.endswith("_win_rate")
+        }
+    )
+    for opponent_name in eval_opponents:
+        prefix = f"eval_{opponent_name}"
         logger.info(
-            "Eval random: win_rate={} avg_diff={} max_step_timeouts={}",
-            latest.get("eval_random_win_rate", "n/a"),
-            latest.get("eval_random_avg_diff", "n/a"),
-            latest.get("eval_random_max_step_timeouts", "n/a"),
-        )
-    if "eval_safe_heuristic_win_rate" in latest or "eval_safe_heuristic_avg_diff" in latest:
-        logger.info(
-            "Eval safe_heuristic: win_rate={} avg_diff={} max_step_timeouts={}",
-            latest.get("eval_safe_heuristic_win_rate", "n/a"),
-            latest.get("eval_safe_heuristic_avg_diff", "n/a"),
-            latest.get("eval_safe_heuristic_max_step_timeouts", "n/a"),
+            "Eval {}: win_rate={} avg_diff={} avg_final_score={} avg_opponent_score={} avg_opened_colors={} avg_opponent_opened_colors={} avg_expedition_cards={} avg_play_actions={} avg_discard_actions={} play_action_rate={} discard_action_rate={} max_step_timeouts={}",
+            opponent_name,
+            latest.get(f"{prefix}_win_rate", "n/a"),
+            latest.get(f"{prefix}_avg_diff", "n/a"),
+            latest.get(f"{prefix}_avg_final_score", "n/a"),
+            latest.get(f"{prefix}_avg_opponent_score", "n/a"),
+            latest.get(f"{prefix}_avg_opened_colors", "n/a"),
+            latest.get(f"{prefix}_avg_opponent_opened_colors", "n/a"),
+            latest.get(f"{prefix}_avg_expedition_cards", "n/a"),
+            latest.get(f"{prefix}_avg_play_actions", "n/a"),
+            latest.get(f"{prefix}_avg_discard_actions", "n/a"),
+            latest.get(f"{prefix}_play_action_rate", "n/a"),
+            latest.get(f"{prefix}_discard_action_rate", "n/a"),
+            latest.get(f"{prefix}_max_step_timeouts", "n/a"),
         )
 
 
@@ -175,7 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--checkpoint", required=True)
     eval_parser.add_argument("--config", type=Path, default=None)
     eval_parser.add_argument("--games", type=int, default=100)
-    eval_parser.add_argument("--opponent", choices=["random", "safe_heuristic"], default="random")
+    eval_parser.add_argument("--opponent", choices=["random", "safe_heuristic", "passive_discard"], default="random")
     eval_parser.set_defaults(func=eval_command)
 
     benchmark = subparsers.add_parser("benchmark-traversal")

@@ -62,6 +62,7 @@ evaluation:
   opponents:
     - random
     - safe_heuristic
+    - passive_discard
 
 checkpoint:
   directory: checkpoints/lost_cities_deep_cfr_tier3

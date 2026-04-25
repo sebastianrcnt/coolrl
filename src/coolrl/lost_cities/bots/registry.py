@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from ..interfaces import LostCitiesBot
 from .heuristic import SafeHeuristicBot
+from .passive import PassiveDiscardBot
 from .random import RandomBot
 
 BotName = str
@@ -12,6 +13,7 @@ BotFactory = Callable[[int | None], LostCitiesBot]
 
 BOT_REGISTRY: dict[BotName, BotFactory] = {
     DEFAULT_BOT: RandomBot,
+    "passive-discard": lambda seed: PassiveDiscardBot(),
     "safe-heuristic": lambda seed: SafeHeuristicBot(),
 }
 
