@@ -190,8 +190,8 @@ def test_traversal_benchmark_compares_single_and_multiprocessing(tmp_path: Path)
     result = benchmark_traversal_modes(cfg, mp_workers=2, iteration=1, mode="compare")
 
     assert result["device_used"] == "cpu"
-    assert result["single_process"]["num_workers"] == 0
-    assert result["multiprocessing"]["num_workers"] == 2
+    assert result["single_process"]["requested_workers"] == 0
+    assert result["multiprocessing"]["requested_workers"] == 2
     assert result["single_process"]["traversal_seconds"] >= 0.0
     assert result["multiprocessing"]["traversal_seconds"] >= 0.0
     assert isinstance(result["speedup_vs_single_process"], float)
@@ -205,7 +205,7 @@ def test_traversal_benchmark_single_mode(tmp_path: Path) -> None:
     assert result["device_used"] == "cpu"
     assert "single_process" in result
     assert "multiprocessing" not in result
-    assert result["single_process"]["num_workers"] == 0
+    assert result["single_process"]["requested_workers"] == 0
     assert result["single_process"]["traversal_seconds"] >= 0.0
     assert result["speedup_vs_single_process"] == "n/a"
 
@@ -217,7 +217,7 @@ def test_traversal_benchmark_mp_mode(tmp_path: Path) -> None:
     assert result["device_used"] == "cpu"
     assert "multiprocessing" in result
     assert "single_process" not in result
-    assert result["multiprocessing"]["num_workers"] == 2
+    assert result["multiprocessing"]["requested_workers"] == 2
     assert result["multiprocessing"]["traversal_seconds"] >= 0.0
     assert result["speedup_vs_single_process"] == "n/a"
 
@@ -261,7 +261,6 @@ def test_traversal_benchmark_mp_mode_does_not_emit_logging_error(
 
     def _fake_run_traversal_benchmark_once(*_args, **_kwargs) -> benchmark_module.TraversalBenchmarkResult:
         return benchmark_module.TraversalBenchmarkResult(
-            num_workers=2,
             requested_workers=2,
             effective_workers=2,
             num_batches=2,
