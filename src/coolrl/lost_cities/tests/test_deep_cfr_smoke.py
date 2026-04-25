@@ -13,12 +13,15 @@ from coolrl.lost_cities.deep_cfr.evaluate import (
     StrategyNetBot,
     evaluate_against_bot,
     load_strategy_bot_from_checkpoint,
+    make_opponent,
 )
 from coolrl.lost_cities.deep_cfr.memory import _Sample
+from coolrl.lost_cities.deep_cfr.cli import build_parser
 from coolrl.lost_cities.deep_cfr.trainer import DeepCFRTrainer
 from coolrl.lost_cities.deep_cfr.traversal import TraversalStats
 from coolrl.lost_cities.deep_cfr.traversal_worker import TraversalWorkerBatchResult
 from coolrl.lost_cities.game import GameState
+from coolrl.lost_cities.bots import PassiveDiscardBot
 
 
 def test_tiny_training_run_completes(tmp_path: Path) -> None:
@@ -282,6 +285,69 @@ def test_evaluate_against_bot_handles_max_steps_timeout() -> None:
     assert result["avg_diff"] == 0.0
 
 
+def test_passive_discard_opponent_acts_legally_and_prefers_deck_draw() -> None:
+    bot = make_opponent("passive_discard", seed=7)
+    assert isinstance(bot, PassiveDiscardBot)
+
+    state = GameState.new_game()
+    card_action = bot.act(state)
+    assert state.legal_mask()[card_action]
+    assert card_action % 2 == 1
+    state.apply_action(card_action)
+
+    draw_action = bot.act(state)
+    assert state.legal_mask()[draw_action]
+    assert draw_action == 0
+
+
+def test_evaluate_against_bot_reports_passive_no_expedition_diagnostics(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 0,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "rules": {"tier": "tier0"},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    trainer = DeepCFRTrainer(cfg)
+    for parameter in trainer.strategy_net.parameters():
+        parameter.data.zero_()
+    final_layer = trainer.strategy_net.net[-1]
+    final_layer.bias.data.fill_(-10.0)
+    for action in range(1, trainer.lc_config.card_action_size, 2):
+        final_layer.bias.data[action] = 10.0
+    final_layer.bias.data[trainer.lc_config.card_action_size] = 10.0
+
+    result = evaluate_against_bot(
+        trainer.strategy_net,
+        PassiveDiscardBot(),
+        trainer.lc_config,
+        games=2,
+        seed=123,
+        device="cpu",
+    )
+
+    assert result["avg_opened_colors"] == 0.0
+    assert result["play_action_rate"] == 0.0
+    assert result["discard_action_rate"] == 1.0
+    assert result["avg_final_score"] == 0.0
+
+
+def test_deep_cfr_eval_cli_accepts_passive_discard_opponent() -> None:
+    args = build_parser().parse_args(
+        [
+            "eval",
+            "--checkpoint",
+            "checkpoint.pt",
+            "--opponent",
+            "passive_discard",
+        ]
+    )
+
+    assert args.opponent == "passive_discard"
+
+
 def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:
     cfg = config_from_dict(
         {
@@ -315,3 +381,7 @@ def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:
     assert progress["eval_random_max_step_timeouts"] == 1
     assert progress["eval_random_win_rate"] == 0.0
     assert progress["eval_random_avg_diff"] == 0.0
+    assert progress["eval_random_avg_final_score"] == 0.0
+    assert progress["eval_random_avg_opened_colors"] >= 0.0
+    assert progress["eval_random_play_action_rate"] >= 0.0
+    assert progress["eval_random_discard_action_rate"] >= 0.0

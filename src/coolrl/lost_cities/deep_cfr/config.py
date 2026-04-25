@@ -94,7 +94,7 @@ class MemoryConfig:
 class EvaluationConfig:
     eval_every: int = 5
     games: int = 100
-    opponents: list[str] = field(default_factory=lambda: ["random", "safe_heuristic"])
+    opponents: list[str] = field(default_factory=lambda: ["random", "safe_heuristic", "passive_discard"])
     max_steps: int = 10_000
     on_max_steps: str = "score_diff"
 

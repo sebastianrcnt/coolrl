@@ -65,6 +65,7 @@ evaluation:
   on_max_steps: score_diff
   opponents:
     - random
+    - passive_discard
 
 checkpoint:
   directory: checkpoints/lost_cities_deep_cfr_probe

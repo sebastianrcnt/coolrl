@@ -8,6 +8,7 @@ import torch
 
 from ..bots.base import first_legal
 from ..bots.heuristic import SafeHeuristicBot
+from ..bots.passive import PassiveDiscardBot
 from ..bots.random import RandomBot
 from ..game import GameState, LostCitiesConfig
 from ..interfaces import BotInput, LostCitiesBot
@@ -107,7 +108,26 @@ def make_opponent(name: str, seed: int | None = None) -> LostCitiesBot:
         return RandomBot(seed=seed)
     if token == "safe_heuristic":
         return SafeHeuristicBot()
+    if token == "passive_discard":
+        return PassiveDiscardBot()
     raise ValueError(f"unsupported opponent: {name!r}")
+
+
+def _opened_color_count(state: GameState, player: int) -> int:
+    return sum(1 for expedition in state.expeditions[player] if len(expedition) > 0)
+
+
+def _expedition_card_count(state: GameState, player: int) -> int:
+    return sum(len(expedition) for expedition in state.expeditions[player])
+
+
+def is_card_play_action(action_id: int) -> bool:
+    """Card-phase phase-local actions use even ids for play and odd ids for discard."""
+    return action_id % 2 == 0
+
+
+def is_card_discard_action(action_id: int) -> bool:
+    return not is_card_play_action(action_id)
 
 
 def _play_game_for_evaluation(
@@ -117,16 +137,25 @@ def _play_game_for_evaluation(
     *,
     seed: int | None = None,
     max_steps: int = 10_000,
-) -> tuple[GameState, bool]:
+    tracked_player: int | None = None,
+) -> tuple[GameState, bool, dict[str, int]]:
     game_config = replace(config, seed=seed) if seed is not None else config
     state = GameState.new_game(game_config)
     bots = [bot0, bot1]
+    action_counts = {"play_actions": 0, "discard_actions": 0}
     for _ in range(max_steps):
         if state.terminal:
-            return state, False
+            return state, False, action_counts
+        acting_player = state.current_player
+        phase = state.phase
         action = bots[state.current_player].act(state)
+        if tracked_player is not None and acting_player == tracked_player and phase == "card":
+            if is_card_play_action(action):
+                action_counts["play_actions"] += 1
+            elif is_card_discard_action(action):
+                action_counts["discard_actions"] += 1
         state.apply_action(action)
-    return state, not state.terminal
+    return state, not state.terminal, action_counts
 
 
 def evaluate_against_bot(
@@ -149,29 +178,46 @@ def evaluate_against_bot(
             "on_max_steps must be one of 'score_diff', 'loss', or 'draw'"
         )
     diffs: list[int] = []
+    final_scores: list[int] = []
+    opponent_scores: list[int] = []
+    opened_colors: list[int] = []
+    opponent_opened_colors: list[int] = []
+    expedition_cards: list[int] = []
+    play_actions = 0
+    discard_actions = 0
     wins = losses = draws = 0
     max_step_timeouts = 0
     for index in range(games):
         net_bot = StrategyNetBot(strategy_net, config, device=device, sample=False, seed=seed + index)
         game_seed = seed + index
         if index % 2 == 0:
-            final_state, timed_out = _play_game_for_evaluation(
+            final_state, timed_out, action_counts = _play_game_for_evaluation(
                 net_bot,
                 opponent_bot,
                 config,
                 seed=game_seed,
                 max_steps=max_steps,
+                tracked_player=0,
             )
             deep_cfr_player = 0
         else:
-            final_state, timed_out = _play_game_for_evaluation(
+            final_state, timed_out, action_counts = _play_game_for_evaluation(
                 opponent_bot,
                 net_bot,
                 config,
                 seed=game_seed,
                 max_steps=max_steps,
+                tracked_player=1,
             )
             deep_cfr_player = 1
+        opponent_player = 1 - deep_cfr_player
+        final_scores.append(final_state.total_score(deep_cfr_player))
+        opponent_scores.append(final_state.total_score(opponent_player))
+        opened_colors.append(_opened_color_count(final_state, deep_cfr_player))
+        opponent_opened_colors.append(_opened_color_count(final_state, opponent_player))
+        expedition_cards.append(_expedition_card_count(final_state, deep_cfr_player))
+        play_actions += action_counts["play_actions"]
+        discard_actions += action_counts["discard_actions"]
         if timed_out:
             max_step_timeouts += 1
             if timeout_mode == "score_diff":
@@ -189,10 +235,20 @@ def evaluate_against_bot(
             losses += 1
         else:
             draws += 1
+    card_actions = play_actions + discard_actions
     return {
         "games": int(games),
         "win_rate": float(wins / max(1, games)),
         "avg_diff": float(np.mean(diffs)) if diffs else 0.0,
+        "avg_final_score": float(np.mean(final_scores)) if final_scores else 0.0,
+        "avg_opponent_score": float(np.mean(opponent_scores)) if opponent_scores else 0.0,
+        "avg_opened_colors": float(np.mean(opened_colors)) if opened_colors else 0.0,
+        "avg_opponent_opened_colors": float(np.mean(opponent_opened_colors)) if opponent_opened_colors else 0.0,
+        "avg_expedition_cards": float(np.mean(expedition_cards)) if expedition_cards else 0.0,
+        "avg_discard_actions": float(discard_actions / max(1, games)),
+        "avg_play_actions": float(play_actions / max(1, games)),
+        "play_action_rate": float(play_actions / max(1, card_actions)),
+        "discard_action_rate": float(discard_actions / max(1, card_actions)),
         "wins": wins,
         "losses": losses,
         "draws": draws,
