@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .config import RunConfig, config_from_dict
 from .trainer import DeepCFRTrainer
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -70,58 +73,64 @@ def _run_traversal_benchmark_once(config: RunConfig, *, iteration: int) -> Trave
     )
 
 
+def _result_to_dict(r: TraversalBenchmarkResult) -> dict[str, Any]:
+    return {
+        "num_workers": r.num_workers,
+        "traversal_seconds": r.traversal_seconds,
+        "total_nodes": r.total_nodes,
+        "traversals": r.traversals,
+        "nodes_per_second": r.nodes_per_second,
+        "avg_nodes_per_traversal": r.avg_nodes_per_traversal,
+        "cutoffs": r.cutoffs,
+        "cutoff_rate": r.cutoff_rate,
+        "node_limit_cutoffs": r.node_limit_cutoffs,
+        "node_limit_cutoff_rate": r.node_limit_cutoff_rate,
+        "cutoff_rollouts": r.cutoff_rollouts,
+        "cutoff_rollout_steps": r.cutoff_rollout_steps,
+        "cutoff_rollout_max_step_timeouts": r.cutoff_rollout_max_step_timeouts,
+    }
+
+
 def benchmark_traversal_modes(
     config: RunConfig,
     *,
-    mp_workers: int,
+    mp_workers: int = 2,
     iteration: int = 1,
+    mode: Literal["compare", "single", "mp"] = "compare",
 ) -> dict[str, Any]:
-    if mp_workers <= 1:
-        raise ValueError(f"mp_workers must be > 1 for comparison benchmarking, got {mp_workers}")
+    if mode in ("compare", "mp") and mp_workers <= 1:
+        raise ValueError(f"mp_workers must be > 1 for mode={mode!r}, got {mp_workers}")
 
     with tempfile.TemporaryDirectory(prefix="lost_cities_deep_cfr_benchmark_") as temp_dir:
         base_dir = Path(temp_dir)
-        single = _run_traversal_benchmark_once(
-            _benchmark_config_variant(config, num_workers=0, checkpoint_dir=base_dir / "single"),
-            iteration=iteration,
-        )
-        multiprocessing = _run_traversal_benchmark_once(
-            _benchmark_config_variant(config, num_workers=mp_workers, checkpoint_dir=base_dir / "multi"),
-            iteration=iteration,
-        )
 
-    return {
-        "device_used": "cpu",
-        "iteration": iteration,
-        "single_process": {
-            "num_workers": single.num_workers,
-            "traversal_seconds": single.traversal_seconds,
-            "total_nodes": single.total_nodes,
-            "traversals": single.traversals,
-            "nodes_per_second": single.nodes_per_second,
-            "avg_nodes_per_traversal": single.avg_nodes_per_traversal,
-            "cutoffs": single.cutoffs,
-            "cutoff_rate": single.cutoff_rate,
-            "node_limit_cutoffs": single.node_limit_cutoffs,
-            "node_limit_cutoff_rate": single.node_limit_cutoff_rate,
-            "cutoff_rollouts": single.cutoff_rollouts,
-            "cutoff_rollout_steps": single.cutoff_rollout_steps,
-            "cutoff_rollout_max_step_timeouts": single.cutoff_rollout_max_step_timeouts,
-        },
-        "multiprocessing": {
-            "num_workers": multiprocessing.num_workers,
-            "traversal_seconds": multiprocessing.traversal_seconds,
-            "total_nodes": multiprocessing.total_nodes,
-            "traversals": multiprocessing.traversals,
-            "nodes_per_second": multiprocessing.nodes_per_second,
-            "avg_nodes_per_traversal": multiprocessing.avg_nodes_per_traversal,
-            "cutoffs": multiprocessing.cutoffs,
-            "cutoff_rate": multiprocessing.cutoff_rate,
-            "node_limit_cutoffs": multiprocessing.node_limit_cutoffs,
-            "node_limit_cutoff_rate": multiprocessing.node_limit_cutoff_rate,
-            "cutoff_rollouts": multiprocessing.cutoff_rollouts,
-            "cutoff_rollout_steps": multiprocessing.cutoff_rollout_steps,
-            "cutoff_rollout_max_step_timeouts": multiprocessing.cutoff_rollout_max_step_timeouts,
-        },
-        "speedup_vs_single_process": single.traversal_seconds / max(1.0e-9, multiprocessing.traversal_seconds),
-    }
+        single_result: TraversalBenchmarkResult | None = None
+        mp_result: TraversalBenchmarkResult | None = None
+
+        if mode in ("compare", "single"):
+            logger.info("Running single-process traversal benchmark...")
+            single_result = _run_traversal_benchmark_once(
+                _benchmark_config_variant(config, num_workers=0, checkpoint_dir=base_dir / "single"),
+                iteration=iteration,
+            )
+
+        if mode in ("compare", "mp"):
+            logger.info("Running multiprocessing traversal benchmark with workers={}...", mp_workers)
+            mp_result = _run_traversal_benchmark_once(
+                _benchmark_config_variant(config, num_workers=mp_workers, checkpoint_dir=base_dir / "multi"),
+                iteration=iteration,
+            )
+
+    out: dict[str, Any] = {"device_used": "cpu", "iteration": iteration}
+
+    if single_result is not None:
+        out["single_process"] = _result_to_dict(single_result)
+    if mp_result is not None:
+        out["multiprocessing"] = _result_to_dict(mp_result)
+
+    if single_result is not None and mp_result is not None:
+        out["speedup_vs_single_process"] = single_result.traversal_seconds / max(1.0e-9, mp_result.traversal_seconds)
+    else:
+        out["speedup_vs_single_process"] = "n/a"
+
+    return out

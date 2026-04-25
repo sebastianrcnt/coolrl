@@ -75,55 +75,47 @@ def eval_command(args: argparse.Namespace) -> None:
     )
 
 
+def _log_traversal_result(label: str, r: dict) -> None:
+    logger.info(
+        "{}: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f} cutoffs={} cutoff_rate={:.4f} node_limit_cutoffs={} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_steps={} rollout_timeouts={}",
+        label,
+        r["num_workers"],
+        r["traversal_seconds"],
+        r["total_nodes"],
+        r["traversals"],
+        r["avg_nodes_per_traversal"],
+        r["nodes_per_second"],
+        r["cutoffs"],
+        r["cutoff_rate"],
+        r["node_limit_cutoffs"],
+        r["node_limit_cutoff_rate"],
+        r["cutoff_rollouts"],
+        r["cutoff_rollout_steps"],
+        r["cutoff_rollout_max_step_timeouts"],
+    )
+
+
 def benchmark_traversal_command(args: argparse.Namespace) -> None:
     config = load_config(args.config)
     result = benchmark_traversal_modes(
         config,
         mp_workers=args.mp_workers,
         iteration=args.iteration,
+        mode=args.mode,
     )
-    single = result["single_process"]
-    multiprocessing = result["multiprocessing"]
     logger.info(
         "Traversal benchmark uses device={} for both modes so the comparison reflects traversal multiprocessing overhead/speedup.",
         result["device_used"],
     )
-    logger.info(
-        "Single-process: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f} cutoffs={} cutoff_rate={:.4f} node_limit_cutoffs={} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_steps={} rollout_timeouts={}",
-        single["num_workers"],
-        single["traversal_seconds"],
-        single["total_nodes"],
-        single["traversals"],
-        single["avg_nodes_per_traversal"],
-        single["nodes_per_second"],
-        single["cutoffs"],
-        single["cutoff_rate"],
-        single["node_limit_cutoffs"],
-        single["node_limit_cutoff_rate"],
-        single["cutoff_rollouts"],
-        single["cutoff_rollout_steps"],
-        single["cutoff_rollout_max_step_timeouts"],
-    )
-    logger.info(
-        "Multiprocessing: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f} cutoffs={} cutoff_rate={:.4f} node_limit_cutoffs={} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_steps={} rollout_timeouts={}",
-        multiprocessing["num_workers"],
-        multiprocessing["traversal_seconds"],
-        multiprocessing["total_nodes"],
-        multiprocessing["traversals"],
-        multiprocessing["avg_nodes_per_traversal"],
-        multiprocessing["nodes_per_second"],
-        multiprocessing["cutoffs"],
-        multiprocessing["cutoff_rate"],
-        multiprocessing["node_limit_cutoffs"],
-        multiprocessing["node_limit_cutoff_rate"],
-        multiprocessing["cutoff_rollouts"],
-        multiprocessing["cutoff_rollout_steps"],
-        multiprocessing["cutoff_rollout_max_step_timeouts"],
-    )
-    logger.info(
-        "Traversal benchmark speedup vs single-process: {:.3f}x",
-        result["speedup_vs_single_process"],
-    )
+    if "single_process" in result:
+        _log_traversal_result("Single-process", result["single_process"])
+    if "multiprocessing" in result:
+        _log_traversal_result("Multiprocessing", result["multiprocessing"])
+    speedup = result["speedup_vs_single_process"]
+    if speedup == "n/a":
+        logger.info("Traversal benchmark speedup vs single-process: n/a")
+    else:
+        logger.info("Traversal benchmark speedup vs single-process: {:.3f}x", speedup)
 
 
 def status_command(args: argparse.Namespace) -> None:
@@ -216,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--config", type=Path, default=Path("configs/lost_cities_deep_cfr_probe.yaml"))
     benchmark.add_argument("--mp-workers", type=int, default=2)
     benchmark.add_argument("--iteration", type=int, default=1)
+    benchmark.add_argument("--mode", choices=["compare", "single", "mp"], default="compare")
     benchmark.set_defaults(func=benchmark_traversal_command)
 
     status = subparsers.add_parser("status")
