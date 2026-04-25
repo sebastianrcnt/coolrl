@@ -292,6 +292,36 @@ def test_traversal_benchmark_mp_mode_does_not_emit_logging_error(
     assert "--- Logging error ---" not in capsys.readouterr().err
 
 
+def test_traversal_benchmark_mp_mode_uses_lightweight_batch_count(monkeypatch) -> None:
+    class _FakeTrainer:
+        def __init__(self, _config) -> None:
+            self.num_workers = 12
+
+        def _estimated_traversal_batch_count(self) -> int:
+            return 10
+
+        def _frozen_advantage_state_dicts(self):
+            raise AssertionError("_frozen_advantage_state_dicts should not be called in benchmark metadata path")
+
+        def _build_traversal_worker_batches(self, _iteration, _advantage_net_state_dicts):
+            raise AssertionError("_build_traversal_worker_batches should not be called in benchmark metadata path")
+
+        def _run_traversals_parallel(self, _iteration):
+            return TraversalStats(nodes=20), 4, None
+
+        def _run_traversals_single_process(self, _iteration):
+            raise AssertionError("single-process path should not be used")
+
+    monkeypatch.setattr(benchmark_module, "DeepCFRTrainer", _FakeTrainer)
+    cfg = config_from_dict({"device": "cpu"})
+    result = benchmark_module._run_traversal_benchmark_once(cfg, iteration=1)
+
+    assert result.requested_workers == 12
+    assert result.effective_workers == 10
+    assert result.num_batches == 10
+    assert result.traversals == 4
+
+
 def test_parallel_traversal_logs_warning_when_requested_workers_exceed_batches(
     tmp_path: Path,
     monkeypatch,

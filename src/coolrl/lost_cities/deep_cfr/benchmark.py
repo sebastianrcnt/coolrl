@@ -57,9 +57,7 @@ def _run_traversal_benchmark_once(config: RunConfig, *, iteration: int) -> Trave
     effective_workers = requested_workers
     num_batches = 0
     if requested_workers > 1:
-        advantage_net_state_dicts = trainer._frozen_advantage_state_dicts()
-        batches = trainer._build_traversal_worker_batches(iteration, advantage_net_state_dicts)
-        num_batches = len(batches)
+        num_batches = trainer._estimated_traversal_batch_count()
         effective_workers = min(requested_workers, num_batches)
 
     started = time.monotonic()
