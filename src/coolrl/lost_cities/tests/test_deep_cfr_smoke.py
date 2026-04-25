@@ -159,8 +159,8 @@ def test_tiny_training_run_profiles_hotspots_and_can_save_latest_only(tmp_path: 
     assert progress["traversal_profile_memory_add_seconds"] >= 0.0
 
 
-def test_traversal_benchmark_compares_single_and_multiprocessing(tmp_path: Path) -> None:
-    cfg = config_from_dict(
+def _minimal_benchmark_cfg(tmp_path: Path):
+    return config_from_dict(
         {
             "max_iterations": 0,
             "device": "cpu",
@@ -181,14 +181,42 @@ def test_traversal_benchmark_compares_single_and_multiprocessing(tmp_path: Path)
         }
     )
 
-    result = benchmark_traversal_modes(cfg, mp_workers=2, iteration=1)
+
+def test_traversal_benchmark_compares_single_and_multiprocessing(tmp_path: Path) -> None:
+    cfg = _minimal_benchmark_cfg(tmp_path)
+    result = benchmark_traversal_modes(cfg, mp_workers=2, iteration=1, mode="compare")
 
     assert result["device_used"] == "cpu"
     assert result["single_process"]["num_workers"] == 0
     assert result["multiprocessing"]["num_workers"] == 2
     assert result["single_process"]["traversal_seconds"] >= 0.0
     assert result["multiprocessing"]["traversal_seconds"] >= 0.0
+    assert isinstance(result["speedup_vs_single_process"], float)
     assert result["speedup_vs_single_process"] >= 0.0
+
+
+def test_traversal_benchmark_single_mode(tmp_path: Path) -> None:
+    cfg = _minimal_benchmark_cfg(tmp_path)
+    result = benchmark_traversal_modes(cfg, iteration=1, mode="single")
+
+    assert result["device_used"] == "cpu"
+    assert "single_process" in result
+    assert "multiprocessing" not in result
+    assert result["single_process"]["num_workers"] == 0
+    assert result["single_process"]["traversal_seconds"] >= 0.0
+    assert result["speedup_vs_single_process"] == "n/a"
+
+
+def test_traversal_benchmark_mp_mode(tmp_path: Path) -> None:
+    cfg = _minimal_benchmark_cfg(tmp_path)
+    result = benchmark_traversal_modes(cfg, mp_workers=2, iteration=1, mode="mp")
+
+    assert result["device_used"] == "cpu"
+    assert "multiprocessing" in result
+    assert "single_process" not in result
+    assert result["multiprocessing"]["num_workers"] == 2
+    assert result["multiprocessing"]["traversal_seconds"] >= 0.0
+    assert result["speedup_vs_single_process"] == "n/a"
 
 
 def test_parallel_traversal_result_merge_aggregates_stats(tmp_path: Path) -> None:
