@@ -54,11 +54,31 @@ class TraversalConfig:
     store_strategy_on_traverser_nodes: bool = True
     max_depth: int | None = 8
     max_nodes_per_traversal: int | None = 10_000
+    cutoff_value_mode: str = "score_diff"
+    cutoff_rollouts: int = 0
+    cutoff_rollout_policy: str = "random"
+    cutoff_rollout_max_steps: int = 10_000
     progress_every_traversals: int = 10
     num_workers: int | str = 0
     traversal_worker_chunk_size: int = 4
     profile_hotspots: bool = False
     regret_matching_epsilon: float = 1.0e-8
+
+    def __post_init__(self) -> None:
+        mode = str(self.cutoff_value_mode).strip().lower()
+        if mode not in {"score_diff", "random_rollout"}:
+            raise ValueError("traversal.cutoff_value_mode must be one of 'score_diff' or 'random_rollout'")
+        self.cutoff_value_mode = mode
+        policy = str(self.cutoff_rollout_policy).strip().lower()
+        if policy != "random":
+            raise ValueError("traversal.cutoff_rollout_policy currently only supports 'random'")
+        self.cutoff_rollout_policy = policy
+        self.cutoff_rollouts = int(self.cutoff_rollouts)
+        if self.cutoff_rollouts < 0:
+            raise ValueError("traversal.cutoff_rollouts must be nonnegative")
+        self.cutoff_rollout_max_steps = int(self.cutoff_rollout_max_steps)
+        if self.cutoff_rollout_max_steps <= 0:
+            raise ValueError("traversal.cutoff_rollout_max_steps must be positive")
 
     def resolved_num_workers(self) -> tuple[int, bool]:
         value = self.num_workers

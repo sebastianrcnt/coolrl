@@ -18,6 +18,13 @@ class TraversalBenchmarkResult:
     traversals: int
     nodes_per_second: float
     avg_nodes_per_traversal: float
+    cutoffs: int
+    cutoff_rate: float
+    node_limit_cutoffs: int
+    node_limit_cutoff_rate: float
+    cutoff_rollouts: int
+    cutoff_rollout_steps: int
+    cutoff_rollout_max_step_timeouts: int
 
 
 def _benchmark_config_variant(config: RunConfig, *, num_workers: int, checkpoint_dir: Path) -> RunConfig:
@@ -53,6 +60,13 @@ def _run_traversal_benchmark_once(config: RunConfig, *, iteration: int) -> Trave
         traversals=traversals,
         nodes_per_second=total_stats.nodes / max(1.0e-9, traversal_seconds),
         avg_nodes_per_traversal=total_stats.nodes / max(1, traversals),
+        cutoffs=total_stats.cutoffs,
+        cutoff_rate=total_stats.cutoffs / max(1, total_stats.nodes),
+        node_limit_cutoffs=total_stats.node_limit_cutoffs,
+        node_limit_cutoff_rate=total_stats.node_limit_cutoffs / max(1, total_stats.nodes),
+        cutoff_rollouts=total_stats.cutoff_rollouts,
+        cutoff_rollout_steps=total_stats.cutoff_rollout_steps,
+        cutoff_rollout_max_step_timeouts=total_stats.cutoff_rollout_max_step_timeouts,
     )
 
 
@@ -86,6 +100,13 @@ def benchmark_traversal_modes(
             "traversals": single.traversals,
             "nodes_per_second": single.nodes_per_second,
             "avg_nodes_per_traversal": single.avg_nodes_per_traversal,
+            "cutoffs": single.cutoffs,
+            "cutoff_rate": single.cutoff_rate,
+            "node_limit_cutoffs": single.node_limit_cutoffs,
+            "node_limit_cutoff_rate": single.node_limit_cutoff_rate,
+            "cutoff_rollouts": single.cutoff_rollouts,
+            "cutoff_rollout_steps": single.cutoff_rollout_steps,
+            "cutoff_rollout_max_step_timeouts": single.cutoff_rollout_max_step_timeouts,
         },
         "multiprocessing": {
             "num_workers": multiprocessing.num_workers,
@@ -94,6 +115,13 @@ def benchmark_traversal_modes(
             "traversals": multiprocessing.traversals,
             "nodes_per_second": multiprocessing.nodes_per_second,
             "avg_nodes_per_traversal": multiprocessing.avg_nodes_per_traversal,
+            "cutoffs": multiprocessing.cutoffs,
+            "cutoff_rate": multiprocessing.cutoff_rate,
+            "node_limit_cutoffs": multiprocessing.node_limit_cutoffs,
+            "node_limit_cutoff_rate": multiprocessing.node_limit_cutoff_rate,
+            "cutoff_rollouts": multiprocessing.cutoff_rollouts,
+            "cutoff_rollout_steps": multiprocessing.cutoff_rollout_steps,
+            "cutoff_rollout_max_step_timeouts": multiprocessing.cutoff_rollout_max_step_timeouts,
         },
         "speedup_vs_single_process": single.traversal_seconds / max(1.0e-9, multiprocessing.traversal_seconds),
     }

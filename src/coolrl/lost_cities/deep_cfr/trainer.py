@@ -182,6 +182,7 @@ class DeepCFRTrainer:
         nodes_per_second = total_stats.nodes / max(1.0e-9, traversal_seconds)
         cutoff_rate = total_stats.cutoffs / max(1, total_stats.nodes)
         node_limit_cutoff_rate = total_stats.node_limit_cutoffs / max(1, total_stats.nodes)
+        avg_cutoff_rollout_steps = total_stats.cutoff_rollout_steps / max(1, total_stats.cutoff_rollouts)
         metrics: dict[str, Any] = {
             "iteration": iteration,
             "elapsed_seconds": self.elapsed_seconds,
@@ -194,6 +195,10 @@ class DeepCFRTrainer:
             "cutoff_rate": cutoff_rate,
             "total_node_limit_cutoffs": total_stats.node_limit_cutoffs,
             "node_limit_cutoff_rate": node_limit_cutoff_rate,
+            "cutoff_rollouts": total_stats.cutoff_rollouts,
+            "cutoff_rollout_steps": total_stats.cutoff_rollout_steps,
+            "cutoff_rollout_max_step_timeouts": total_stats.cutoff_rollout_max_step_timeouts,
+            "avg_cutoff_rollout_steps": avg_cutoff_rollout_steps,
             "nodes_per_second": nodes_per_second,
             "traversals_per_second": traversals / max(1.0e-9, traversal_seconds),
             "avg_nodes_per_traversal": total_stats.nodes / max(1, traversals),
@@ -208,13 +213,15 @@ class DeepCFRTrainer:
         if hotspot_stats is not None:
             metrics.update(self._hotspot_metrics(hotspot_stats))
         logger.info(
-            "Iteration {}: nodes={} cutoffs={} node_limit_cutoffs={} cutoff_rate={:.4f} node_limit_cutoff_rate={:.4f} nps={:.1f} adv_loss=({:.4f},{:.4f}) strategy_loss={:.4f}",
+            "Iteration {}: nodes={} cutoffs={} node_limit_cutoffs={} cutoff_rate={:.4f} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_timeouts={} nps={:.1f} adv_loss=({:.4f},{:.4f}) strategy_loss={:.4f}",
             iteration,
             total_stats.nodes,
             total_stats.cutoffs,
             total_stats.node_limit_cutoffs,
             cutoff_rate,
             node_limit_cutoff_rate,
+            total_stats.cutoff_rollouts,
+            total_stats.cutoff_rollout_max_step_timeouts,
             nodes_per_second,
             advantage_losses[0],
             advantage_losses[1],
@@ -265,6 +272,10 @@ class DeepCFRTrainer:
             store_strategy_on_traverser_nodes=self.config.traversal.store_strategy_on_traverser_nodes,
             max_depth=self.config.traversal.max_depth,
             max_nodes_per_traversal=self.config.traversal.max_nodes_per_traversal,
+            cutoff_value_mode=self.config.traversal.cutoff_value_mode,
+            cutoff_rollouts=self.config.traversal.cutoff_rollouts,
+            cutoff_rollout_policy=self.config.traversal.cutoff_rollout_policy,
+            cutoff_rollout_max_steps=self.config.traversal.cutoff_rollout_max_steps,
             rng=self.rng,
             timing_stats=hotspot_stats,
         )
@@ -276,11 +287,7 @@ class DeepCFRTrainer:
                 seed = self._traversal_seed(iteration, player, index)
                 state = GameState.new_game(self.lc_config, seed=seed)
                 _, stats = traverser.traverse(state, player, iteration)
-                total_stats.nodes += stats.nodes
-                total_stats.terminals += stats.terminals
-                total_stats.cutoffs += stats.cutoffs
-                total_stats.node_limit_cutoffs += stats.node_limit_cutoffs
-                total_stats.max_depth_reached = max(total_stats.max_depth_reached, stats.max_depth_reached)
+                total_stats.accumulate(stats)
                 traversals += 1
                 progress_every = self.config.traversal.progress_every_traversals
                 if progress_every > 0 and (index + 1) % progress_every == 0:
@@ -335,6 +342,10 @@ class DeepCFRTrainer:
                         seeds=chunk,
                         max_depth=self.config.traversal.max_depth,
                         max_nodes_per_traversal=self.config.traversal.max_nodes_per_traversal,
+                        cutoff_value_mode=self.config.traversal.cutoff_value_mode,
+                        cutoff_rollouts=self.config.traversal.cutoff_rollouts,
+                        cutoff_rollout_policy=self.config.traversal.cutoff_rollout_policy,
+                        cutoff_rollout_max_steps=self.config.traversal.cutoff_rollout_max_steps,
                         strategy_sample_interval=self.config.traversal.strategy_sample_interval,
                         store_strategy_on_opponent_nodes=self.config.traversal.store_strategy_on_opponent_nodes,
                         store_strategy_on_traverser_nodes=self.config.traversal.store_strategy_on_traverser_nodes,
@@ -360,11 +371,7 @@ class DeepCFRTrainer:
         result: TraversalWorkerBatchResult,
         hotspot_stats: TraversalTimingStats | None = None,
     ) -> int:
-        total_stats.nodes += result.stats.nodes
-        total_stats.terminals += result.stats.terminals
-        total_stats.cutoffs += result.stats.cutoffs
-        total_stats.node_limit_cutoffs += result.stats.node_limit_cutoffs
-        total_stats.max_depth_reached = max(total_stats.max_depth_reached, result.stats.max_depth_reached)
+        total_stats.accumulate(result.stats)
         self._merge_advantage_samples(result.traverser, result.advantage_samples)
         self._merge_strategy_samples(result.strategy_samples)
         if hotspot_stats is not None:

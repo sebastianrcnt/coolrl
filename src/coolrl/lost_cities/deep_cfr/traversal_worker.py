@@ -30,6 +30,10 @@ class TraversalWorkerBatch:
     seeds: list[int]
     max_depth: int | None
     max_nodes_per_traversal: int | None
+    cutoff_value_mode: str
+    cutoff_rollouts: int
+    cutoff_rollout_policy: str
+    cutoff_rollout_max_steps: int
     strategy_sample_interval: int
     store_strategy_on_opponent_nodes: bool
     store_strategy_on_traverser_nodes: bool
@@ -109,6 +113,10 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         store_strategy_on_traverser_nodes=batch.store_strategy_on_traverser_nodes,
         max_depth=batch.max_depth,
         max_nodes_per_traversal=batch.max_nodes_per_traversal,
+        cutoff_value_mode=batch.cutoff_value_mode,
+        cutoff_rollouts=batch.cutoff_rollouts,
+        cutoff_rollout_policy=batch.cutoff_rollout_policy,
+        cutoff_rollout_max_steps=batch.cutoff_rollout_max_steps,
         rng=rng,
         timing_stats=timing_stats,
     )
@@ -117,11 +125,7 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
     for seed in batch.seeds:
         state = GameState.new_game(lc_config, seed=seed)
         _, stats = traverser.traverse(state, batch.traverser, batch.iteration)
-        total_stats.nodes += stats.nodes
-        total_stats.terminals += stats.terminals
-        total_stats.cutoffs += stats.cutoffs
-        total_stats.node_limit_cutoffs += stats.node_limit_cutoffs
-        total_stats.max_depth_reached = max(total_stats.max_depth_reached, stats.max_depth_reached)
+        total_stats.accumulate(stats)
 
     return TraversalWorkerBatchResult(
         batch_index=batch.batch_index,

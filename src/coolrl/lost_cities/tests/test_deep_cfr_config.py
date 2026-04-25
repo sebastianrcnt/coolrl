@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coolrl.lost_cities.deep_cfr.config import RulesConfig, load_config
+from coolrl.lost_cities.deep_cfr.config import RulesConfig, config_from_dict, load_config
 
 
 def test_load_default_config_is_tier3() -> None:
@@ -18,6 +18,10 @@ def test_load_yaml_profile() -> None:
     assert cfg.traversal.store_strategy_on_opponent_nodes is True
     assert cfg.traversal.store_strategy_on_traverser_nodes is True
     assert cfg.traversal.max_nodes_per_traversal == 10_000
+    assert cfg.traversal.cutoff_value_mode == "score_diff"
+    assert cfg.traversal.cutoff_rollouts == 0
+    assert cfg.traversal.cutoff_rollout_policy == "random"
+    assert cfg.traversal.cutoff_rollout_max_steps == 10_000
     assert cfg.traversal.progress_every_traversals == 10
     assert cfg.traversal.num_workers == 0
     assert cfg.traversal.traversal_worker_chunk_size == 4
@@ -40,6 +44,24 @@ def test_load_probe_yaml_profile() -> None:
     assert cfg.evaluation.max_steps == 10_000
     assert cfg.evaluation.on_max_steps == "score_diff"
     assert cfg.checkpoint.save_latest_only is False
+
+
+def test_load_cutoff_random_rollout_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_cutoff_random_rollout"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollouts == 1
+    assert cfg.traversal.cutoff_rollout_policy == "random"
+    assert cfg.traversal.cutoff_rollout_max_steps == 10_000
+    assert cfg.traversal.max_depth == 12
+    assert cfg.traversal.max_nodes_per_traversal == 10_000
+
+
+def test_default_cutoff_config_preserves_score_diff_behavior() -> None:
+    cfg = config_from_dict({})
+    assert cfg.traversal.cutoff_value_mode == "score_diff"
+    assert cfg.traversal.cutoff_rollouts == 0
+    assert cfg.traversal.cutoff_rollout_policy == "random"
 
 
 def test_rules_config_default_tier3_shape() -> None:

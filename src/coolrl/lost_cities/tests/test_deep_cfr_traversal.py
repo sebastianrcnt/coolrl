@@ -80,6 +80,67 @@ def test_cfr_traversal_max_depth_cutoff_returns_current_score_diff() -> None:
     assert stats.nodes == 1
 
 
+def test_cfr_traversal_random_rollout_cutoff_returns_numeric_value_and_stats() -> None:
+    config = tier_config("tier1", seed=15)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config, seed=15),
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=0,
+        cutoff_value_mode="random_rollout",
+        cutoff_rollouts=2,
+        cutoff_rollout_max_steps=1000,
+        rng=np.random.default_rng(19),
+    )
+
+    assert math.isfinite(value)
+    assert stats.cutoffs == 1
+    assert stats.cutoff_rollouts == 2
+    assert stats.cutoff_rollout_steps > 0
+    assert stats.cutoff_rollout_max_step_timeouts == 0
+
+
+def test_cfr_traversal_random_rollout_records_max_step_timeout() -> None:
+    config = tier_config("tier1", seed=16)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config, seed=16),
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=0,
+        cutoff_value_mode="random_rollout",
+        cutoff_rollouts=1,
+        cutoff_rollout_max_steps=1,
+        rng=np.random.default_rng(20),
+    )
+
+    assert math.isfinite(value)
+    assert stats.cutoff_rollouts == 1
+    assert stats.cutoff_rollout_steps == 1
+    assert stats.cutoff_rollout_max_step_timeouts == 1
+
+
 def test_cfr_traversal_node_limit_cutoff_returns_current_score_diff() -> None:
     config = tier_config("tier1", seed=21)
     input_dim = infer_input_dim(config)

@@ -89,22 +89,36 @@ def benchmark_traversal_command(args: argparse.Namespace) -> None:
         result["device_used"],
     )
     logger.info(
-        "Single-process: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f}",
+        "Single-process: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f} cutoffs={} cutoff_rate={:.4f} node_limit_cutoffs={} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_steps={} rollout_timeouts={}",
         single["num_workers"],
         single["traversal_seconds"],
         single["total_nodes"],
         single["traversals"],
         single["avg_nodes_per_traversal"],
         single["nodes_per_second"],
+        single["cutoffs"],
+        single["cutoff_rate"],
+        single["node_limit_cutoffs"],
+        single["node_limit_cutoff_rate"],
+        single["cutoff_rollouts"],
+        single["cutoff_rollout_steps"],
+        single["cutoff_rollout_max_step_timeouts"],
     )
     logger.info(
-        "Multiprocessing: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f}",
+        "Multiprocessing: workers={} traversal_seconds={:.4f} total_nodes={} traversals={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f} cutoffs={} cutoff_rate={:.4f} node_limit_cutoffs={} node_limit_cutoff_rate={:.4f} cutoff_rollouts={} rollout_steps={} rollout_timeouts={}",
         multiprocessing["num_workers"],
         multiprocessing["traversal_seconds"],
         multiprocessing["total_nodes"],
         multiprocessing["traversals"],
         multiprocessing["avg_nodes_per_traversal"],
         multiprocessing["nodes_per_second"],
+        multiprocessing["cutoffs"],
+        multiprocessing["cutoff_rate"],
+        multiprocessing["node_limit_cutoffs"],
+        multiprocessing["node_limit_cutoff_rate"],
+        multiprocessing["cutoff_rollouts"],
+        multiprocessing["cutoff_rollout_steps"],
+        multiprocessing["cutoff_rollout_max_step_timeouts"],
     )
     logger.info(
         "Traversal benchmark speedup vs single-process: {:.3f}x",
@@ -128,9 +142,13 @@ def status_command(args: argparse.Namespace) -> None:
     )
     if "cutoff_rate" in latest or "node_limit_cutoff_rate" in latest:
         logger.info(
-            "Cutoffs: cutoff_rate={} node_limit_cutoff_rate={}",
+            "Cutoffs: cutoff_rate={} node_limit_cutoff_rate={} cutoff_rollouts={} cutoff_rollout_steps={} avg_cutoff_rollout_steps={} cutoff_rollout_max_step_timeouts={}",
             latest.get("cutoff_rate", "n/a"),
             latest.get("node_limit_cutoff_rate", "n/a"),
+            latest.get("cutoff_rollouts", "n/a"),
+            latest.get("cutoff_rollout_steps", "n/a"),
+            latest.get("avg_cutoff_rollout_steps", "n/a"),
+            latest.get("cutoff_rollout_max_step_timeouts", "n/a"),
         )
     if "advantage_loss_p0" in latest or "advantage_loss_p1" in latest or "strategy_loss" in latest:
         logger.info(
