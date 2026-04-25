@@ -83,9 +83,18 @@ class DeepCFRTrainer:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.metrics_path = self.checkpoint_dir / "metrics.jsonl"
         self.progress_path = self.checkpoint_dir / "runtime_progress.json"
-        self.num_workers, _ = config.traversal.resolved_num_workers()
+        self.num_workers, num_workers_auto, cpu_guess, num_batches = (
+            config.traversal.resolved_num_workers_for_traversal()
+        )
         self.traversal_worker_chunk_size = max(1, int(config.traversal.traversal_worker_chunk_size))
         self.profile_hotspots = bool(config.traversal.profile_hotspots)
+        if num_workers_auto:
+            logger.info(
+                "Resolved traversal.num_workers=auto to requested_workers={} using cpu_guess={} num_batches={}",
+                self.num_workers,
+                cpu_guess,
+                num_batches,
+            )
         if resume_path is None and self.metrics_path.exists():
             archive = self.metrics_path.with_name(f"metrics.{time.strftime('%Y%m%d-%H%M%S')}.jsonl")
             shutil.move(self.metrics_path, archive)
@@ -316,11 +325,7 @@ class DeepCFRTrainer:
         return frozen_state_dicts
 
     def _estimated_traversal_batch_count(self) -> int:
-        traversals_per_player = int(self.config.traversal.traversals_per_player)
-        if traversals_per_player <= 0:
-            return 0
-        chunks_per_player = (traversals_per_player + self.traversal_worker_chunk_size - 1) // self.traversal_worker_chunk_size
-        return 2 * chunks_per_player
+        return self.config.traversal.estimated_num_batches()
 
     def _build_traversal_worker_batches(
         self,

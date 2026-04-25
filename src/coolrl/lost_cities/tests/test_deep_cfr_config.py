@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 from coolrl.lost_cities.deep_cfr.config import RulesConfig, config_from_dict, load_config
@@ -76,3 +78,114 @@ def test_rules_config_overrides() -> None:
     lc_cfg = RulesConfig(bonus_threshold=7, expedition_penalty=-15).to_lost_cities_config()
     assert lc_cfg.bonus_threshold == 7
     assert lc_cfg.expedition_penalty == -15
+
+
+def test_traversal_num_workers_explicit_values_remain_unchanged() -> None:
+    cfg = config_from_dict(
+        {
+            "traversal": {
+                "num_workers": 4,
+                "traversals_per_player": 20,
+                "traversal_worker_chunk_size": 4,
+            }
+        }
+    )
+
+    resolved, is_auto, cpu_guess, num_batches = cfg.traversal.resolved_num_workers_for_traversal()
+
+    assert resolved == 4
+    assert is_auto is False
+    assert cpu_guess is None
+    assert num_batches is None
+
+
+def test_traversal_num_workers_auto_is_capped_by_batch_count(monkeypatch) -> None:
+    monkeypatch.setattr("coolrl.lost_cities.deep_cfr.config.os.cpu_count", lambda: 32)
+    monkeypatch.setitem(sys.modules, "psutil", types.SimpleNamespace(cpu_count=lambda logical=False: 16))
+    cfg = config_from_dict(
+        {
+            "traversal": {
+                "num_workers": "auto",
+                "traversals_per_player": 3,
+                "traversal_worker_chunk_size": 2,
+            }
+        }
+    )
+
+    resolved, is_auto, cpu_guess, num_batches = cfg.traversal.resolved_num_workers_for_traversal()
+
+    assert resolved == 4
+    assert is_auto is True
+    assert cpu_guess == 16
+    assert num_batches == 4
+
+
+def test_traversal_num_workers_auto_never_returns_below_one(monkeypatch) -> None:
+    monkeypatch.setattr("coolrl.lost_cities.deep_cfr.config.os.cpu_count", lambda: 1)
+    monkeypatch.setitem(sys.modules, "psutil", types.SimpleNamespace(cpu_count=lambda logical=False: None))
+    cfg = config_from_dict(
+        {
+            "traversal": {
+                "num_workers": "auto",
+                "traversals_per_player": 0,
+                "traversal_worker_chunk_size": 4,
+            }
+        }
+    )
+
+    resolved, is_auto, cpu_guess, num_batches = cfg.traversal.resolved_num_workers_for_traversal()
+
+    assert resolved == 1
+    assert is_auto is True
+    assert cpu_guess == 1
+    assert num_batches == 0
+
+
+def test_traversal_num_workers_auto_falls_back_without_psutil(monkeypatch) -> None:
+    monkeypatch.setattr("coolrl.lost_cities.deep_cfr.config.os.cpu_count", lambda: 12)
+    monkeypatch.delitem(sys.modules, "psutil", raising=False)
+    real_import = __import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name == "psutil":
+            raise ImportError("psutil not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _fake_import)
+    cfg = config_from_dict(
+        {
+            "traversal": {
+                "num_workers": "auto",
+                "traversals_per_player": 20,
+                "traversal_worker_chunk_size": 4,
+            }
+        }
+    )
+
+    resolved, is_auto, cpu_guess, num_batches = cfg.traversal.resolved_num_workers_for_traversal()
+
+    assert resolved == 6
+    assert is_auto is True
+    assert cpu_guess == 6
+    assert num_batches == 10
+
+
+def test_traversal_num_workers_auto_prefers_physical_core_count(monkeypatch) -> None:
+    monkeypatch.setattr("coolrl.lost_cities.deep_cfr.config.os.cpu_count", lambda: 32)
+    monkeypatch.setitem(sys.modules, "psutil", types.SimpleNamespace(cpu_count=lambda logical=False: 14))
+    cfg = config_from_dict(
+        {
+            "traversal": {
+                "num_workers": "auto",
+                "traversals_per_player": 20,
+                "traversal_worker_chunk_size": 4,
+            }
+        }
+    )
+
+    resolved, is_auto, cpu_guess, num_batches = cfg.traversal.resolved_num_workers_for_traversal()
+
+    assert resolved == 10
+    assert is_auto is True
+    assert cpu_guess == 14
+    assert num_batches == 10

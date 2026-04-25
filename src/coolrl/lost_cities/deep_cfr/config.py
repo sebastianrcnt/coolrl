@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -80,17 +81,48 @@ class TraversalConfig:
         if self.cutoff_rollout_max_steps <= 0:
             raise ValueError("traversal.cutoff_rollout_max_steps must be positive")
 
+    def _cpu_worker_guess(self) -> int:
+        logical = max(1, os.cpu_count() or 1)
+        physical = None
+        try:
+            psutil = sys.modules.get("psutil")
+            if psutil is None:
+                import psutil as imported_psutil
+
+                psutil = imported_psutil
+            physical = psutil.cpu_count(logical=False)
+        except Exception:
+            physical = None
+        return max(1, int(physical) if physical else logical // 2)
+
+    def estimated_num_batches(self) -> int:
+        traversals_per_player = max(0, int(self.traversals_per_player))
+        if traversals_per_player <= 0:
+            return 0
+        chunk_size = max(1, int(self.traversal_worker_chunk_size))
+        chunks_per_player = (traversals_per_player + chunk_size - 1) // chunk_size
+        return 2 * chunks_per_player
+
     def resolved_num_workers(self) -> tuple[int, bool]:
         value = self.num_workers
         if isinstance(value, str):
             token = value.strip().lower()
             if token == "auto":
-                return max(1, os.cpu_count() or 1), True
+                return self._cpu_worker_guess(), True
             try:
                 return max(0, int(token)), False
             except ValueError as exc:
                 raise ValueError(f"unsupported traversal.num_workers: {value!r}") from exc
         return max(0, int(value)), False
+
+    def resolved_num_workers_for_traversal(self) -> tuple[int, bool, int | None, int | None]:
+        requested_workers, is_auto = self.resolved_num_workers()
+        if not is_auto:
+            return requested_workers, False, None, None
+        cpu_guess = requested_workers
+        num_batches = self.estimated_num_batches()
+        resolved = max(1, min(cpu_guess, num_batches)) if num_batches > 0 else 1
+        return resolved, True, cpu_guess, num_batches
 
 
 @dataclass(slots=True)
