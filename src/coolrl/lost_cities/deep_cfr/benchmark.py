@@ -115,7 +115,7 @@ def benchmark_traversal_modes(
             )
 
         if mode in ("compare", "mp"):
-            logger.info("Running multiprocessing traversal benchmark with workers={}...", mp_workers)
+            logger.info("Running multiprocessing traversal benchmark with requested_workers=%s...", mp_workers)
             mp_result = _run_traversal_benchmark_once(
                 _benchmark_config_variant(config, num_workers=mp_workers, checkpoint_dir=base_dir / "multi"),
                 iteration=iteration,
