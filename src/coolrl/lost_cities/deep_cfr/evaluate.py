@@ -121,6 +121,15 @@ def _expedition_card_count(state: GameState, player: int) -> int:
     return sum(len(expedition) for expedition in state.expeditions[player])
 
 
+def is_card_play_action(action_id: int) -> bool:
+    """Card-phase phase-local actions use even ids for play and odd ids for discard."""
+    return action_id % 2 == 0
+
+
+def is_card_discard_action(action_id: int) -> bool:
+    return not is_card_play_action(action_id)
+
+
 def _play_game_for_evaluation(
     bot0: LostCitiesBot,
     bot1: LostCitiesBot,
@@ -141,9 +150,9 @@ def _play_game_for_evaluation(
         phase = state.phase
         action = bots[state.current_player].act(state)
         if tracked_player is not None and acting_player == tracked_player and phase == "card":
-            if action % 2 == 0:
+            if is_card_play_action(action):
                 action_counts["play_actions"] += 1
-            else:
+            elif is_card_discard_action(action):
                 action_counts["discard_actions"] += 1
         state.apply_action(action)
     return state, not state.terminal, action_counts
