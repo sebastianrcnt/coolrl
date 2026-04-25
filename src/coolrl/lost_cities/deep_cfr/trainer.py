@@ -315,6 +315,13 @@ class DeepCFRTrainer:
             )
         return frozen_state_dicts
 
+    def _estimated_traversal_batch_count(self) -> int:
+        traversals_per_player = int(self.config.traversal.traversals_per_player)
+        if traversals_per_player <= 0:
+            return 0
+        chunks_per_player = (traversals_per_player + self.traversal_worker_chunk_size - 1) // self.traversal_worker_chunk_size
+        return 2 * chunks_per_player
+
     def _build_traversal_worker_batches(
         self,
         iteration: int,
@@ -402,6 +409,13 @@ class DeepCFRTrainer:
             len(batches),
             self.traversal_worker_chunk_size,
         )
+        if max_workers < self.num_workers:
+            logger.warning(
+                "Requested {} traversal workers but only {} batches are available; using {} workers. To use more workers, decrease traversal_worker_chunk_size or increase traversals_per_player.",
+                self.num_workers,
+                len(batches),
+                max_workers,
+            )
 
         total_stats = TraversalStats()
         traversals = 0
@@ -429,7 +443,7 @@ class DeepCFRTrainer:
                     avg_nodes = progress_nodes / max(1, progress_traversals)
                     nodes_per_second = progress_nodes / max(1.0e-9, elapsed)
                     logger.info(
-                        "Traversal multiprocessing progress: num_workers={} completed_batches={}/{} elapsed_seconds={:.2f} total_nodes={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f}",
+                        "Traversal multiprocessing progress: effective_workers={} completed_batches={}/{} elapsed_seconds={:.2f} total_nodes={} avg_nodes_per_traversal={:.1f} nodes_per_second={:.1f}",
                         max_workers,
                         completed_batches,
                         total_batches,
