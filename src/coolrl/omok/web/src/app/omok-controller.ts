@@ -1,5 +1,13 @@
 import { GameState, type Player } from "../core/game-state";
-import { MCTS, type TreeNode, type WeakeningParams } from "../core/mcts";
+import { MCTS, type TreeNode } from "../core/mcts";
+import {
+  DIFFICULTY_PRESETS,
+  DEFAULT_DIFFICULTY,
+  MOBILE_DEFAULT_DIFFICULTY,
+  getDifficultyPreset,
+  type Difficulty,
+  type DifficultyPreset,
+} from "./difficulty-presets";
 import { WorkerEvaluator } from "../evaluator/worker-evaluator";
 import {
   makeMetricsForCanvas,
@@ -35,24 +43,6 @@ import { logDebug, logError, logInfo, logWarn } from "../util/logger";
 const BOARD_SIZE = 15;
 const DEFAULT_MODEL_URL = "./best.onnx";
 const MOBILE_MCTS_MAX_CHILDREN = 48;
-
-interface DifficultyPreset {
-  readonly label: string;
-  readonly sims: number;
-  readonly weakening: WeakeningParams | null; // null = argmax (최강)
-}
-
-const DIFFICULTY_PRESETS = {
-  strong:   { label: "강함",      sims: 256, weakening: null },
-  hard:     { label: "어려움",    sims: 128, weakening: { temperature: 0.35, topK: 3,  minVisitRatio: 0.35, qDrop: 0.10, qWeight: 3.0, priorWeight: 0.20 } },
-  normal:   { label: "보통",      sims: 128, weakening: { temperature: 0.55, topK: 5,  minVisitRatio: 0.22, qDrop: 0.18, qWeight: 2.5, priorWeight: 0.25 } },
-  easy:     { label: "쉬움",      sims: 96,  weakening: { temperature: 1.20, topK: 12, minVisitRatio: 0.10, qDrop: 0.35, qWeight: 1.0, priorWeight: 0.40 } },
-  veryEasy: { label: "매우 쉬움", sims: 96,  weakening: { temperature: 2.50, topK: 25, minVisitRatio: 0.04, qDrop: 0.65, qWeight: 0.2, priorWeight: 0.55 } },
-} as const satisfies Record<string, DifficultyPreset>;
-
-type Difficulty = keyof typeof DIFFICULTY_PRESETS;
-const DEFAULT_DIFFICULTY: Difficulty = "normal";
-const MOBILE_DEFAULT_DIFFICULTY: Difficulty = "easy";
 
 export interface DomRefs {
   canvas: HTMLCanvasElement;
@@ -919,8 +909,7 @@ export class OmokController {
   }
 
   private readDifficultyPreset(): DifficultyPreset {
-    const key = this.dom.difficultySelect.value as Difficulty;
-    return DIFFICULTY_PRESETS[key] ?? DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY];
+    return getDifficultyPreset(this.dom.difficultySelect.value);
   }
 
   private reuseSearchTree(): boolean {
@@ -1086,10 +1075,7 @@ export class OmokController {
       get modelBytes() { return ctrl.modelSource.bytes; },
       get defaultModelLoadStarted() { return ctrl.defaultModelLoadStarted; },
       get simsCount() { return ctrl.readDifficultyPreset().sims; },
-      get difficulty() {
-        const key = ctrl.dom.difficultySelect.value as Difficulty;
-        return DIFFICULTY_PRESETS[key]?.label ?? DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY].label;
-      },
+      get difficulty() { return ctrl.readDifficultyPreset().label; },
       get maxChildren() {
         return ctrl.env.isLowMemoryMode ? MOBILE_MCTS_MAX_CHILDREN : Infinity;
       },
