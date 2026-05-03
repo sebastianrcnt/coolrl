@@ -386,8 +386,16 @@ export function chooseMoveWithWeakening(
     const second = sorted[1]!;
     const qGap = best.q - second.q;
     const visitDomFloor = Math.max(8, Math.floor(0.15 * numSims));
-    const qForced = qGap >= 0.30 && best.visits >= 4;
+    // qGap 0.20: catches forced-block scenarios (open-3 등) without locking
+    // every minor preference. Open-3 typically yields qGap 0.25–0.45 since
+    // ignoring it lets opponent build open-4 next turn.
+    const qForced = qGap >= 0.20 && best.visits >= 4;
     const visitDom = best.visits >= second.visits * 3.0 && best.visits >= visitDomFloor;
+    const top5 = sorted.slice(0, 5).map(c => ({
+      a: c.action,
+      n: c.visits,
+      q: Number(c.q.toFixed(3)),
+    }));
     if (qForced || visitDom) {
       logInfo("MCTS", "weakening.bypass", {
         reason: qForced ? "qForced" : "visitDom",
@@ -397,9 +405,18 @@ export function chooseMoveWithWeakening(
         secondVisits: second.visits,
         secondQ: Number(second.q.toFixed(3)),
         qGap: Number(qGap.toFixed(3)),
+        top5,
       });
       return best.action;
     }
+    // Log non-bypass case too — so we can see when filtering proceeds and
+    // verify whether the dominant signal was actually present in the data.
+    logInfo("MCTS", "weakening.sample", {
+      qGap: Number(qGap.toFixed(3)),
+      bestVisits: best.visits,
+      visitRatio: Number((best.visits / Math.max(1, second.visits)).toFixed(2)),
+      top5,
+    });
   }
 
   // 1. visit ratio cut

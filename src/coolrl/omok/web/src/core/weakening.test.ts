@@ -51,6 +51,36 @@ describe("chooseMoveWithWeakening — dominant-move bypass", () => {
     expect(action).toBe(10);
   });
 
+  it("blocks an open-3: medium Q gap (~0.30) still triggers bypass", () => {
+    // Open-3 is not immediate loss but demands a block. MCTS at sims=96
+    // typically yields a moderate Q gap (block ≈ +0.2, attacks ≈ -0.1 to -0.3).
+    const candidates = [
+      cand(10, 22, +0.20),  // block one end
+      cand(20, 14, -0.15),  // some attack
+      cand(30, 11, -0.20),
+      cand(40,  8, -0.25),
+    ];
+    const action = chooseMoveWithWeakening(candidates, VERY_EASY, 96, constRng(0.5));
+    expect(action).toBe(10);
+  });
+
+  it("does NOT bypass on a minor Q preference (gap < 0.20)", () => {
+    const candidates = [
+      cand(10, 25, +0.30),
+      cand(20, 22, +0.15),  // qGap = 0.15, below threshold
+      cand(30, 20, +0.10),
+      cand(40, 18, +0.05),
+    ];
+    const seen = new Set<number>();
+    let i = 0;
+    const rng = () => ((i++ * 0.137) % 1);
+    for (let k = 0; k < 30; k++) {
+      seen.add(chooseMoveWithWeakening(candidates, VERY_EASY, 96, rng));
+    }
+    // Sampling proceeds → multiple distinct actions over many draws.
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
   it("visit-dominated best is selected even if Q gap is small", () => {
     // No clear Q signal but MCTS heavily concentrated on action 10.
     const candidates = [
