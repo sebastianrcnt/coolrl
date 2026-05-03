@@ -1,5 +1,5 @@
 import { GameState, type Player } from "../core/game-state";
-import { MCTS, type TreeNode } from "../core/mcts";
+import { MCTS, type TreeNode, type WeakeningParams } from "../core/mcts";
 import { WorkerEvaluator } from "../evaluator/worker-evaluator";
 import {
   makeMetricsForCanvas,
@@ -34,9 +34,25 @@ import { logDebug, logError, logInfo, logWarn } from "../util/logger";
 
 const BOARD_SIZE = 15;
 const DEFAULT_MODEL_URL = "./best.onnx";
-const DEFAULT_SIMS = 128;
 const MOBILE_MCTS_MAX_CHILDREN = 48;
-const MOBILE_DEFAULT_SIMS = 96;
+
+interface DifficultyPreset {
+  readonly label: string;
+  readonly sims: number;
+  readonly weakening: WeakeningParams | null; // null = argmax (최강)
+}
+
+const DIFFICULTY_PRESETS = {
+  strong:   { label: "강함",      sims: 256, weakening: null },
+  hard:     { label: "어려움",    sims: 128, weakening: { temperature: 0.35, topK: 3,  minVisitRatio: 0.35, qDrop: 0.10, qWeight: 3.0, priorWeight: 0.20 } },
+  normal:   { label: "보통",      sims: 128, weakening: { temperature: 0.55, topK: 5,  minVisitRatio: 0.22, qDrop: 0.18, qWeight: 2.5, priorWeight: 0.25 } },
+  easy:     { label: "쉬움",      sims: 96,  weakening: { temperature: 0.80, topK: 8,  minVisitRatio: 0.14, qDrop: 0.28, qWeight: 2.0, priorWeight: 0.30 } },
+  veryEasy: { label: "매우 쉬움", sims: 96,  weakening: { temperature: 1.05, topK: 12, minVisitRatio: 0.09, qDrop: 0.38, qWeight: 1.5, priorWeight: 0.35 } },
+} as const satisfies Record<string, DifficultyPreset>;
+
+type Difficulty = keyof typeof DIFFICULTY_PRESETS;
+const DEFAULT_DIFFICULTY: Difficulty = "normal";
+const MOBILE_DEFAULT_DIFFICULTY: Difficulty = "easy";
 
 export interface DomRefs {
   canvas: HTMLCanvasElement;
@@ -45,8 +61,7 @@ export interface DomRefs {
   fileName: HTMLElement;
   colorSelect: HTMLSelectElement;
   backendSelect: HTMLSelectElement;
-  simsSelect: HTMLSelectElement;
-  temperatureSelect: HTMLSelectElement;
+  difficultySelect: HTMLSelectElement;
   btnReset: HTMLButtonElement;
   btnSettings: HTMLButtonElement;
   btnSheetClose: HTMLButtonElement;
@@ -240,8 +255,7 @@ export class OmokController {
       if (!this.initialSetup) this.reloadModelForBackend();
       else this.updateInfo();
     });
-    on(this.dom.simsSelect, "change", () => this.debugPanel.render());
-    on(this.dom.temperatureSelect, "change", () => this.debugPanel.render());
+    on(this.dom.difficultySelect, "change", () => this.debugPanel.render());
     on(this.dom.btnReset, "click", () => { if (!this.busy) this.resetGame(); });
     on(this.dom.btnUndo, "click", () => this.undo());
     on(this.dom.btnAi, "click", () => {
@@ -735,8 +749,7 @@ export class OmokController {
     }
     this.setBusy(true);
     this.thinkingGhosts.start(this.game.toPlay);
-    const sims = this.readSimsValue();
-    const temperature = this.readTemperatureValue();
+    const { sims, weakening } = this.readDifficultyPreset();
     const template = pickLookaheadTemplate();
     this.aiProgress = formatLookahead(template, 1);
     this.statusPresenter.setThinking(this.aiProgress);
@@ -745,7 +758,7 @@ export class OmokController {
     try {
       const result = await this.mcts!.run(this.game, sims, {
         reuseRoot: this.reuseSearchTree() ? this.aiSubtree : null,
-        temperature,
+        weakening,
         onProgress: (done, _total, candidates) => {
           this.thinkingGhosts.updateCandidates(candidates);
           this.aiProgress = formatLookahead(template, done);
@@ -788,7 +801,7 @@ export class OmokController {
       this.scheduleEvaluatorIdleRelease();
       return;
     }
-    const sims = this.readSimsValue();
+    const { sims } = this.readDifficultyPreset();
     const template = pickLookaheadTemplate();
     this.statusPresenter.setThinking(formatLookahead(template, 1));
     this.setBusy(true);
@@ -888,8 +901,8 @@ export class OmokController {
       this.dom.backendSelect.value = "wasm";
       this.backendChoice = "wasm";
     }
-    if (this.env.isMobile && this.dom.simsSelect.value === String(DEFAULT_SIMS)) {
-      this.dom.simsSelect.value = String(MOBILE_DEFAULT_SIMS);
+    if (this.env.isMobile && this.dom.difficultySelect.value === DEFAULT_DIFFICULTY) {
+      this.dom.difficultySelect.value = MOBILE_DEFAULT_DIFFICULTY;
     }
     if (this.env.isMobile) {
       // WebGPU/WebNN on iOS Safari OOM-kills the tab under sustained MCTS
@@ -905,16 +918,9 @@ export class OmokController {
     }
   }
 
-  private readSimsValue(): number {
-    return parseInt(this.dom.simsSelect.value) || DEFAULT_SIMS;
-  }
-
-  // Read the action-selection temperature from the settings sheet.
-  // Negative or non-finite inputs collapse to 0 (argmax).
-  private readTemperatureValue(): number {
-    const raw = parseFloat(this.dom.temperatureSelect.value);
-    if (!Number.isFinite(raw) || raw < 0) return 0;
-    return raw;
+  private readDifficultyPreset(): DifficultyPreset {
+    const key = this.dom.difficultySelect.value as Difficulty;
+    return DIFFICULTY_PRESETS[key] ?? DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY];
   }
 
   private reuseSearchTree(): boolean {
@@ -1079,8 +1085,11 @@ export class OmokController {
       get modelName() { return ctrl.modelSource.name; },
       get modelBytes() { return ctrl.modelSource.bytes; },
       get defaultModelLoadStarted() { return ctrl.defaultModelLoadStarted; },
-      get simsCount() { return ctrl.readSimsValue(); },
-      get temperature() { return ctrl.readTemperatureValue(); },
+      get simsCount() { return ctrl.readDifficultyPreset().sims; },
+      get difficulty() {
+        const key = ctrl.dom.difficultySelect.value as Difficulty;
+        return DIFFICULTY_PRESETS[key]?.label ?? DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY].label;
+      },
       get maxChildren() {
         return ctrl.env.isLowMemoryMode ? MOBILE_MCTS_MAX_CHILDREN : Infinity;
       },

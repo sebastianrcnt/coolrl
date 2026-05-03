@@ -9,8 +9,7 @@
   let fileName: HTMLElement;
   let colorSelect: HTMLSelectElement;
   let backendSelect: HTMLSelectElement;
-  let simsSelect: HTMLSelectElement;
-  let temperatureSelect: HTMLSelectElement;
+  let difficultySelect: HTMLSelectElement;
   let btnReset: HTMLButtonElement;
   let btnSettings: HTMLButtonElement;
   let btnSheetClose: HTMLButtonElement;
@@ -39,8 +38,7 @@
       fileName,
       colorSelect,
       backendSelect,
-      simsSelect,
-      temperatureSelect,
+      difficultySelect,
       btnReset,
       btnSettings,
       btnSheetClose,
@@ -160,12 +158,13 @@
       </select>
     </div>
     <div class="sheet-row">
-      <span class="label">탐색 횟수</span>
-      <select bind:this={simsSelect} id="sims">
-        <option value="64">64 · 쉬움</option>
-        <option value="96">96 · 중간</option>
-        <option value="128" selected>128 · 어려움</option>
-        <option value="256">256 · 알파고</option>
+      <span class="label">난이도</span>
+      <select bind:this={difficultySelect} id="difficulty-select">
+        <option value="strong">강함</option>
+        <option value="hard">어려움</option>
+        <option value="normal" selected>보통</option>
+        <option value="easy">쉬움</option>
+        <option value="veryEasy">매우 쉬움</option>
       </select>
     </div>
   </div>
@@ -177,16 +176,6 @@
         <path d="m6 9 6 6 6-6" />
       </svg>
     </summary>
-    <div class="sheet-row">
-      <span class="label">무작위성 (τ)</span>
-      <select bind:this={temperatureSelect} id="temperature-select">
-        <option value="0" selected>0 · 항상 최선 (가장 강함)</option>
-        <option value="0.5">0.5 · 살짝 흔들림</option>
-        <option value="1">1.0 · 다양한 수</option>
-        <option value="1.5">1.5 · 약화</option>
-        <option value="2">2.0 · 많이 약함</option>
-      </select>
-    </div>
     <div class="sheet-row">
       <span class="label">추론 방식</span>
       <select bind:this={backendSelect} id="backend-select">

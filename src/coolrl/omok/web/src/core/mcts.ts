@@ -20,14 +20,23 @@ export interface ProgressCallback {
   (done: number, total: number, candidates: CandidateHint[]): void;
 }
 
+// Parameters that control how the AI deliberately weakens its move selection.
+// All filters are applied before sampling so "junk" tail moves never surface.
+export interface WeakeningParams {
+  temperature: number;    // softmax temperature over filtered candidates
+  topK: number;           // keep at most this many candidates by visit count
+  minVisitRatio: number;  // drop candidates with N < minVisitRatio * maxN
+  qDrop: number;          // drop candidates with Q < bestQ - qDrop
+  qWeight: number;        // weight of Q term in softmax score
+  priorWeight: number;    // weight of log(P) term in softmax score
+}
+
 export interface RunOptions {
   reuseRoot?: TreeNode | null;
   onProgress?: ProgressCallback | null;
-  // Action selection temperature applied to root visit counts.
-  //   τ = 0  → argmax (default, strongest play)
-  //   τ > 0  → sample from N(s,a)^(1/τ); larger τ flattens the distribution
-  // Used to deliberately weaken AI moves so the user can win more often.
-  temperature?: number;
+  // When set, weakens the AI's move selection so the user wins more often.
+  // null / omitted → argmax (strongest play, no weakening).
+  weakening?: WeakeningParams | null;
   // Optional RNG hook for deterministic tests. Defaults to Math.random.
   random?: () => number;
 }
@@ -113,7 +122,7 @@ export class MCTS {
     const {
       reuseRoot = null,
       onProgress = null,
-      temperature = 0,
+      weakening = null,
       random = Math.random,
     } = options;
     const startedAt = performance.now();
@@ -200,7 +209,7 @@ export class MCTS {
       }
     }
     onProgress?.(numSims, numSims, this.candidateHints(root, state));
-    const result = this.chooseAction(root, state, temperature, random);
+    const result = this.chooseAction(root, state, numSims, weakening, random);
     logInfo("MCTS", "run.done", {
       action: result.action,
       rootValue: result.rootValue,
@@ -285,28 +294,36 @@ export class MCTS {
   private chooseAction(
     root: TreeNode,
     state: GameState,
-    temperature: number,
+    numSims: number,
+    weakening: WeakeningParams | null,
     random: () => number
   ): RunResult {
-    const candidates: Array<{ action: number; visits: number }> = [];
-    let total = 0;
-    let bestAction = -1;
-    let bestCount = -1;
+    // Collect visited legal children with Q from current-player perspective.
+    // child.averageValue() is from the child node's to-play perspective
+    // (opponent of root), so we negate to get root's perspective.
+    const candidates: ActionCandidate[] = [];
+    let hasAny = false;
     for (const [action, child] of root.children) {
       if (state.board[action] !== 0) continue;
-      total += child.visitCount;
-      candidates.push({ action, visits: child.visitCount });
-      if (child.visitCount > bestCount) {
-        bestCount = child.visitCount;
-        bestAction = action;
-      }
+      if (child.visitCount > 0) hasAny = true;
+      candidates.push({
+        action,
+        visits: child.visitCount,
+        prior: child.prior,
+        q: -child.averageValue(),
+      });
     }
-    if (total === 0) {
+
+    let bestAction: number;
+    if (!hasAny) {
       const legal = state.legalIndices();
       bestAction = legal[Math.floor(random() * legal.length)] ?? -1;
-    } else if (temperature > 0 && candidates.length > 1) {
-      bestAction = sampleByVisitTemperature(candidates, temperature, random);
+    } else if (weakening && weakening.temperature > 0) {
+      bestAction = chooseMoveWithWeakening(candidates, weakening, numSims, random);
+    } else {
+      bestAction = argmaxByVisits(candidates);
     }
+
     const nextRoot = bestAction >= 0 ? root.children.get(bestAction) ?? null : null;
     if (nextRoot) {
       const nextState = state.clone();
@@ -321,50 +338,90 @@ export class MCTS {
   }
 }
 
-// Sample an action by N(s,a)^(1/τ). High τ flattens; very high τ → uniform
-// over visited actions. Falls back to argmax on numerical breakdown.
-function sampleByVisitTemperature(
-  candidates: ReadonlyArray<{ action: number; visits: number }>,
-  temperature: number,
+interface ActionCandidate {
+  action: number;
+  visits: number;
+  prior: number;
+  q: number; // from current-player perspective; higher = better for AI
+}
+
+function argmaxByVisits(candidates: ActionCandidate[]): number {
+  let best = candidates[0]!;
+  for (let i = 1; i < candidates.length; i++) {
+    if (candidates[i]!.visits > best.visits) best = candidates[i]!;
+  }
+  return best.action;
+}
+
+// Filtered softmax move selection.
+// 1. visit ratio cut   — drop junk-tail moves
+// 2. top-K cut         — cap candidate pool size
+// 3. Q-drop cut        — drop obvious blunders
+// 4. forced-move guard — if 1 candidate left, pick it immediately
+// 5. dominant-move bypass — if best clearly dominates, skip sampling
+// 6. softmax sample    — natural wobble inside the plausible pool
+function chooseMoveWithWeakening(
+  candidates: ActionCandidate[],
+  params: WeakeningParams,
+  numSims: number,
   random: () => number
 ): number {
-  const invT = 1 / temperature;
-  let maxLogVisits = -Infinity;
-  for (const c of candidates) {
-    if (c.visits <= 0) continue;
-    const lv = Math.log(c.visits);
-    if (lv > maxLogVisits) maxLogVisits = lv;
+  if (candidates.length === 0) throw new Error("no candidates");
+  if (candidates.length === 1) return candidates[0]!.action;
+
+  const sorted = [...candidates]
+    .filter(c => c.visits > 0)
+    .sort((a, b) => b.visits - a.visits);
+
+  if (sorted.length === 0) return argmaxByVisits(candidates);
+
+  const best = sorted[0]!;
+  const bestQ = Math.max(...sorted.map(c => c.q));
+
+  // Dominant-move bypass: if best is overwhelmingly visited, don't sample.
+  // Threshold is sims-proportional so 96-sims and 256-sims behave consistently.
+  // Applied only at lower weakness levels (topK <= 5) to protect forced moves
+  // without over-riding weaker difficulty levels.
+  if (params.topK <= 5 && sorted.length >= 2) {
+    const second = sorted[1]!;
+    const visitDominance =
+      best.visits >= second.visits * 3.0 && best.visits >= 0.20 * numSims;
+    const qDominance =
+      best.q >= second.q + 0.25 && best.visits >= 0.13 * numSims;
+    if (visitDominance || qDominance) return best.action;
   }
-  if (!Number.isFinite(maxLogVisits)) {
-    // No visited candidates — pick the listed argmax.
-    let best = candidates[0]!.action;
-    let bestV = -1;
-    for (const c of candidates) {
-      if (c.visits > bestV) { bestV = c.visits; best = c.action; }
-    }
-    return best;
-  }
-  const weights: number[] = [];
-  let sum = 0;
-  for (const c of candidates) {
-    const w = c.visits > 0
-      ? Math.exp((Math.log(c.visits) - maxLogVisits) * invT)
-      : 0;
-    weights.push(w);
-    sum += w;
-  }
-  if (!(sum > 0) || !Number.isFinite(sum)) {
-    let best = candidates[0]!.action;
-    let bestV = -1;
-    for (const c of candidates) {
-      if (c.visits > bestV) { bestV = c.visits; best = c.action; }
-    }
-    return best;
-  }
+
+  // 1. visit ratio cut
+  let pool = sorted.filter(c => c.visits >= best.visits * params.minVisitRatio);
+  if (pool.length === 0) pool = [best];
+
+  // 2. top-K cut
+  pool = pool.slice(0, params.topK);
+
+  // 3. Q-drop cut (argmax is always kept)
+  pool = pool.filter(c => c.action === best.action || c.q >= bestQ - params.qDrop);
+  if (pool.length === 0) pool = [best];
+
+  // 4. single candidate
+  if (pool.length === 1) return pool[0]!.action;
+
+  // 5. softmax sampling
+  const logits = pool.map(c => {
+    const visitScore = Math.log(c.visits + 1);
+    const qScore = params.qWeight * c.q;
+    const priorScore = params.priorWeight * Math.log(Math.max(c.prior, 1e-8));
+    return (visitScore + qScore + priorScore) / params.temperature;
+  });
+
+  const maxLogit = Math.max(...logits);
+  const exps = logits.map(x => Math.exp(x - maxLogit));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  if (!(sum > 0) || !Number.isFinite(sum)) return best.action;
+
   let r = random() * sum;
-  for (let i = 0; i < candidates.length; i++) {
-    r -= weights[i]!;
-    if (r <= 0) return candidates[i]!.action;
+  for (let i = 0; i < exps.length; i++) {
+    r -= exps[i]!;
+    if (r <= 0) return pool[i]!.action;
   }
-  return candidates[candidates.length - 1]!.action;
+  return pool[pool.length - 1]!.action;
 }

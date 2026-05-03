@@ -69,7 +69,7 @@ describe("MCTS.run", () => {
     expect(evaluator.calls).toBe(1);
   });
 
-  it("temperature=0 (default) chooses the most-visited action deterministically", async () => {
+  it("no weakening picks the most-visited action regardless of rng", async () => {
     const game = new GameState(7);
     const mcts = new MCTS({ evaluator: new UniformEvaluator() });
     const a = await mcts.run(game, 32, { random: () => 0.0 });
@@ -77,14 +77,15 @@ describe("MCTS.run", () => {
     expect(a.action).toBe(b.action);
   });
 
-  it("temperature>0 can return non-argmax actions when sampling", async () => {
+  it("weakening with high temperature produces diverse legal actions", async () => {
     const game = new GameState(7);
     const mcts = new MCTS({ evaluator: new UniformEvaluator() });
+    const veryEasy = { temperature: 1.05, topK: 12, minVisitRatio: 0.09, qDrop: 0.38, qWeight: 1.5, priorWeight: 0.35 };
     const seen = new Set<number>();
     let i = 0;
     const rng = () => ((i++ * 0.137) % 1);
     for (let k = 0; k < 20; k++) {
-      const r = await mcts.run(game, 16, { temperature: 2.0, random: rng });
+      const r = await mcts.run(game, 32, { weakening: veryEasy, random: rng });
       expect(game.legalIndices()).toContain(r.action);
       seen.add(r.action);
     }
