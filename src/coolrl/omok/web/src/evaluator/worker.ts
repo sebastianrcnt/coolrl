@@ -3,11 +3,10 @@
 // Worker-side ONNX evaluator. Runs on a DedicatedWorkerGlobalScope so UI
 // rendering / input / animation keep flowing while inference is in-flight.
 //
-// ONNX Runtime is still fetched from the CDN at runtime via importScripts so
-// the bundle stays lean and the user's browser cache is shared with other
-// sites that use the same ort build. The Blob-from-string trick from the old
-// WORKER_SRC is gone — Vite bundles this module separately (classic worker)
-// and imports the main-thread glue via typed messages.
+// ONNX Runtime is fetched from the CDN at runtime via dynamic ESM `import()`
+// of the `.bundle.min.mjs` builds. Same CDN, same artifacts as before — the
+// shift from importScripts() is forced by Vite serving workers as module
+// workers (importScripts is unavailable in module worker scope per spec).
 //
 import { normalizeBackend, type InferenceBackend } from "../util/backend";
 import { logDebug, logError, logInfo, logWarn } from "../util/logger";
@@ -21,15 +20,14 @@ import type {
 import type { OrtInferenceSession, OrtRuntime } from "./ort-types";
 
 declare const self: DedicatedWorkerGlobalScope;
-declare function importScripts(...urls: string[]): void;
-declare const ort: OrtRuntime;
 
 const ORT_CDN_BASE = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/";
 
 class EvaluatorSession {
   private session: OrtInferenceSession | null = null;
   private activeBackend: InferenceBackend = "wasm";
-  private ortLoaded = false;
+  private ort: OrtRuntime | null = null;
+  private ortLoading: Promise<OrtRuntime> | null = null;
   private boardSize = 9;
   private planeSize = 81;
   private actionSize = 81;
@@ -63,7 +61,7 @@ class EvaluatorSession {
       lowMemory: request.lowMemory,
       bufBytes: request.buf.byteLength,
     });
-    this.loadOrt(this.activeBackend);
+    const ort = await this.loadOrt(this.activeBackend);
     const sessionOptions = this.buildSessionOptions(this.activeBackend, request.lowMemory);
     this.session = await ort.InferenceSession.create(request.buf, sessionOptions);
     await this.warmUp();
@@ -91,6 +89,8 @@ class EvaluatorSession {
       batch,
       featureLength: features.length,
     });
+    const ort = this.ort;
+    if (!ort) throw new Error("ort runtime not loaded");
     const tensor = new ort.Tensor("float32", features, [batch, 4, this.boardSize, this.boardSize]);
     let output: Record<string, OrtTensor> | null = null;
     try {
@@ -136,19 +136,44 @@ class EvaluatorSession {
     }
   }
 
-  private loadOrt(backend: InferenceBackend): void {
-    logDebug("EvaluatorWorker", "loadOrt", { backend, alreadyLoaded: this.ortLoaded });
-    if (this.ortLoaded) return;
+  private loadOrt(backend: InferenceBackend): Promise<OrtRuntime> {
+    if (this.ort) return Promise.resolve(this.ort);
+    if (this.ortLoading) return this.ortLoading;
     const useWebGpuLoader = backend === "webgpu" || backend === "webnn";
-    importScripts(ORT_CDN_BASE + (useWebGpuLoader ? "ort.webgpu.min.js" : "ort.wasm.min.js"));
-    // Hand the loader only the CDN base URL and let it construct its own
-    // filename (e.g. ort-wasm-simd-threaded.asyncify.mjs for the native
-    // WebGPU/WebNN EPs in 1.24+). Pinning explicit filenames couples us to
-    // the internal wasm-glue naming, which has changed each minor release.
-    ort.env.wasm.wasmPaths = ORT_CDN_BASE;
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.proxy = false;
-    this.ortLoaded = true;
+    const url =
+      ORT_CDN_BASE +
+      (useWebGpuLoader ? "ort.webgpu.bundle.min.mjs" : "ort.wasm.bundle.min.mjs");
+    logDebug("EvaluatorWorker", "loadOrt", { backend, url });
+    // Hide the URL behind a runtime-built specifier so Vite doesn't try to
+    // resolve and pre-bundle it at build time — this stays a real CDN fetch
+    // in both dev and prod.
+    const dynamicImport = new Function("u", "return import(u)") as (
+      url: string
+    ) => Promise<{ default?: OrtRuntime } & Partial<OrtRuntime>>;
+    this.ortLoading = dynamicImport(url).then((mod) => {
+      // The ESM bundle exposes Tensor / InferenceSession / env at the module
+      // level; accept the default export too in case a future build switches
+      // shape without warning.
+      const ort = (
+        mod && typeof mod === "object" && "InferenceSession" in mod
+          ? (mod as unknown as OrtRuntime)
+          : (mod.default as OrtRuntime | undefined)
+      );
+      if (!ort) throw new Error("ort module did not expose InferenceSession");
+      // Hand the loader only the CDN base URL and let it construct its own
+      // wasm-glue filename. Pinning explicit names couples us to internal
+      // naming that has changed each minor release.
+      ort.env.wasm.wasmPaths = ORT_CDN_BASE;
+      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.proxy = false;
+      // Suppress benign EP-assignment warnings ("Some nodes were not assigned
+      // to the preferred execution providers"). They surface every load and
+      // bury real errors in the console.
+      ort.env.logLevel = "error";
+      this.ort = ort;
+      return ort;
+    });
+    return this.ortLoading;
   }
 
   private buildSessionOptions(backend: InferenceBackend, lowMemory: boolean) {
@@ -174,6 +199,8 @@ class EvaluatorSession {
 
   private async warmUp(): Promise<void> {
     logDebug("EvaluatorWorker", "warmUp.start");
+    const ort = this.ort;
+    if (!ort) throw new Error("ort runtime not loaded");
     const emptyFeat = new Float32Array(4 * this.planeSize);
     // Color plane set to 1 so the warm-up shape matches what evaluate() feeds.
     for (let i = 0; i < this.planeSize; i++) emptyFeat[3 * this.planeSize + i] = 1.0;

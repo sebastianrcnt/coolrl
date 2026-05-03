@@ -30,6 +30,7 @@ export interface OrtRuntime {
   Tensor: OrtTensorConstructor;
   InferenceSession: OrtInferenceSessionConstructor;
   env: {
+    logLevel?: "verbose" | "info" | "warning" | "error" | "fatal";
     wasm: {
       wasmPaths: string | Record<string, string>;
       numThreads: number;
