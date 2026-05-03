@@ -23,6 +23,13 @@ export interface ProgressCallback {
 export interface RunOptions {
   reuseRoot?: TreeNode | null;
   onProgress?: ProgressCallback | null;
+  // Action selection temperature applied to root visit counts.
+  //   τ = 0  → argmax (default, strongest play)
+  //   τ > 0  → sample from N(s,a)^(1/τ); larger τ flattens the distribution
+  // Used to deliberately weaken AI moves so the user can win more often.
+  temperature?: number;
+  // Optional RNG hook for deterministic tests. Defaults to Math.random.
+  random?: () => number;
 }
 
 export interface RunResult {
@@ -103,7 +110,12 @@ export class MCTS {
   }
 
   async run(state: GameState, numSims: number, options: RunOptions = {}): Promise<RunResult> {
-    const { reuseRoot = null, onProgress = null } = options;
+    const {
+      reuseRoot = null,
+      onProgress = null,
+      temperature = 0,
+      random = Math.random,
+    } = options;
     const startedAt = performance.now();
     const currentKey = stateKey(state);
     const root =
@@ -188,7 +200,7 @@ export class MCTS {
       }
     }
     onProgress?.(numSims, numSims, this.candidateHints(root, state));
-    const result = this.chooseAction(root, state);
+    const result = this.chooseAction(root, state, temperature, random);
     logInfo("MCTS", "run.done", {
       action: result.action,
       rootValue: result.rootValue,
@@ -270,13 +282,20 @@ export class MCTS {
       .slice(0, limit);
   }
 
-  private chooseAction(root: TreeNode, state: GameState): RunResult {
+  private chooseAction(
+    root: TreeNode,
+    state: GameState,
+    temperature: number,
+    random: () => number
+  ): RunResult {
+    const candidates: Array<{ action: number; visits: number }> = [];
+    let total = 0;
     let bestAction = -1;
     let bestCount = -1;
-    let total = 0;
     for (const [action, child] of root.children) {
       if (state.board[action] !== 0) continue;
       total += child.visitCount;
+      candidates.push({ action, visits: child.visitCount });
       if (child.visitCount > bestCount) {
         bestCount = child.visitCount;
         bestAction = action;
@@ -284,7 +303,9 @@ export class MCTS {
     }
     if (total === 0) {
       const legal = state.legalIndices();
-      bestAction = legal[Math.floor(Math.random() * legal.length)] ?? -1;
+      bestAction = legal[Math.floor(random() * legal.length)] ?? -1;
+    } else if (temperature > 0 && candidates.length > 1) {
+      bestAction = sampleByVisitTemperature(candidates, temperature, random);
     }
     const nextRoot = bestAction >= 0 ? root.children.get(bestAction) ?? null : null;
     if (nextRoot) {
@@ -298,4 +319,52 @@ export class MCTS {
       nextRoot: state.terminal ? null : nextRoot,
     };
   }
+}
+
+// Sample an action by N(s,a)^(1/τ). High τ flattens; very high τ → uniform
+// over visited actions. Falls back to argmax on numerical breakdown.
+function sampleByVisitTemperature(
+  candidates: ReadonlyArray<{ action: number; visits: number }>,
+  temperature: number,
+  random: () => number
+): number {
+  const invT = 1 / temperature;
+  let maxLogVisits = -Infinity;
+  for (const c of candidates) {
+    if (c.visits <= 0) continue;
+    const lv = Math.log(c.visits);
+    if (lv > maxLogVisits) maxLogVisits = lv;
+  }
+  if (!Number.isFinite(maxLogVisits)) {
+    // No visited candidates — pick the listed argmax.
+    let best = candidates[0]!.action;
+    let bestV = -1;
+    for (const c of candidates) {
+      if (c.visits > bestV) { bestV = c.visits; best = c.action; }
+    }
+    return best;
+  }
+  const weights: number[] = [];
+  let sum = 0;
+  for (const c of candidates) {
+    const w = c.visits > 0
+      ? Math.exp((Math.log(c.visits) - maxLogVisits) * invT)
+      : 0;
+    weights.push(w);
+    sum += w;
+  }
+  if (!(sum > 0) || !Number.isFinite(sum)) {
+    let best = candidates[0]!.action;
+    let bestV = -1;
+    for (const c of candidates) {
+      if (c.visits > bestV) { bestV = c.visits; best = c.action; }
+    }
+    return best;
+  }
+  let r = random() * sum;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i]!;
+    if (r <= 0) return candidates[i]!.action;
+  }
+  return candidates[candidates.length - 1]!.action;
 }

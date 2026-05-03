@@ -46,6 +46,7 @@ export interface DomRefs {
   colorSelect: HTMLSelectElement;
   backendSelect: HTMLSelectElement;
   simsSelect: HTMLSelectElement;
+  temperatureSelect: HTMLSelectElement;
   btnReset: HTMLButtonElement;
   btnSettings: HTMLButtonElement;
   btnSheetClose: HTMLButtonElement;
@@ -240,6 +241,7 @@ export class OmokController {
       else this.updateInfo();
     });
     on(this.dom.simsSelect, "change", () => this.debugPanel.render());
+    on(this.dom.temperatureSelect, "change", () => this.debugPanel.render());
     on(this.dom.btnReset, "click", () => { if (!this.busy) this.resetGame(); });
     on(this.dom.btnUndo, "click", () => this.undo());
     on(this.dom.btnAi, "click", () => {
@@ -734,6 +736,7 @@ export class OmokController {
     this.setBusy(true);
     this.thinkingGhosts.start(this.game.toPlay);
     const sims = this.readSimsValue();
+    const temperature = this.readTemperatureValue();
     const template = pickLookaheadTemplate();
     this.aiProgress = formatLookahead(template, 1);
     this.statusPresenter.setThinking(this.aiProgress);
@@ -742,6 +745,7 @@ export class OmokController {
     try {
       const result = await this.mcts!.run(this.game, sims, {
         reuseRoot: this.reuseSearchTree() ? this.aiSubtree : null,
+        temperature,
         onProgress: (done, _total, candidates) => {
           this.thinkingGhosts.updateCandidates(candidates);
           this.aiProgress = formatLookahead(template, done);
@@ -903,6 +907,14 @@ export class OmokController {
 
   private readSimsValue(): number {
     return parseInt(this.dom.simsSelect.value) || DEFAULT_SIMS;
+  }
+
+  // Read the action-selection temperature from the settings sheet.
+  // Negative or non-finite inputs collapse to 0 (argmax).
+  private readTemperatureValue(): number {
+    const raw = parseFloat(this.dom.temperatureSelect.value);
+    if (!Number.isFinite(raw) || raw < 0) return 0;
+    return raw;
   }
 
   private reuseSearchTree(): boolean {
@@ -1068,6 +1080,7 @@ export class OmokController {
       get modelBytes() { return ctrl.modelSource.bytes; },
       get defaultModelLoadStarted() { return ctrl.defaultModelLoadStarted; },
       get simsCount() { return ctrl.readSimsValue(); },
+      get temperature() { return ctrl.readTemperatureValue(); },
       get maxChildren() {
         return ctrl.env.isLowMemoryMode ? MOBILE_MCTS_MAX_CHILDREN : Infinity;
       },

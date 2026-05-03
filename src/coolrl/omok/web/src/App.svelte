@@ -10,6 +10,7 @@
   let colorSelect: HTMLSelectElement;
   let backendSelect: HTMLSelectElement;
   let simsSelect: HTMLSelectElement;
+  let temperatureSelect: HTMLSelectElement;
   let btnReset: HTMLButtonElement;
   let btnSettings: HTMLButtonElement;
   let btnSheetClose: HTMLButtonElement;
@@ -39,6 +40,7 @@
       colorSelect,
       backendSelect,
       simsSelect,
+      temperatureSelect,
       btnReset,
       btnSettings,
       btnSheetClose,
@@ -175,6 +177,16 @@
         <path d="m6 9 6 6 6-6" />
       </svg>
     </summary>
+    <div class="sheet-row">
+      <span class="label">무작위성 (τ)</span>
+      <select bind:this={temperatureSelect} id="temperature-select">
+        <option value="0" selected>0 · 항상 최선 (가장 강함)</option>
+        <option value="0.5">0.5 · 살짝 흔들림</option>
+        <option value="1">1.0 · 다양한 수</option>
+        <option value="1.5">1.5 · 약화</option>
+        <option value="2">2.0 · 많이 약함</option>
+      </select>
+    </div>
     <div class="sheet-row">
       <span class="label">추론 방식</span>
       <select bind:this={backendSelect} id="backend-select">

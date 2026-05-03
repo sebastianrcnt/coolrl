@@ -68,4 +68,26 @@ describe("MCTS.run", () => {
     await mcts.run(otherState, 0, { reuseRoot: first.nextRoot });
     expect(evaluator.calls).toBe(1);
   });
+
+  it("temperature=0 (default) chooses the most-visited action deterministically", async () => {
+    const game = new GameState(7);
+    const mcts = new MCTS({ evaluator: new UniformEvaluator() });
+    const a = await mcts.run(game, 32, { random: () => 0.0 });
+    const b = await mcts.run(game, 32, { random: () => 0.999 });
+    expect(a.action).toBe(b.action);
+  });
+
+  it("temperature>0 can return non-argmax actions when sampling", async () => {
+    const game = new GameState(7);
+    const mcts = new MCTS({ evaluator: new UniformEvaluator() });
+    const seen = new Set<number>();
+    let i = 0;
+    const rng = () => ((i++ * 0.137) % 1);
+    for (let k = 0; k < 20; k++) {
+      const r = await mcts.run(game, 16, { temperature: 2.0, random: rng });
+      expect(game.legalIndices()).toContain(r.action);
+      seen.add(r.action);
+    }
+    expect(seen.size).toBeGreaterThan(1);
+  });
 });
