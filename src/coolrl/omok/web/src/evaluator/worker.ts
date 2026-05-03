@@ -144,35 +144,39 @@ class EvaluatorSession {
       ORT_CDN_BASE +
       (useWebGpuLoader ? "ort.webgpu.bundle.min.mjs" : "ort.wasm.bundle.min.mjs");
     logDebug("EvaluatorWorker", "loadOrt", { backend, url });
-    // Hide the URL behind a runtime-built specifier so Vite doesn't try to
-    // resolve and pre-bundle it at build time — this stays a real CDN fetch
-    // in both dev and prod.
-    const dynamicImport = new Function("u", "return import(u)") as (
-      url: string
-    ) => Promise<{ default?: OrtRuntime } & Partial<OrtRuntime>>;
-    this.ortLoading = dynamicImport(url).then((mod) => {
-      // The ESM bundle exposes Tensor / InferenceSession / env at the module
-      // level; accept the default export too in case a future build switches
-      // shape without warning.
-      const ort = (
-        mod && typeof mod === "object" && "InferenceSession" in mod
-          ? (mod as unknown as OrtRuntime)
-          : (mod.default as OrtRuntime | undefined)
-      );
-      if (!ort) throw new Error("ort module did not expose InferenceSession");
-      // Hand the loader only the CDN base URL and let it construct its own
-      // wasm-glue filename. Pinning explicit names couples us to internal
-      // naming that has changed each minor release.
-      ort.env.wasm.wasmPaths = ORT_CDN_BASE;
-      ort.env.wasm.numThreads = 1;
-      ort.env.wasm.proxy = false;
-      // Suppress benign EP-assignment warnings ("Some nodes were not assigned
-      // to the preferred execution providers"). They surface every load and
-      // bury real errors in the console.
-      ort.env.logLevel = "error";
-      this.ort = ort;
-      return ort;
-    });
+    // /* @vite-ignore */ tells Vite not to analyze this dynamic specifier so
+    // the CDN URL stays as a runtime fetch in both dev and prod. CSP note: a
+    // strict policy must allow `script-src https://cdn.jsdelivr.net` (or
+    // wherever ORT_CDN_BASE points) for this to work.
+    this.ortLoading = import(/* @vite-ignore */ url)
+      .then((mod: { default?: OrtRuntime } & Partial<OrtRuntime>) => {
+        // The ESM bundle exposes Tensor / InferenceSession / env at the module
+        // level; accept the default export too in case a future build switches
+        // shape without warning.
+        const ort =
+          mod && typeof mod === "object" && "InferenceSession" in mod
+            ? (mod as unknown as OrtRuntime)
+            : (mod.default as OrtRuntime | undefined);
+        if (!ort) throw new Error("ort module did not expose InferenceSession");
+        // Hand the loader only the CDN base URL and let it construct its own
+        // wasm-glue filename. Pinning explicit names couples us to internal
+        // naming that has changed each minor release.
+        ort.env.wasm.wasmPaths = ORT_CDN_BASE;
+        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.proxy = false;
+        // Suppress benign EP-assignment warnings ("Some nodes were not assigned
+        // to the preferred execution providers"). They surface every load and
+        // bury real errors in the console.
+        ort.env.logLevel = "error";
+        this.ort = ort;
+        return ort;
+      })
+      .catch((err) => {
+        // Clear the cached promise so a retry (e.g. user switches backend)
+        // doesn't lock onto the rejected import forever.
+        this.ortLoading = null;
+        throw err;
+      });
     return this.ortLoading;
   }
 

@@ -338,7 +338,7 @@ export class MCTS {
   }
 }
 
-interface ActionCandidate {
+export interface ActionCandidate {
   action: number;
   visits: number;
   prior: number;
@@ -360,7 +360,7 @@ function argmaxByVisits(candidates: ActionCandidate[]): number {
 // 4. forced-move guard — if 1 candidate left, pick it immediately
 // 5. dominant-move bypass — if best clearly dominates, skip sampling
 // 6. softmax sample    — natural wobble inside the plausible pool
-function chooseMoveWithWeakening(
+export function chooseMoveWithWeakening(
   candidates: ActionCandidate[],
   params: WeakeningParams,
   numSims: number,
@@ -376,19 +376,29 @@ function chooseMoveWithWeakening(
   if (sorted.length === 0) return argmaxByVisits(candidates);
 
   const best = sorted[0]!;
-  const bestQ = Math.max(...sorted.map(c => c.q));
 
-  // Dominant-move bypass: if best is overwhelmingly visited, don't sample.
-  // Threshold is sims-proportional so 96-sims and 256-sims behave consistently.
-  // Applied only at lower weakness levels (topK <= 5) to protect forced moves
-  // without over-riding weaker difficulty levels.
-  if (params.topK <= 5 && sorted.length >= 2) {
+  // Dominant-move bypass: forced moves (e.g. blocking opponent's open-4)
+  // must always be played at every difficulty level — otherwise the AI looks
+  // braindead, not weak. Two independent triggers:
+  //   - qGap: best move's value is clearly higher than alternatives
+  //   - visitDom: MCTS heavily concentrated visits on best
+  if (sorted.length >= 2) {
     const second = sorted[1]!;
-    const visitDominance =
-      best.visits >= second.visits * 3.0 && best.visits >= 0.20 * numSims;
-    const qDominance =
-      best.q >= second.q + 0.25 && best.visits >= 0.13 * numSims;
-    if (visitDominance || qDominance) return best.action;
+    const qGap = best.q - second.q;
+    const qForced = qGap >= 0.30 && best.visits >= 4;
+    const visitDom = best.visits >= second.visits * 3.0 && best.visits >= 8;
+    if (qForced || visitDom) {
+      logInfo("MCTS", "weakening.bypass", {
+        reason: qForced ? "qForced" : "visitDom",
+        bestAction: best.action,
+        bestVisits: best.visits,
+        bestQ: Number(best.q.toFixed(3)),
+        secondVisits: second.visits,
+        secondQ: Number(second.q.toFixed(3)),
+        qGap: Number(qGap.toFixed(3)),
+      });
+      return best.action;
+    }
   }
 
   // 1. visit ratio cut
@@ -398,7 +408,10 @@ function chooseMoveWithWeakening(
   // 2. top-K cut
   pool = pool.slice(0, params.topK);
 
-  // 3. Q-drop cut (argmax is always kept)
+  // 3. Q-drop cut (argmax is always kept).
+  // bestQ is computed AFTER visit/topK filtering so noisy 1-visit Q values
+  // can't artificially inflate the threshold and shrink the pool to argmax.
+  const bestQ = Math.max(...pool.map(c => c.q));
   pool = pool.filter(c => c.action === best.action || c.q >= bestQ - params.qDrop);
   if (pool.length === 0) pool = [best];
 
