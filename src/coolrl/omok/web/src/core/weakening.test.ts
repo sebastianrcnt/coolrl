@@ -62,6 +62,25 @@ describe("chooseMoveWithWeakening — dominant-move bypass", () => {
     expect(action).toBe(10);
   });
 
+  it("visitDom floor scales with sims (12 visits at sims=256 does not bypass)", () => {
+    // Visit count 12 with second=3 is 4x ratio. At sims=64 the visitDom
+    // floor is max(8, 9) = 9 → would bypass. At sims=256 the floor is
+    // max(8, 38) = 38 → must NOT bypass on visit dominance alone.
+    const candidates = [
+      cand(10, 12, +0.10),
+      cand(20, 3,  +0.08),
+      cand(30, 2,  +0.05),
+    ];
+    // qGap=0.02 → qForced no. So sampling must proceed (varied actions).
+    const seen = new Set<number>();
+    let i = 0;
+    const rng = () => ((i++ * 0.137) % 1);
+    for (let k = 0; k < 30; k++) {
+      seen.add(chooseMoveWithWeakening(candidates, VERY_EASY, 256, rng));
+    }
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
   it("does NOT bypass when no move is clearly dominant", () => {
     // Several plausible moves with similar Q and visits; sampling should
     // produce different actions across rng draws.

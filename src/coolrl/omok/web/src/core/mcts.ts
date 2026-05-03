@@ -385,8 +385,9 @@ export function chooseMoveWithWeakening(
   if (sorted.length >= 2) {
     const second = sorted[1]!;
     const qGap = best.q - second.q;
+    const visitDomFloor = Math.max(8, Math.floor(0.15 * numSims));
     const qForced = qGap >= 0.30 && best.visits >= 4;
-    const visitDom = best.visits >= second.visits * 3.0 && best.visits >= 8;
+    const visitDom = best.visits >= second.visits * 3.0 && best.visits >= visitDomFloor;
     if (qForced || visitDom) {
       logInfo("MCTS", "weakening.bypass", {
         reason: qForced ? "qForced" : "visitDom",

@@ -47,7 +47,7 @@ const DIFFICULTY_PRESETS = {
   hard:     { label: "어려움",    sims: 128, weakening: { temperature: 0.35, topK: 3,  minVisitRatio: 0.35, qDrop: 0.10, qWeight: 3.0, priorWeight: 0.20 } },
   normal:   { label: "보통",      sims: 128, weakening: { temperature: 0.55, topK: 5,  minVisitRatio: 0.22, qDrop: 0.18, qWeight: 2.5, priorWeight: 0.25 } },
   easy:     { label: "쉬움",      sims: 96,  weakening: { temperature: 1.20, topK: 12, minVisitRatio: 0.10, qDrop: 0.35, qWeight: 1.0, priorWeight: 0.40 } },
-  veryEasy: { label: "매우 쉬움", sims: 64,  weakening: { temperature: 2.00, topK: 20, minVisitRatio: 0.05, qDrop: 0.55, qWeight: 0.3, priorWeight: 0.50 } },
+  veryEasy: { label: "매우 쉬움", sims: 96,  weakening: { temperature: 2.50, topK: 25, minVisitRatio: 0.04, qDrop: 0.65, qWeight: 0.2, priorWeight: 0.55 } },
 } as const satisfies Record<string, DifficultyPreset>;
 
 type Difficulty = keyof typeof DIFFICULTY_PRESETS;
