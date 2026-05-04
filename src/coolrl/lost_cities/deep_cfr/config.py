@@ -53,7 +53,7 @@ class TraversalConfig:
     strategy_sample_interval: int = 1
     store_strategy_on_opponent_nodes: bool = True
     store_strategy_on_traverser_nodes: bool = True
-    max_depth: int | None = 8
+    max_depth: int | None = None
     max_nodes_per_traversal: int | None = 10_000
     cutoff_value_mode: str = "score_diff"
     cutoff_rollouts: int = 0
@@ -64,6 +64,7 @@ class TraversalConfig:
     traversal_worker_chunk_size: int = 4
     profile_hotspots: bool = False
     regret_matching_epsilon: float = 1.0e-8
+    outcome_sampling_epsilon: float = 0.0
 
     def __post_init__(self) -> None:
         mode = str(self.cutoff_value_mode).strip().lower()
@@ -80,6 +81,9 @@ class TraversalConfig:
         self.cutoff_rollout_max_steps = int(self.cutoff_rollout_max_steps)
         if self.cutoff_rollout_max_steps <= 0:
             raise ValueError("traversal.cutoff_rollout_max_steps must be positive")
+        self.outcome_sampling_epsilon = float(self.outcome_sampling_epsilon)
+        if not 0.0 <= self.outcome_sampling_epsilon <= 1.0:
+            raise ValueError("traversal.outcome_sampling_epsilon must be between 0 and 1")
 
     def _cpu_worker_guess(self) -> int:
         logical = max(1, os.cpu_count() or 1)

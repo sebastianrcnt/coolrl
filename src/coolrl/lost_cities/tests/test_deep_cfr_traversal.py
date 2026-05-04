@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 
 import numpy as np
 import torch
@@ -9,7 +10,7 @@ from coolrl.lost_cities.deep_cfr.encoding import infer_input_dim
 from coolrl.lost_cities.deep_cfr.memory import AdvantageMemory, StrategyMemory
 from coolrl.lost_cities.deep_cfr.networks import AdvantageNet, regret_matching
 from coolrl.lost_cities.deep_cfr.config import NetworkConfig
-from coolrl.lost_cities.deep_cfr.traversal import TraversalTimingStats, cfr_traverse
+from coolrl.lost_cities.deep_cfr.traversal import DeepCFRTraverser, TraversalTimingStats, cfr_traverse
 from coolrl.lost_cities.game import Card, GameState, tier_config
 
 
@@ -44,6 +45,62 @@ def test_cfr_traversal_tier3_completes() -> None:
     )
     assert math.isfinite(value)
     assert stats.nodes > 0
+
+
+def test_cfr_traversal_outcome_sampling_follows_one_traverser_action() -> None:
+    config = tier_config("tier1", seed=7)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config),
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=1,
+        rng=np.random.default_rng(11),
+    )
+
+    assert math.isfinite(value)
+    assert stats.nodes == 2
+    assert stats.cutoffs == 1
+    assert len(memories[0]) == 1
+
+
+def test_cfr_traversal_samples_deck_draw_chance_before_apply() -> None:
+    config = tier_config("tier1", seed=9)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    traverser = DeepCFRTraverser(
+        nets,
+        [AdvantageMemory(100), AdvantageMemory(100)],
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        rng=np.random.default_rng(1),
+    )
+    state = GameState.new_game(config, seed=9)
+    state.phase = "draw"
+    state.current_player = 0
+    original_deck = list(state.deck)
+    original_hand = list(state.hands[0])
+    sampled_index = int(np.random.default_rng(1).integers(0, len(original_deck)))
+    sampled_card = original_deck[sampled_index]
+
+    child = traverser._child_after_action(state, state.card_action_size)
+
+    assert Counter(child.deck)[sampled_card] == Counter(original_deck)[sampled_card] - 1
+    assert Counter(child.hands[0])[sampled_card] == Counter(original_hand)[sampled_card] + 1
+    assert state.deck == original_deck
 
 
 def test_cfr_traversal_max_depth_cutoff_returns_current_score_diff() -> None:

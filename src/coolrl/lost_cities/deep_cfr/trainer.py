@@ -285,6 +285,7 @@ class DeepCFRTrainer:
             cutoff_rollouts=self.config.traversal.cutoff_rollouts,
             cutoff_rollout_policy=self.config.traversal.cutoff_rollout_policy,
             cutoff_rollout_max_steps=self.config.traversal.cutoff_rollout_max_steps,
+            outcome_sampling_epsilon=self.config.traversal.outcome_sampling_epsilon,
             rng=self.rng,
             timing_stats=hotspot_stats,
         )
@@ -363,6 +364,7 @@ class DeepCFRTrainer:
                         store_strategy_on_traverser_nodes=self.config.traversal.store_strategy_on_traverser_nodes,
                         profile_hotspots=self.profile_hotspots,
                         regret_matching_epsilon=self.config.traversal.regret_matching_epsilon,
+                        outcome_sampling_epsilon=self.config.traversal.outcome_sampling_epsilon,
                         worker_seed=self.config.seed + iteration * 10_000_019 + player * 1_000_003 + batch_index,
                     )
                 )

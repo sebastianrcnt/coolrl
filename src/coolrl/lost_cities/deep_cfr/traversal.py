@@ -82,6 +82,7 @@ class DeepCFRTraverser:
         cutoff_rollouts: int = 0,
         cutoff_rollout_policy: str = "random",
         cutoff_rollout_max_steps: int = 10_000,
+        outcome_sampling_epsilon: float = 0.0,
         rng: np.random.Generator | None = None,
         timing_stats: TraversalTimingStats | None = None,
     ) -> None:
@@ -99,6 +100,7 @@ class DeepCFRTraverser:
         self.cutoff_rollouts = max(0, int(cutoff_rollouts))
         self.cutoff_rollout_policy = cutoff_rollout_policy
         self.cutoff_rollout_max_steps = max(1, int(cutoff_rollout_max_steps))
+        self.outcome_sampling_epsilon = float(outcome_sampling_epsilon)
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
 
@@ -168,14 +170,59 @@ class DeepCFRTraverser:
     def _child_after_action(self, state: GameState, action: int) -> GameState:
         if self.timing_stats is None:
             child = clone_state(state)
+            self._sample_deck_draw_chance(child, action)
             child.apply_unified_action(action)
             return child
         started = time.perf_counter()
         child = clone_state(state)
+        self._sample_deck_draw_chance(child, action)
         child.apply_unified_action(action)
         self.timing_stats.clone_apply_seconds += time.perf_counter() - started
         self.timing_stats.clone_apply_calls += 1
         return child
+
+    def _sample_deck_draw_chance(self, state: GameState, action: int) -> None:
+        deck_draw_action = state.card_action_size
+        if state.phase != "draw" or action != deck_draw_action or len(state.deck) <= 1:
+            return
+        sampled_index = int(self.rng.integers(0, len(state.deck)))
+        state.deck[sampled_index], state.deck[-1] = state.deck[-1], state.deck[sampled_index]
+
+    def _sampling_policy(self, policy: np.ndarray, legal: np.ndarray) -> np.ndarray:
+        legal_count = int(legal.sum())
+        if legal_count <= 0:
+            return np.zeros_like(policy, dtype=np.float32)
+        eps = min(1.0, max(0.0, self.outcome_sampling_epsilon))
+        if eps <= 0.0:
+            return np.asarray(policy, dtype=np.float32)
+        uniform = legal.astype(np.float32) / float(legal_count)
+        return ((1.0 - eps) * policy + eps * uniform).astype(np.float32)
+
+    def _sample_legal_action(self, sampling_policy: np.ndarray, legal_actions: np.ndarray) -> int:
+        legal_probs = sampling_policy[legal_actions].astype(np.float64)
+        total = float(legal_probs.sum())
+        if total <= 0.0:
+            legal_probs = np.full(len(legal_actions), 1.0 / float(len(legal_actions)))
+        else:
+            legal_probs /= total
+        return int(self.rng.choice(legal_actions, p=legal_probs))
+
+    def _outcome_sampled_regrets(
+        self,
+        value: float,
+        sampled_action: int,
+        policy: np.ndarray,
+        sampling_policy: np.ndarray,
+        legal: np.ndarray,
+    ) -> np.ndarray:
+        action_sample_prob = float(sampling_policy[sampled_action])
+        if action_sample_prob <= self.epsilon:
+            return np.zeros_like(policy, dtype=np.float32)
+        sampled_action_value = float(value) / action_sample_prob
+        node_value = float(policy[sampled_action]) * sampled_action_value
+        regrets = np.where(legal, -node_value, 0.0).astype(np.float32)
+        regrets[sampled_action] = np.float32(sampled_action_value - node_value)
+        return regrets
 
     def _random_rollout_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
         rollout_state = clone_state(state)
@@ -185,6 +232,7 @@ class DeepCFRTraverser:
             if len(legal_actions) == 0:
                 break
             action = int(self.rng.choice(legal_actions))
+            self._sample_deck_draw_chance(rollout_state, action)
             rollout_state.apply_unified_action(action)
             steps += 1
         stats.cutoff_rollouts += 1
@@ -234,29 +282,25 @@ class DeepCFRTraverser:
             stats.terminals += 1
             return float(state.score_diff(traverser))
 
+        sampling_policy = self._sampling_policy(policy, legal)
+        action = self._sample_legal_action(sampling_policy, legal_actions)
+        child = self._child_after_action(state, action)
+        value = self._traverse(
+            child,
+            traverser,
+            iteration,
+            depth + 1,
+            stats,
+        )
+
         if player == traverser:
-            action_values = np.zeros(state.action_size, dtype=np.float32)
-            for index, action in enumerate(legal_actions):
-                if self._node_budget_reached(stats):
-                    remaining_actions = legal_actions[index:]
-                    # Treat every unexpanded traverser action as a budget cutoff
-                    # without recursing further, so max_nodes_per_traversal acts as
-                    # a hard cap instead of a soft budget.
-                    stats.node_limit_cutoffs += len(remaining_actions)
-                    for remaining_action in remaining_actions:
-                        child = self._child_after_action(state, int(remaining_action))
-                        action_values[remaining_action] = self._cutoff_value(child, traverser, stats)
-                    break
-                child = self._child_after_action(state, int(action))
-                action_values[action] = self._traverse(
-                    child,
-                    traverser,
-                    iteration,
-                    depth + 1,
-                    stats,
-                )
-            node_value = float(np.dot(policy, action_values))
-            regrets = np.where(legal, action_values - node_value, 0.0).astype(np.float32)
+            regrets = self._outcome_sampled_regrets(
+                value,
+                action,
+                policy,
+                sampling_policy,
+                legal,
+            )
             if self.timing_stats is None:
                 self.advantage_memories[traverser].add(
                     info,
@@ -278,17 +322,7 @@ class DeepCFRTraverser:
                 )
                 self.timing_stats.memory_add_seconds += time.perf_counter() - started
                 self.timing_stats.memory_add_calls += 1
-            return node_value
-
-        action = int(self.rng.choice(legal_actions, p=policy[legal_actions] / policy[legal_actions].sum()))
-        child = self._child_after_action(state, action)
-        return self._traverse(
-            child,
-            traverser,
-            iteration,
-            depth + 1,
-            stats,
-        )
+        return value
 
 
 def cfr_traverse(
@@ -310,6 +344,7 @@ def cfr_traverse(
     cutoff_rollouts: int = 0,
     cutoff_rollout_policy: str = "random",
     cutoff_rollout_max_steps: int = 10_000,
+    outcome_sampling_epsilon: float = 0.0,
     rng: np.random.Generator | None = None,
     timing_stats: TraversalTimingStats | None = None,
 ) -> tuple[float, TraversalStats]:
@@ -328,6 +363,7 @@ def cfr_traverse(
         cutoff_rollouts=cutoff_rollouts,
         cutoff_rollout_policy=cutoff_rollout_policy,
         cutoff_rollout_max_steps=cutoff_rollout_max_steps,
+        outcome_sampling_epsilon=outcome_sampling_epsilon,
         rng=rng,
         timing_stats=timing_stats,
     )

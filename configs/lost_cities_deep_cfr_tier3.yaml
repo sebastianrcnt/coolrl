@@ -27,9 +27,8 @@ traversal:
   strategy_sample_interval: 1
   store_strategy_on_opponent_nodes: true
   store_strategy_on_traverser_nodes: true
-  # Hard node cap for one traversal. When the budget is exhausted mid-expansion,
-  # remaining traverser actions use the current score_diff(traverser) fallback.
-  max_depth: 8
+  # Outcome sampling follows one sampled action at every player node to terminal.
+  max_depth: null
   max_nodes_per_traversal: 10000
   progress_every_traversals: 10
   num_workers: 0
@@ -39,6 +38,7 @@ traversal:
   traversal_worker_chunk_size: 4
   profile_hotspots: false
   regret_matching_epsilon: 1.0e-8
+  outcome_sampling_epsilon: 0.05
 
 optimization:
   advantage_batch_size: 1024

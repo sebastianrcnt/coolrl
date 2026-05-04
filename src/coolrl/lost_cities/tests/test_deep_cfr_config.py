@@ -20,6 +20,7 @@ def test_load_yaml_profile() -> None:
     assert cfg.traversal.store_strategy_on_opponent_nodes is True
     assert cfg.traversal.store_strategy_on_traverser_nodes is True
     assert cfg.traversal.max_nodes_per_traversal == 10_000
+    assert cfg.traversal.max_depth is None
     assert cfg.traversal.cutoff_value_mode == "score_diff"
     assert cfg.traversal.cutoff_rollouts == 0
     assert cfg.traversal.cutoff_rollout_policy == "random"
@@ -28,6 +29,7 @@ def test_load_yaml_profile() -> None:
     assert cfg.traversal.num_workers == 0
     assert cfg.traversal.traversal_worker_chunk_size == 4
     assert cfg.traversal.profile_hotspots is False
+    assert cfg.traversal.outcome_sampling_epsilon == 0.05
     assert cfg.evaluation.max_steps == 10_000
     assert cfg.evaluation.on_max_steps == "score_diff"
     assert cfg.checkpoint.save_latest_only is False
@@ -64,6 +66,8 @@ def test_default_cutoff_config_preserves_score_diff_behavior() -> None:
     assert cfg.traversal.cutoff_value_mode == "score_diff"
     assert cfg.traversal.cutoff_rollouts == 0
     assert cfg.traversal.cutoff_rollout_policy == "random"
+    assert cfg.traversal.max_depth is None
+    assert cfg.traversal.outcome_sampling_epsilon == 0.0
 
 
 def test_rules_config_default_tier3_shape() -> None:
