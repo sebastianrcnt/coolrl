@@ -66,7 +66,7 @@ def test_default_cutoff_config_preserves_score_diff_behavior() -> None:
     assert cfg.traversal.cutoff_value_mode == "score_diff"
     assert cfg.traversal.cutoff_rollouts == 0
     assert cfg.traversal.cutoff_rollout_policy == "random"
-    assert cfg.traversal.max_depth is None
+    assert cfg.traversal.max_depth == 8
     assert cfg.traversal.outcome_sampling_epsilon == 0.0
 
 

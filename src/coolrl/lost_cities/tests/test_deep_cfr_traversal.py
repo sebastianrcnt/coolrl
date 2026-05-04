@@ -74,6 +74,36 @@ def test_cfr_traversal_outcome_sampling_follows_one_traverser_action() -> None:
     assert len(memories[0]) == 1
 
 
+def test_cfr_traversal_outcome_sampling_regret_target_uses_importance_weight() -> None:
+    config = tier_config("tier1", seed=8)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    traverser = DeepCFRTraverser(
+        nets,
+        [AdvantageMemory(100), AdvantageMemory(100)],
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+    )
+    policy = np.zeros(config.action_size, dtype=np.float32)
+    sampling_policy = np.zeros(config.action_size, dtype=np.float32)
+    legal = np.zeros(config.action_size, dtype=bool)
+    policy[:2] = [0.7, 0.3]
+    sampling_policy[:2] = [0.6, 0.4]
+    legal[:2] = True
+
+    action_value = traverser._outcome_sampled_action_value(10.0, 1, sampling_policy)
+    node_value = traverser._sampled_node_value(action_value, 1, policy)
+    regrets = traverser._outcome_sampled_regrets(action_value, 1, policy, legal)
+
+    assert np.isclose(action_value, 25.0)
+    assert np.isclose(node_value, 7.5)
+    assert np.allclose(regrets[:2], [-7.5, 17.5])
+    assert np.all(regrets[2:] == 0.0)
+
+
 def test_cfr_traversal_samples_deck_draw_chance_before_apply() -> None:
     config = tier_config("tier1", seed=9)
     input_dim = infer_input_dim(config)

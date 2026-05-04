@@ -101,6 +101,7 @@ class DeepCFRTraverser:
         self.cutoff_rollout_policy = cutoff_rollout_policy
         self.cutoff_rollout_max_steps = max(1, int(cutoff_rollout_max_steps))
         self.outcome_sampling_epsilon = float(outcome_sampling_epsilon)
+        self.sampling_probability_floor = 1.0e-12
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
 
@@ -207,18 +208,32 @@ class DeepCFRTraverser:
             legal_probs /= total
         return int(self.rng.choice(legal_actions, p=legal_probs))
 
-    def _outcome_sampled_regrets(
+    def _outcome_sampled_action_value(
         self,
         value: float,
         sampled_action: int,
-        policy: np.ndarray,
         sampling_policy: np.ndarray,
+    ) -> float:
+        action_sample_prob = float(sampling_policy[sampled_action])
+        if action_sample_prob <= self.sampling_probability_floor:
+            return 0.0
+        return float(value) / action_sample_prob
+
+    def _sampled_node_value(
+        self,
+        sampled_action_value: float,
+        sampled_action: int,
+        policy: np.ndarray,
+    ) -> float:
+        return float(policy[sampled_action]) * sampled_action_value
+
+    def _outcome_sampled_regrets(
+        self,
+        sampled_action_value: float,
+        sampled_action: int,
+        policy: np.ndarray,
         legal: np.ndarray,
     ) -> np.ndarray:
-        action_sample_prob = float(sampling_policy[sampled_action])
-        if action_sample_prob <= self.epsilon:
-            return np.zeros_like(policy, dtype=np.float32)
-        sampled_action_value = float(value) / action_sample_prob
         node_value = float(policy[sampled_action]) * sampled_action_value
         regrets = np.where(legal, -node_value, 0.0).astype(np.float32)
         regrets[sampled_action] = np.float32(sampled_action_value - node_value)
@@ -292,13 +307,14 @@ class DeepCFRTraverser:
             depth + 1,
             stats,
         )
+        sampled_action_value = self._outcome_sampled_action_value(value, action, sampling_policy)
+        node_value = self._sampled_node_value(sampled_action_value, action, policy)
 
         if player == traverser:
             regrets = self._outcome_sampled_regrets(
-                value,
+                sampled_action_value,
                 action,
                 policy,
-                sampling_policy,
                 legal,
             )
             if self.timing_stats is None:
@@ -322,7 +338,7 @@ class DeepCFRTraverser:
                 )
                 self.timing_stats.memory_add_seconds += time.perf_counter() - started
                 self.timing_stats.memory_add_calls += 1
-        return value
+        return node_value
 
 
 def cfr_traverse(

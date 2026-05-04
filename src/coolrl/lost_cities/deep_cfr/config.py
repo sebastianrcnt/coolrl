@@ -53,7 +53,7 @@ class TraversalConfig:
     strategy_sample_interval: int = 1
     store_strategy_on_opponent_nodes: bool = True
     store_strategy_on_traverser_nodes: bool = True
-    max_depth: int | None = None
+    max_depth: int | None = 8
     max_nodes_per_traversal: int | None = 10_000
     cutoff_value_mode: str = "score_diff"
     cutoff_rollouts: int = 0
