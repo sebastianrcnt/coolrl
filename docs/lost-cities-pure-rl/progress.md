@@ -179,3 +179,16 @@ Iteration 5의 첫 eval 결과:
 | `noisy_safe` | 0.13 | -60.66 | 38 | 575.9 | 1.633 |
 
 공식 Run A 초반은 random/passive/safe 모두에서 기준 미달이다. `cutoff_rollouts=0`과 `self_play_league_snapshots=5`는 의도대로 기록됐다.
+
+Iteration 20 eval:
+
+| Opponent | win_rate | avg_diff | timeouts |
+| --- | ---: | ---: | ---: |
+| `random` | 0.62 | 9.33 | 0 |
+| `passive_discard` | 0.00 | -16.85 | 0 |
+| `safe_heuristic` | 0.18 | -63.65 | 48 |
+| `safe_heuristic_loose` | 0.18 | -69.54 | 47 |
+| `safe_heuristic_strict` | 0.19 | -53.28 | 49 |
+| `noisy_safe` | 0.17 | -52.42 | 37 |
+
+Iteration 21 기준 `self_play_league_snapshots=20`으로 configured cap에 도달했다. `traversal_seconds`는 `4.91s`로 pilot의 `14` snapshots 시점 `13.81s`보다 낮아, chunk size 조정과 snapshot deepcopy 캐시가 IPC 병목을 줄인 것으로 보인다.
