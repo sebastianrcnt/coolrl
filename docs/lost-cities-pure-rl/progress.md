@@ -440,3 +440,16 @@ Iteration 70 eval:
 | `noisy_safe` | 0.26 | -27.44 | 72 | 901.48 | 0.689 | 0.27 | 0.001 | 0.999 |
 
 Run B iteration 70은 safe family win rate와 score diff가 iteration 55보다 조금 개선됐지만, safe family timeout이 96-99/100까지 올라갔다. `policy_entropy`, `avg_opened_colors`, `play_rate`가 함께 낮아져서, safe pretrain prior가 유지되기보다 discard-loop 방향으로 빠르게 붕괴하는 신호가 강하다.
+
+Iteration 100 eval:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy | avg_opened_colors | play_rate | discard_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.68 | 10.52 | 0 | 529.52 | 0.763 | 0.04 | 0.000 | 1.000 |
+| `passive_discard` | 0.00 | 0.00 | 0 | 93.60 | 1.131 | 0.00 | 0.000 | 1.000 |
+| `safe_heuristic` | 0.18 | -48.80 | 99 | 998.08 | 0.533 | 0.38 | 0.002 | 0.998 |
+| `safe_heuristic_loose` | 0.18 | -53.60 | 95 | 966.34 | 0.543 | 0.43 | 0.002 | 0.998 |
+| `safe_heuristic_strict` | 0.17 | -40.25 | 98 | 985.66 | 0.527 | 0.40 | 0.002 | 0.998 |
+| `noisy_safe` | 0.16 | -37.13 | 69 | 886.84 | 0.553 | 0.28 | 0.002 | 0.998 |
+
+Run B iteration 100은 Claude가 제안한 booster 판정 지점이다. 이 시점에서 safe family timeout은 95-99/100으로 높게 유지되고, `policy_entropy`는 iteration 70보다 더 낮아졌으며, `passive_discard`는 여전히 0승이다. Run B는 현재까지 safe pretrain이 collapse를 막는 booster라는 증거가 약하고, self-play 중 safe prior가 discard-loop로 희석되는 쪽에 가깝다.
