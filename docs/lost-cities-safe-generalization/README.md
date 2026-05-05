@@ -13,7 +13,9 @@
 
 2026-05-05 기준으로 목표는 아직 미달이다. 가장 좋은 실전용 기준 checkpoint는 여전히 `checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt`다.
 
-이 checkpoint는 `random`과 `passive_discard`에는 강하지만 `safe_heuristic`에는 아직 진다. 이후 DAGGER-style imitation과 successful-policy replay를 시도했지만, safe 상대 win rate를 0.5 이상으로 올리지 못했다.
+이 checkpoint는 `random`과 `passive_discard`에는 강하지만 `safe_heuristic`에는 아직 진다. 이후 DAGGER-style imitation, successful-policy replay, KL-anchored episodic policy-gradient를 시도했지만, safe 상대 win rate를 0.5 이상으로 올리지 못했다.
+
+현재 추가 파일럿으로 `policy_gradient_safe_adv_lr3e6_g4000.pt` 4000게임 fine-tune이 실행 중이다. 이 run은 아직 완료/eval 전이므로 결론에는 반영하지 않는다.
 
 ## 핵심 관찰
 
@@ -22,6 +24,8 @@
 - 단순 fixed-safe best-response CFR은 pretrain 정책을 빠르게 망가뜨렸다. 원인은 reservoir cold start, 큰 outcome-sampled regret target, pretrain anchor 부재, BR 목적과 strategy averaging의 부정합으로 본다.
 - DAGGER-style safe-label imitation은 `passive_discard` 대응을 개선하지만, `safe_heuristic` exploitation을 만들지는 못했다.
 - Successful-policy replay는 base policy가 실제로 safe를 이긴 판의 행동만 강화했지만, safe win rate는 오르지 않았다. 즉 “이긴 판 행동 모방”만으로는 timeout/루프와 평균 점수 열세를 해결하지 못했다.
+- KL-anchored episodic policy-gradient도 1000게임 파일럿에서는 safe 상대 개선을 만들지 못했다. `random`과 `passive_discard` 유지 기준은 통과했지만, safe win rate는 `0.280`으로 기준 checkpoint보다 낮았다.
+- 현재 반복되는 패턴은 “기본 플레이/일반화는 imitation으로 확보 가능하지만, safe를 넘기는 exploitation 신호가 action-level로 부족하다”는 것이다. 다음 단계는 전체 episode reward만 주는 방식보다, 후보 action별 safe-rollout improvement 또는 one-step lookahead label이 더 적합해 보인다.
 
 ## 구현된 실험 도구
 
@@ -55,6 +59,7 @@
 | `aggregated_init_from_safe_adv.pt` | 0.980 | 0.658 | 0.284 | passive는 개선, safe는 미개선 |
 | `aggregated_init_from_safe_adv_e1.pt` | 0.984 | 0.698 | 0.246 | update를 줄여도 safe 미개선 |
 | `successful_policy_vs_safe_e2.pt` | 0.984 | 0.530 | 0.276 | 이긴 판 replay도 safe 미개선 |
+| `policy_gradient_safe_e1000.pt` | 0.982 | 0.478 | 0.280 | KL-anchored PG 1000게임. 유지 기준은 간신히 통과, safe 미개선 |
 
 `safe_adv_imitation/latest.pt`의 variant-safe 500-game eval:
 
@@ -101,7 +106,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
   --games 2000 --epochs 2 --batch-size 2048 --max-steps 1000
 ```
 
-다음 policy-gradient fine-tune 파일럿:
+Policy-gradient fine-tune 파일럿:
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli fine-tune-policy \
@@ -118,12 +123,41 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli fine-tune-policy \
   --max-steps 1000
 ```
 
+이 파일럿의 500-game eval 결과:
+
+```text
+vs random: win_rate=0.982 avg_diff=73.75 avg_final_score=7.56 max_step_timeouts=0
+vs passive_discard: win_rate=0.478 avg_diff=3.90 avg_final_score=3.90 max_step_timeouts=0
+vs safe_heuristic: win_rate=0.280 avg_diff=-19.89 avg_final_score=-8.78 max_step_timeouts=123
+```
+
+진행 중인 더 강한 PG 파일럿:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli fine-tune-policy \
+  --config configs/lost_cities_deep_cfr_safe_dagger_256.yaml \
+  --checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --output checkpoints/lost_cities_deep_cfr_safe_dagger_256/policy_gradient_safe_adv_lr3e6_g4000.pt \
+  --games 4000 \
+  --opponent safe_heuristic \
+  --max-steps 1000 \
+  --learning-rate 3.0e-6 \
+  --reward-scale 60 \
+  --reward-clip 2 \
+  --kl-coef 0.10 \
+  --entropy-coef 0.001 \
+  --grad-clip 0.5
+```
+
+이 run은 완료 후 최소 `random`, `passive_discard`, `safe_heuristic` 500-game eval이 필요하다.
+
 ## 다음 우선순위
 
-1. `fine-tune-policy`로 safe 상대 outcome 신호를 직접 넣는다.
-2. 500-game eval에서 `random >= 0.90`, `passive >= 0.45`가 유지되는지 먼저 확인한다.
-3. safe win rate가 0.35 이상으로 오르지 않으면, 단순 policy-gradient도 폐기하고 action-level safe-rollout improvement label 또는 MCTS-style one-step improvement로 넘어간다.
-4. safe win rate가 0.40 이상으로 오르면, `safe_heuristic_loose`, `safe_heuristic_strict`, `noisy_safe`까지 500-game eval을 돌린다.
+1. 단순 policy-gradient는 우선순위를 낮춘다. `policy_gradient_safe_e1000.pt`가 safe win rate `0.280`에 그쳐 기준 checkpoint보다 낫지 않았다.
+2. 다음 실험은 action-level safe-rollout improvement label이다. 각 상태에서 legal action 몇 개를 적용한 뒤 safe-vs-safe 또는 policy-vs-safe rollout을 짧게 돌려, `SafeHeuristicBot` 행동이 아니라 “safe 상대로 기대 score_diff가 더 좋은 행동”을 target으로 만든다.
+3. rollout label은 모든 상태에 쓰지 말고, safe 상대 timeout/루프가 자주 생기는 card phase와 draw phase를 분리해 수집한다. 특히 draw-discard loop를 끊는 draw action label을 별도로 추적한다.
+4. label 생성 비용이 크면 `safe_adv_imitation/latest.pt`가 실제로 safe에게 지는 trajectory에서만 hard state를 뽑아 action improvement를 계산한다.
+5. 새 checkpoint는 먼저 `random >= 0.90`, `passive >= 0.45`, `safe >= 0.35`를 500-game eval에서 확인한다. `safe >= 0.40`까지 오르면 variant-safe 3종도 평가한다.
 
 ## 검증
 
@@ -134,3 +168,13 @@ uv run pytest src/coolrl/lost_cities/tests/test_deep_cfr_config.py src/coolrl/lo
 ```
 
 마지막 확인 결과: `82 passed`.
+
+## 커밋 / 푸시
+
+코드와 1차 문서화는 다음 커밋으로 `main`에 push했다.
+
+```text
+af0f675 Lost Cities safe 일반화 실험 도구 추가
+```
+
+이 커밋에는 imitation/PG 실험 도구, variant-safe eval opponent, safe-generalization config, GUI 실행 보조 수정, 테스트가 포함된다.
