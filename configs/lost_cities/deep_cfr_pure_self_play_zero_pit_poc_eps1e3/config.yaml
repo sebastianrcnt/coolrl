@@ -69,7 +69,7 @@ evaluation:
     - noisy_safe
 
 checkpoint:
-  directory: runs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3
+  directory: checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
   save_every_iteration: true
   save_iteration_interval: 1
   save_latest_only: true

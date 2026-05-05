@@ -25,7 +25,7 @@ configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
 Run output:
 
 ```text
-runs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3
+checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
 ```
 
 ## 기준 실험과 차이
@@ -68,7 +68,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli status \
-  --checkpoint-dir runs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
 ```
 
 ## 판정 기준
