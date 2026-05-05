@@ -83,13 +83,164 @@ def test_load_safe_rollout300_yaml_profile() -> None:
     assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_rollout300"
 
 
+def test_load_safe_rollout300_eps05_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_rollout300_eps05.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_rollout300_eps05"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.cutoff_rollout_max_steps == 300
+    assert cfg.traversal.outcome_sampling_epsilon == 0.5
+    assert cfg.traversal.traversals_per_player == 100
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_rollout300_eps05"
+
+
+def test_load_safe_rollout300_safe_opponent_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_rollout300_safe_opponent.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_rollout300_safe_opponent"
+    assert cfg.traversal.opponent_policy == "safe_heuristic"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.outcome_sampling_epsilon == 0.05
+    assert cfg.traversal.traversals_per_player == 100
+    assert cfg.traversal.outcome_sampling_value_clip is None
+    assert cfg.traversal.outcome_unsampled_regret == "negative_node_value"
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_rollout300_safe_opponent"
+
+
+def test_load_safe_rollout300_t500_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_rollout300_t500.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_rollout300_t500"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.cutoff_rollout_max_steps == 300
+    assert cfg.traversal.outcome_sampling_epsilon == 0.05
+    assert cfg.traversal.traversals_per_player == 500
+    assert cfg.traversal.progress_every_traversals == 50
+    assert cfg.memory.advantage_capacity == 400000
+    assert cfg.memory.strategy_capacity == 800000
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_rollout300_t500"
+
+
+def test_load_safe_rollout300_clip500_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_rollout300_clip500.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_rollout300_clip500"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.cutoff_rollout_max_steps == 300
+    assert cfg.traversal.outcome_sampling_epsilon == 0.05
+    assert cfg.traversal.outcome_sampling_value_clip == 500.0
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_rollout300_clip500"
+
+
+def test_load_safe_rollout300_eps02_t500_clip500_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_rollout300_eps02_t500_clip500.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_rollout300_eps02_t500_clip500"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.cutoff_rollout_max_steps == 300
+    assert cfg.traversal.outcome_sampling_epsilon == 0.2
+    assert cfg.traversal.outcome_sampling_value_clip == 500.0
+    assert cfg.traversal.traversals_per_player == 500
+    assert cfg.traversal.traversal_worker_chunk_size == 8
+    assert cfg.optimization.advantage_updates_per_iteration == 512
+    assert cfg.optimization.strategy_updates_per_iteration == 512
+    assert cfg.memory.advantage_capacity == 2_000_000
+    assert cfg.memory.strategy_capacity == 2_000_000
+    assert cfg.evaluation.games == 100
+    assert cfg.checkpoint.directory == (
+        "checkpoints/lost_cities_deep_cfr_safe_rollout300_eps02_t500_clip500"
+    )
+
+
+def test_load_safe_rollout300_zero_unsampled_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_rollout300_zero_unsampled.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_rollout300_zero_unsampled"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.cutoff_rollout_max_steps == 300
+    assert cfg.traversal.outcome_sampling_epsilon == 0.2
+    assert cfg.traversal.outcome_sampling_value_clip == 500.0
+    assert cfg.traversal.outcome_unsampled_regret == "zero"
+    assert cfg.traversal.traversals_per_player == 500
+    assert cfg.traversal.traversal_worker_chunk_size == 8
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_rollout300_zero_unsampled"
+
+
+def test_load_safe_br_zero_unsampled_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_br_zero_unsampled.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_br_zero_unsampled"
+    assert cfg.traversal.opponent_policy == "safe_heuristic"
+    assert cfg.traversal.store_strategy_on_opponent_nodes is False
+    assert cfg.traversal.store_strategy_on_traverser_nodes is True
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.outcome_sampling_epsilon == 0.2
+    assert cfg.traversal.outcome_sampling_value_clip == 500.0
+    assert cfg.traversal.outcome_unsampled_regret == "zero"
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_br_zero_unsampled"
+
+
+def test_load_safe_br_pretrained_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_br_pretrained.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_br_pretrained"
+    assert cfg.traversal.opponent_policy == "safe_heuristic"
+    assert cfg.traversal.store_strategy_on_opponent_nodes is False
+    assert cfg.traversal.outcome_sampling_epsilon == 0.2
+    assert cfg.traversal.outcome_sampling_value_clip == 500.0
+    assert cfg.traversal.outcome_unsampled_regret == "zero"
+    assert cfg.optimization.learning_rate == 1.0e-4
+    assert cfg.evaluation.eval_every == 5
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_br_pretrained"
+
+
+def test_load_safe_pretrain_512_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_pretrain_512.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_pretrain_512"
+    assert cfg.network.hidden_size == 512
+    assert cfg.network.num_layers == 4
+    assert cfg.traversal.opponent_policy == "safe_heuristic"
+    assert cfg.traversal.outcome_unsampled_regret == "zero"
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_pretrain_512"
+
+
+def test_load_safe_dagger_512_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_dagger_512.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_dagger_512"
+    assert cfg.network.hidden_size == 512
+    assert cfg.network.num_layers == 4
+    assert cfg.optimization.learning_rate == 1.0e-4
+    assert cfg.evaluation.opponents == [
+        "random",
+        "safe_heuristic",
+        "safe_heuristic_loose",
+        "safe_heuristic_strict",
+        "noisy_safe",
+        "passive_discard",
+    ]
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_dagger_512"
+
+
+def test_load_safe_dagger_256_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_dagger_256.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_dagger_256"
+    assert cfg.network.hidden_size == 256
+    assert cfg.network.num_layers == 3
+    assert cfg.optimization.learning_rate == 3.0e-5
+    assert "safe_heuristic_loose" in cfg.evaluation.opponents
+    assert "safe_heuristic_strict" in cfg.evaluation.opponents
+    assert "noisy_safe" in cfg.evaluation.opponents
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_dagger_256"
+
+
 def test_default_cutoff_config_preserves_score_diff_behavior() -> None:
     cfg = config_from_dict({})
     assert cfg.traversal.cutoff_value_mode == "score_diff"
     assert cfg.traversal.cutoff_rollouts == 0
     assert cfg.traversal.cutoff_rollout_policy == "random"
+    assert cfg.traversal.opponent_policy == "network"
     assert cfg.traversal.max_depth == 8
     assert cfg.traversal.outcome_sampling_epsilon == 0.0
+    assert cfg.traversal.outcome_sampling_value_clip is None
+    assert cfg.traversal.outcome_unsampled_regret == "negative_node_value"
 
 
 def test_rules_config_default_tier3_shape() -> None:

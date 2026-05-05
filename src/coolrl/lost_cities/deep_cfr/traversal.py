@@ -83,7 +83,10 @@ class DeepCFRTraverser:
         cutoff_rollouts: int = 0,
         cutoff_rollout_policy: str = "random",
         cutoff_rollout_max_steps: int = 10_000,
+        opponent_policy: str = "network",
         outcome_sampling_epsilon: float = 0.0,
+        outcome_sampling_value_clip: float | None = None,
+        outcome_unsampled_regret: str = "negative_node_value",
         rng: np.random.Generator | None = None,
         timing_stats: TraversalTimingStats | None = None,
     ) -> None:
@@ -101,7 +104,12 @@ class DeepCFRTraverser:
         self.cutoff_rollouts = max(0, int(cutoff_rollouts))
         self.cutoff_rollout_policy = cutoff_rollout_policy
         self.cutoff_rollout_max_steps = max(1, int(cutoff_rollout_max_steps))
+        self.opponent_policy = opponent_policy
         self.outcome_sampling_epsilon = float(outcome_sampling_epsilon)
+        self.outcome_sampling_value_clip = (
+            None if outcome_sampling_value_clip is None else max(1.0e-9, float(outcome_sampling_value_clip))
+        )
+        self.outcome_unsampled_regret = outcome_unsampled_regret
         self.sampling_probability_floor = 1.0e-12
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
@@ -221,7 +229,16 @@ class DeepCFRTraverser:
         action_sample_prob = float(sampling_policy[sampled_action])
         if action_sample_prob <= self.sampling_probability_floor:
             return 0.0
-        return float(value) / action_sample_prob
+        sampled_value = float(value) / action_sample_prob
+        if self.outcome_sampling_value_clip is not None:
+            sampled_value = float(
+                np.clip(
+                    sampled_value,
+                    -self.outcome_sampling_value_clip,
+                    self.outcome_sampling_value_clip,
+                )
+            )
+        return sampled_value
 
     def _sampled_node_value(
         self,
@@ -239,22 +256,33 @@ class DeepCFRTraverser:
         legal: np.ndarray,
     ) -> np.ndarray:
         node_value = float(policy[sampled_action]) * sampled_action_value
-        regrets = np.where(legal, -node_value, 0.0).astype(np.float32)
+        if self.outcome_unsampled_regret == "zero":
+            regrets = np.zeros_like(policy, dtype=np.float32)
+        else:
+            regrets = np.where(legal, -node_value, 0.0).astype(np.float32)
         regrets[sampled_action] = np.float32(sampled_action_value - node_value)
         return regrets
 
     def _cutoff_rollout_action(self, rollout_state: GameState) -> int | None:
+        return self._rollout_bot_action(rollout_state, self.cutoff_rollout_policy)
+
+    def _rollout_bot_action(self, rollout_state: GameState, policy: str) -> int | None:
         legal_actions = np.flatnonzero(rollout_state.unified_legal_mask())
         if len(legal_actions) == 0:
             return None
-        if self.cutoff_rollout_policy == "random":
+        if policy == "random":
             return int(self.rng.choice(legal_actions))
-        if self.cutoff_rollout_policy == "safe_heuristic":
+        if policy == "safe_heuristic":
             if self._safe_heuristic_rollout_bot is None:
                 self._safe_heuristic_rollout_bot = SafeHeuristicBot()
             action = self._safe_heuristic_rollout_bot.act(rollout_state)
             return rollout_state.to_unified_action(action)
-        raise ValueError(f"unsupported cutoff_rollout_policy: {self.cutoff_rollout_policy!r}")
+        raise ValueError(f"unsupported rollout policy: {policy!r}")
+
+    def _fixed_opponent_action(self, state: GameState) -> int | None:
+        if self.opponent_policy == "network":
+            return None
+        return self._rollout_bot_action(state, self.opponent_policy)
 
     def _rollout_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
         rollout_state = clone_state(state)
@@ -304,6 +332,20 @@ class DeepCFRTraverser:
             return self._cutoff_value(state, traverser, stats)
 
         player = state.current_player
+        if player != traverser and self.opponent_policy != "network":
+            action = self._fixed_opponent_action(state)
+            if action is None:
+                stats.terminals += 1
+                return float(state.score_diff(traverser))
+            child = self._child_after_action(state, action)
+            return self._traverse(
+                child,
+                traverser,
+                iteration,
+                depth + 1,
+                stats,
+            )
+
         info, legal, policy = self._policy(state, player)
         self._record_strategy(info, legal, policy, player, traverser, iteration, depth)
         legal_actions = np.flatnonzero(legal)
@@ -374,7 +416,10 @@ def cfr_traverse(
     cutoff_rollouts: int = 0,
     cutoff_rollout_policy: str = "random",
     cutoff_rollout_max_steps: int = 10_000,
+    opponent_policy: str = "network",
     outcome_sampling_epsilon: float = 0.0,
+    outcome_sampling_value_clip: float | None = None,
+    outcome_unsampled_regret: str = "negative_node_value",
     rng: np.random.Generator | None = None,
     timing_stats: TraversalTimingStats | None = None,
 ) -> tuple[float, TraversalStats]:
@@ -393,7 +438,10 @@ def cfr_traverse(
         cutoff_rollouts=cutoff_rollouts,
         cutoff_rollout_policy=cutoff_rollout_policy,
         cutoff_rollout_max_steps=cutoff_rollout_max_steps,
+        opponent_policy=opponent_policy,
         outcome_sampling_epsilon=outcome_sampling_epsilon,
+        outcome_sampling_value_clip=outcome_sampling_value_clip,
+        outcome_unsampled_regret=outcome_unsampled_regret,
         rng=rng,
         timing_stats=timing_stats,
     )

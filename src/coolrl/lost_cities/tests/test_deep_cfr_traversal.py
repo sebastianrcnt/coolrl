@@ -228,6 +228,73 @@ def test_cfr_traversal_random_rollout_records_max_step_timeout() -> None:
     assert stats.cutoff_rollout_max_step_timeouts == 1
 
 
+def test_cfr_traversal_clips_outcome_sampled_value() -> None:
+    config = tier_config("tier1", seed=16)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config, seed=16),
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=1,
+        cutoff_value_mode="random_rollout",
+        cutoff_rollouts=1,
+        cutoff_rollout_policy="safe_heuristic",
+        cutoff_rollout_max_steps=1000,
+        outcome_sampling_value_clip=1.0,
+        rng=np.random.default_rng(20),
+    )
+
+    assert math.isfinite(value)
+    assert stats.cutoff_rollouts == 1
+    assert len(memories[0]) > 0
+    assert np.max(np.abs(memories[0].samples[0].target)) <= 1.0
+
+
+def test_cfr_traversal_can_zero_unsampled_outcome_regrets() -> None:
+    config = tier_config("tier1", seed=18)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config, seed=18),
+        0,
+        1,
+        nets,
+        memories,
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=1,
+        cutoff_value_mode="random_rollout",
+        cutoff_rollouts=1,
+        cutoff_rollout_policy="safe_heuristic",
+        cutoff_rollout_max_steps=1000,
+        outcome_unsampled_regret="zero",
+        rng=np.random.default_rng(22),
+    )
+
+    assert math.isfinite(value)
+    assert stats.cutoff_rollouts == 1
+    target = memories[0].samples[0].target
+    legal = memories[0].samples[0].legal_mask
+    nonzero_indices = np.flatnonzero(target)
+    assert len(nonzero_indices) <= 1
+    assert all(legal[index] for index in nonzero_indices)
+
+
 def test_cfr_traversal_safe_heuristic_rollout_cutoff_finishes() -> None:
     config = tier_config("tier1", seed=17)
     input_dim = infer_input_dim(config)
@@ -257,6 +324,40 @@ def test_cfr_traversal_safe_heuristic_rollout_cutoff_finishes() -> None:
     assert stats.cutoff_rollouts == 1
     assert stats.cutoff_rollout_steps > 0
     assert stats.cutoff_rollout_max_step_timeouts == 0
+
+
+def test_cfr_traversal_can_use_safe_heuristic_fixed_opponent() -> None:
+    config = tier_config("tier1", seed=19)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    memories = [AdvantageMemory(100), AdvantageMemory(100)]
+    strategy_memory = StrategyMemory(100)
+
+    value, stats = cfr_traverse(
+        GameState.new_game(config, seed=19),
+        0,
+        1,
+        nets,
+        memories,
+        strategy_memory,
+        device=torch.device("cpu"),
+        max_depth=4,
+        opponent_policy="safe_heuristic",
+        cutoff_value_mode="random_rollout",
+        cutoff_rollouts=1,
+        cutoff_rollout_policy="safe_heuristic",
+        cutoff_rollout_max_steps=1000,
+        outcome_unsampled_regret="zero",
+        rng=np.random.default_rng(24),
+    )
+
+    assert math.isfinite(value)
+    assert stats.nodes > 0
+    assert len(memories[0]) > 0
+    assert len(strategy_memory) > 0
 
 
 def test_cfr_traversal_node_limit_cutoff_returns_current_score_diff() -> None:

@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from ..bots.base import first_legal
-from ..bots.heuristic import SafeHeuristicBot
+from ..bots.heuristic import SafeHeuristicBot, SafeHeuristicParams
 from ..bots.passive import PassiveDiscardBot
 from ..bots.random import RandomBot
 from ..game import GameState, LostCitiesConfig
@@ -15,6 +15,15 @@ from ..interfaces import BotInput, LostCitiesBot
 from .config import config_from_dict
 from .encoding import encode_information_state, legal_mask_array
 from .networks import StrategyNet
+
+SUPPORTED_OPPONENTS = (
+    "random",
+    "safe_heuristic",
+    "safe_heuristic_loose",
+    "safe_heuristic_strict",
+    "noisy_safe",
+    "passive_discard",
+)
 
 
 def _resolve_device(device: str | torch.device) -> torch.device:
@@ -72,6 +81,21 @@ class StrategyNetBot(LostCitiesBot):
         return state.from_unified_action(unified)
 
 
+class NoisySafeHeuristicBot(LostCitiesBot):
+    def __init__(self, *, seed: int | None = None, noise: float = 0.15) -> None:
+        if not 0.0 <= noise <= 1.0:
+            raise ValueError(f"noise must be between 0 and 1, got {noise}")
+        self.safe_bot = SafeHeuristicBot()
+        self.random_bot = RandomBot(seed=seed)
+        self.rng = np.random.default_rng(seed)
+        self.noise = noise
+
+    def act(self, obs_or_state: BotInput) -> int:
+        if self.rng.random() < self.noise:
+            return self.random_bot.act(obs_or_state)
+        return self.safe_bot.act(obs_or_state)
+
+
 def load_strategy_bot_from_checkpoint(
     checkpoint_path: str | Path,
     *,
@@ -108,6 +132,28 @@ def make_opponent(name: str, seed: int | None = None) -> LostCitiesBot:
         return RandomBot(seed=seed)
     if token == "safe_heuristic":
         return SafeHeuristicBot()
+    if token == "safe_heuristic_loose":
+        return SafeHeuristicBot(
+            SafeHeuristicParams(
+                open_target_ratio=0.42,
+                open_min_card_ratio=0.34,
+                handshake_target_multiplier=1.05,
+                late_deck_ratio=0.15,
+                gift_penalty_weight=0.85,
+            )
+        )
+    if token == "safe_heuristic_strict":
+        return SafeHeuristicBot(
+            SafeHeuristicParams(
+                open_target_ratio=0.58,
+                open_min_card_ratio=0.50,
+                handshake_target_multiplier=1.30,
+                late_deck_ratio=0.25,
+                gift_penalty_weight=1.25,
+            )
+        )
+    if token == "noisy_safe":
+        return NoisySafeHeuristicBot(seed=seed, noise=0.15)
     if token == "passive_discard":
         return PassiveDiscardBot()
     raise ValueError(f"unsupported opponent: {name!r}")
@@ -168,6 +214,7 @@ def evaluate_against_bot(
     device: torch.device | str = "cpu",
     max_steps: int = 10_000,
     on_max_steps: str = "score_diff",
+    sample: bool = False,
 ) -> dict[str, float | int]:
     strategy_net.eval()
     if max_steps <= 0:
@@ -188,7 +235,7 @@ def evaluate_against_bot(
     wins = losses = draws = 0
     max_step_timeouts = 0
     for index in range(games):
-        net_bot = StrategyNetBot(strategy_net, config, device=device, sample=False, seed=seed + index)
+        net_bot = StrategyNetBot(strategy_net, config, device=device, sample=sample, seed=seed + index)
         game_seed = seed + index
         if index % 2 == 0:
             final_state, timed_out, action_counts = _play_game_for_evaluation(

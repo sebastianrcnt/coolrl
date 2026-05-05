@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 import logging
+import os
 from pathlib import Path
 import sys
 from typing import Any, Literal
@@ -172,6 +173,13 @@ def preferred_font_path() -> Path | None:
     return None
 
 
+def pygame_display_flags(pygame_module: Any) -> int:
+    flags = pygame_module.RESIZABLE
+    if os.environ.get("COOLRL_X11_SOFTWARE") != "1":
+        flags |= pygame_module.SCALED
+    return flags
+
+
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Play Lost Cities in one pygame window.")
     parser.add_argument("--mode", choices=("pvp", "pvc"), default="pvp")
@@ -219,7 +227,11 @@ class LostCitiesGuiApp:
         self.pygame = pygame
         self.pygame_gui = pygame_gui
         self.window_size = (width, height)
-        self.screen = pygame.display.set_mode(self.window_size)
+        self.screen = pygame.display.set_mode(
+            self.window_size,
+            pygame_display_flags(pygame),
+            vsync=0,
+        )
         self.font_path = preferred_font_path()
         self.font_cache: dict[tuple[int, bool], Any] = {}
         theme_path = Path(__file__).resolve().parent / "assets" / "pygame_pvp_theme.json"

@@ -59,12 +59,15 @@ class TraversalConfig:
     cutoff_rollouts: int = 0
     cutoff_rollout_policy: str = "random"
     cutoff_rollout_max_steps: int = 10_000
+    opponent_policy: str = "network"
     progress_every_traversals: int = 10
     num_workers: int | str = 0
     traversal_worker_chunk_size: int = 4
     profile_hotspots: bool = False
     regret_matching_epsilon: float = 1.0e-8
     outcome_sampling_epsilon: float = 0.0
+    outcome_sampling_value_clip: float | None = None
+    outcome_unsampled_regret: str = "negative_node_value"
 
     def __post_init__(self) -> None:
         mode = str(self.cutoff_value_mode).strip().lower()
@@ -77,6 +80,12 @@ class TraversalConfig:
                 "traversal.cutoff_rollout_policy must be one of 'random' or 'safe_heuristic'"
             )
         self.cutoff_rollout_policy = policy
+        opponent_policy = str(self.opponent_policy).strip().lower()
+        if opponent_policy not in {"network", "safe_heuristic"}:
+            raise ValueError(
+                "traversal.opponent_policy must be one of 'network' or 'safe_heuristic'"
+            )
+        self.opponent_policy = opponent_policy
         self.cutoff_rollouts = int(self.cutoff_rollouts)
         if self.cutoff_rollouts < 0:
             raise ValueError("traversal.cutoff_rollouts must be nonnegative")
@@ -86,6 +95,17 @@ class TraversalConfig:
         self.outcome_sampling_epsilon = float(self.outcome_sampling_epsilon)
         if not 0.0 <= self.outcome_sampling_epsilon <= 1.0:
             raise ValueError("traversal.outcome_sampling_epsilon must be between 0 and 1")
+        if self.outcome_sampling_value_clip is not None:
+            self.outcome_sampling_value_clip = float(self.outcome_sampling_value_clip)
+            if self.outcome_sampling_value_clip <= 0.0:
+                raise ValueError("traversal.outcome_sampling_value_clip must be positive when set")
+        unsampled_regret = str(self.outcome_unsampled_regret).strip().lower()
+        if unsampled_regret not in {"negative_node_value", "zero"}:
+            raise ValueError(
+                "traversal.outcome_unsampled_regret must be one of "
+                "'negative_node_value' or 'zero'"
+            )
+        self.outcome_unsampled_regret = unsampled_regret
 
     def _cpu_worker_guess(self) -> int:
         logical = max(1, os.cpu_count() or 1)

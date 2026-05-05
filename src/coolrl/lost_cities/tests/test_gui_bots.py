@@ -6,9 +6,27 @@ from coolrl.lost_cities.pygame_pvp import (
     build_argparser,
     checkpoint_config_differs,
     deep_cfr_bot_label,
+    pygame_display_flags,
     snapshot_to_json,
     undo_until_player_card_phase,
 )
+
+
+class FakePygame:
+    RESIZABLE = 1
+    SCALED = 2
+
+
+def test_pygame_display_flags_keep_scaled_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("COOLRL_X11_SOFTWARE", raising=False)
+
+    assert pygame_display_flags(FakePygame) == FakePygame.RESIZABLE | FakePygame.SCALED
+
+
+def test_pygame_display_flags_drop_scaled_for_x11_software(monkeypatch) -> None:
+    monkeypatch.setenv("COOLRL_X11_SOFTWARE", "1")
+
+    assert pygame_display_flags(FakePygame) == FakePygame.RESIZABLE
 
 
 def test_random_gui_bot_selects_unified_legal_action() -> None:

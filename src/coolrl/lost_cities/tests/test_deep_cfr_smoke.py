@@ -18,6 +18,7 @@ from coolrl.lost_cities.deep_cfr.evaluate import (
     load_strategy_bot_from_checkpoint,
     make_opponent,
 )
+from coolrl.lost_cities.deep_cfr.imitation import pretrain_safe_heuristic_checkpoint
 from coolrl.lost_cities.deep_cfr.memory import _Sample
 from coolrl.lost_cities.deep_cfr.cli import _RESUME_LATEST, _resolve_resume_path, build_parser
 from coolrl.lost_cities.deep_cfr.trainer import DeepCFRTrainer
@@ -75,6 +76,97 @@ def test_train_parser_resume_with_path_preserves_path() -> None:
     assert args.resume == "checkpoints/lost_cities_deep_cfr_tier3/iteration_00005.pt"
 
 
+def test_pretrain_heuristic_parser_accepts_training_options() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pretrain-heuristic",
+            "--config",
+            "configs/lost_cities_deep_cfr_safe_rollout300_safe_opponent.yaml",
+            "--output",
+            "checkpoints/example/pretrain.pt",
+            "--games",
+            "10",
+            "--epochs",
+            "2",
+            "--batch-size",
+            "32",
+            "--max-steps",
+            "100",
+            "--seed",
+            "123",
+            "--dataset-mode",
+            "successful_policy_vs_safe",
+            "--base-checkpoint",
+            "checkpoints/example/base.pt",
+            "--init-checkpoint",
+            "checkpoints/example/init.pt",
+            "--policy-sample",
+        ]
+    )
+
+    assert str(args.config) == "configs/lost_cities_deep_cfr_safe_rollout300_safe_opponent.yaml"
+    assert str(args.output) == "checkpoints/example/pretrain.pt"
+    assert args.games == 10
+    assert args.epochs == 2
+    assert args.batch_size == 32
+    assert args.max_steps == 100
+    assert args.seed == 123
+    assert args.dataset_mode == "successful_policy_vs_safe"
+    assert str(args.base_checkpoint) == "checkpoints/example/base.pt"
+    assert str(args.init_checkpoint) == "checkpoints/example/init.pt"
+    assert args.policy_sample is True
+
+
+def test_fine_tune_policy_parser_accepts_training_options() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "fine-tune-policy",
+            "--config",
+            "configs/lost_cities_deep_cfr_safe_dagger_256.yaml",
+            "--checkpoint",
+            "checkpoints/base.pt",
+            "--output",
+            "checkpoints/tuned.pt",
+            "--games",
+            "10",
+            "--opponent",
+            "safe_heuristic",
+            "--max-steps",
+            "100",
+            "--learning-rate",
+            "1e-6",
+            "--reward-scale",
+            "50",
+            "--reward-clip",
+            "1.5",
+            "--kl-coef",
+            "0.1",
+            "--entropy-coef",
+            "0.002",
+            "--grad-clip",
+            "0.25",
+            "--seed",
+            "123",
+        ]
+    )
+
+    assert str(args.config) == "configs/lost_cities_deep_cfr_safe_dagger_256.yaml"
+    assert str(args.checkpoint) == "checkpoints/base.pt"
+    assert str(args.output) == "checkpoints/tuned.pt"
+    assert args.games == 10
+    assert args.opponent == "safe_heuristic"
+    assert args.max_steps == 100
+    assert args.learning_rate == 1.0e-6
+    assert args.reward_scale == 50
+    assert args.reward_clip == 1.5
+    assert args.kl_coef == 0.1
+    assert args.entropy_coef == 0.002
+    assert args.grad_clip == 0.25
+    assert args.seed == 123
+
+
 def test_resolve_resume_without_path_uses_config_latest(tmp_path: Path) -> None:
     checkpoint_dir = tmp_path / "checkpoints"
     checkpoint_dir.mkdir()
@@ -94,6 +186,120 @@ def test_resolve_resume_without_path_requires_existing_latest(tmp_path: Path) ->
         assert "latest checkpoint does not exist" in str(exc)
     else:
         raise AssertionError("expected FileNotFoundError")
+
+
+def test_safe_heuristic_pretrain_checkpoint_is_resume_compatible(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "optimization": {"learning_rate": 1.0e-3, "weight_decay": 0.0},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    output_path = tmp_path / "pretrain.pt"
+
+    result = pretrain_safe_heuristic_checkpoint(
+        cfg,
+        output_path=output_path,
+        games=1,
+        epochs=1,
+        batch_size=16,
+        max_steps=200,
+        seed=123,
+    )
+
+    assert result.output_path == output_path
+    assert result.games == 1
+    assert result.states > 0
+    checkpoint = torch.load(output_path, map_location="cpu")
+    assert checkpoint["resume_semantics"] == "networks_optimizers_iteration_only"
+    assert checkpoint["iteration"] == 0
+    assert checkpoint["metrics"]["pretrain_states"] == result.states
+    trainer = DeepCFRTrainer(cfg, resume_path=output_path)
+    assert trainer.iteration == 0
+
+
+def test_aggregated_safe_heuristic_pretrain_checkpoint_uses_base_policy_states(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "optimization": {"learning_rate": 1.0e-3, "weight_decay": 0.0},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    base_path = tmp_path / "base.pt"
+    output_path = tmp_path / "aggregated.pt"
+
+    pretrain_safe_heuristic_checkpoint(
+        cfg,
+        output_path=base_path,
+        games=1,
+        epochs=1,
+        batch_size=16,
+        max_steps=80,
+        seed=123,
+    )
+    result = pretrain_safe_heuristic_checkpoint(
+        cfg,
+        output_path=output_path,
+        games=3,
+        epochs=1,
+        batch_size=16,
+        max_steps=80,
+        seed=456,
+        dataset_mode="aggregated",
+        base_checkpoint=base_path,
+        init_checkpoint=base_path,
+    )
+
+    assert result.dataset_mode == "aggregated"
+    assert result.states > 0
+    checkpoint = torch.load(output_path, map_location="cpu")
+    assert checkpoint["metrics"]["pretrain_dataset_mode"] == "aggregated"
+    assert checkpoint["metrics"]["pretrain_base_checkpoint"] == str(base_path)
+    assert checkpoint["metrics"]["pretrain_init_checkpoint"] == str(base_path)
+
+
+def test_successful_policy_vs_safe_pretrain_checkpoint_uses_winning_policy_actions(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "optimization": {"learning_rate": 1.0e-3, "weight_decay": 0.0},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    base_path = tmp_path / "base.pt"
+    output_path = tmp_path / "successful.pt"
+
+    pretrain_safe_heuristic_checkpoint(
+        cfg,
+        output_path=base_path,
+        games=1,
+        epochs=1,
+        batch_size=16,
+        max_steps=80,
+        seed=123,
+    )
+    result = pretrain_safe_heuristic_checkpoint(
+        cfg,
+        output_path=output_path,
+        games=20,
+        epochs=1,
+        batch_size=16,
+        max_steps=80,
+        seed=456,
+        dataset_mode="successful_policy_vs_safe",
+        base_checkpoint=base_path,
+        init_checkpoint=base_path,
+    )
+
+    assert result.dataset_mode == "successful_policy_vs_safe"
+    assert result.states > 0
+    checkpoint = torch.load(output_path, map_location="cpu")
+    assert checkpoint["metrics"]["pretrain_dataset_mode"] == "successful_policy_vs_safe"
 
 
 def test_tiny_training_run_completes_with_parallel_traversal(tmp_path: Path) -> None:
@@ -604,6 +810,15 @@ def test_passive_discard_opponent_acts_legally_and_prefers_deck_draw() -> None:
     assert draw_action == 0
 
 
+def test_variant_safe_opponents_act_legally() -> None:
+    for name in ("safe_heuristic_loose", "safe_heuristic_strict", "noisy_safe"):
+        bot = make_opponent(name, seed=7)
+        state = GameState.new_game()
+        action = bot.act(state)
+
+        assert state.legal_mask()[action]
+
+
 def test_evaluate_against_bot_reports_passive_no_expedition_diagnostics(tmp_path: Path) -> None:
     cfg = config_from_dict(
         {
@@ -650,6 +865,22 @@ def test_deep_cfr_eval_cli_accepts_passive_discard_opponent() -> None:
     )
 
     assert args.opponent == "passive_discard"
+
+
+def test_deep_cfr_eval_cli_accepts_sampling_and_max_steps_overrides() -> None:
+    args = build_parser().parse_args(
+        [
+            "eval",
+            "--checkpoint",
+            "checkpoint.pt",
+            "--sample",
+            "--max-steps",
+            "123",
+        ]
+    )
+
+    assert args.sample is True
+    assert args.max_steps == 123
 
 
 def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:

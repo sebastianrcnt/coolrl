@@ -61,6 +61,15 @@ CLI 진입점은 `python -m coolrl.lost_cities.deep_cfr.cli` 다.
 | `lost_cities_deep_cfr_tier3.yaml` | 기존 score-diff cutoff 기반 tier3 baseline / CLI 기본 config |
 | `lost_cities_deep_cfr_capped_rollout300.yaml` | `random_rollout` cutoff cap 300 실험 — eval 비용 절감, CPU traversal workers |
 | `lost_cities_deep_cfr_safe_rollout300.yaml` | `safe_heuristic` rollout cutoff cap 300 실험 — pure random rollout의 over-opening 진단용 |
+| `lost_cities_deep_cfr_safe_rollout300_safe_opponent.yaml` | `safe_heuristic` fixed-opponent best-response 실험 |
+| `lost_cities_deep_cfr_safe_rollout300_eps05.yaml` | `safe_heuristic` rollout + outcome sampling epsilon 0.5 탐색 실험 |
+| `lost_cities_deep_cfr_safe_rollout300_t500.yaml` | `safe_heuristic` rollout + player당 500 traversal 샘플 품질 실험 |
+| `lost_cities_deep_cfr_safe_rollout300_clip500.yaml` | `safe_heuristic` rollout + outcome-sampled value clip 500 안정화 실험 |
+| `lost_cities_deep_cfr_safe_rollout300_eps02_t500_clip500.yaml` | clip 500 안정화 위에서 epsilon 0.2 + player당 500 traversal를 결합한 discard spiral 탈출 실험 |
+| `lost_cities_deep_cfr_safe_rollout300_zero_unsampled.yaml` | 미샘플 액션 regret를 0으로 두고 clip 500 + epsilon 0.2 + player당 500 traversal를 결합한 discard spiral 완화 실험 |
+| `lost_cities_deep_cfr_safe_br_zero_unsampled.yaml` | `safe_heuristic`을 고정 opponent로 둔 best-response 목적 실험 |
+| `lost_cities_deep_cfr_safe_dagger_256.yaml` | 기존 256x3 pretrain checkpoint를 초기화점으로 쓰는 aggregated imitation / DAGGER-style 후속 pretrain config |
+| `lost_cities_deep_cfr_safe_dagger_512.yaml` | aggregated imitation / DAGGER-style 후속 pretrain용 512x4 config. `random`, `safe_heuristic`, variant-safe, `passive_discard` 평가를 함께 본다 |
 
 과거 실험용 `overnight`, `small_run`, `diagnostic_depth16_nodes20k`, `cutoff_random_rollout` config는 결과가 문서화된 뒤 제거했다. 관련 기록은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)와 [`docs/lost-cities-deep-cfr-worker-benchmark-notes.md`](../../../docs/lost-cities-deep-cfr-worker-benchmark-notes.md)를 참고한다.
 
@@ -129,6 +138,45 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli eval \
 ```
 
 Deep CFR eval opponent는 `random`, `safe_heuristic`, `passive_discard`를 지원한다. `passive_discard`는 expedition을 열지 않는 baseline이라 random win rate만으로 passive collapse를 착각하는 문제를 잡는 데 사용한다.
+
+추가 일반화 진단용으로 `safe_heuristic_loose`, `safe_heuristic_strict`, `noisy_safe`도 지원한다. 이 opponent들은 `safe_heuristic` 하나에만 맞춘 정책인지 빠르게 확인하기 위한 variant-safe baseline이다.
+
+### Safe heuristic imitation / DAGGER-style pretrain
+
+기본 safe self-play imitation checkpoint:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
+  --config configs/lost_cities_deep_cfr_safe_dagger_512.yaml \
+  --output checkpoints/lost_cities_deep_cfr_safe_dagger_512/base.pt \
+  --games 1600 --epochs 16 --batch-size 2048 --max-steps 1000
+```
+
+기존 checkpoint가 만든 상태분포까지 섞는 aggregated imitation:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
+  --config configs/lost_cities_deep_cfr_safe_dagger_256.yaml \
+  --output checkpoints/lost_cities_deep_cfr_safe_dagger_256/aggregated.pt \
+  --dataset-mode aggregated \
+  --base-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --init-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --games 1600 --epochs 8 --batch-size 2048 --max-steps 1000
+```
+
+`aggregated` mode는 safe-vs-safe, policy-vs-safe, policy-vs-policy로 게임을 진행하되, target action은 항상 현재 상태에서 `SafeHeuristicBot`이 고르는 행동으로 저장한다. 목적은 fixed safe best-response가 아니라, 모델이 실제로 도달하는 상태분포에서 safe-style correction을 받는 것이다.
+
+`safe_heuristic`을 직접 넘기기 위한 exploitation 실험은 `successful_policy_vs_safe` mode를 쓴다. 이 mode는 `--base-checkpoint` 정책이 `safe_heuristic`을 상대로 실제로 이긴 게임에서 해당 정책이 둔 행동만 imitation target으로 저장한다:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
+  --config configs/lost_cities_deep_cfr_safe_dagger_256.yaml \
+  --output checkpoints/lost_cities_deep_cfr_safe_dagger_256/successful_policy_vs_safe.pt \
+  --dataset-mode successful_policy_vs_safe \
+  --base-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --init-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --games 2000 --epochs 2 --batch-size 2048 --max-steps 1000
+```
 
 현재 training caveat와 다음 실험 기준은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)를 참고한다.
 

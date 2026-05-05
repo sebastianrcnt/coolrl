@@ -34,12 +34,15 @@ class TraversalWorkerBatch:
     cutoff_rollouts: int
     cutoff_rollout_policy: str
     cutoff_rollout_max_steps: int
+    opponent_policy: str
     strategy_sample_interval: int
     store_strategy_on_opponent_nodes: bool
     store_strategy_on_traverser_nodes: bool
     profile_hotspots: bool
     regret_matching_epsilon: float
     outcome_sampling_epsilon: float
+    outcome_sampling_value_clip: float | None
+    outcome_unsampled_regret: str
     worker_seed: int
 
 
@@ -118,7 +121,10 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         cutoff_rollouts=batch.cutoff_rollouts,
         cutoff_rollout_policy=batch.cutoff_rollout_policy,
         cutoff_rollout_max_steps=batch.cutoff_rollout_max_steps,
+        opponent_policy=batch.opponent_policy,
         outcome_sampling_epsilon=batch.outcome_sampling_epsilon,
+        outcome_sampling_value_clip=batch.outcome_sampling_value_clip,
+        outcome_unsampled_regret=batch.outcome_unsampled_regret,
         rng=rng,
         timing_stats=timing_stats,
     )
