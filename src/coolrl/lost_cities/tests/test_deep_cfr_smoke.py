@@ -168,6 +168,8 @@ def test_fine_tune_policy_parser_accepts_training_options() -> None:
             "--batch-games",
             "16",
             "--normalize-advantages",
+            "--baseline-decay",
+            "0.95",
             "--seed",
             "123",
         ]
@@ -187,6 +189,7 @@ def test_fine_tune_policy_parser_accepts_training_options() -> None:
     assert args.grad_clip == 0.25
     assert args.batch_games == 16
     assert args.normalize_advantages is True
+    assert args.baseline_decay == 0.95
     assert args.seed == 123
 
 
