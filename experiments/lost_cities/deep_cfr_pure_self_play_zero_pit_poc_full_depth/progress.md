@@ -103,3 +103,37 @@ iter 180 기준:
 1. league에 anchor opponents를 주입한다. 예: safe 계열 또는 고정 policy를 0.1-0.2 weight로 섞는다. 이는 selectivity가 유도 가능한지 직접 테스트하므로 가장 결정적이다.
 2. league weight를 비대칭화한다. 예: `older_weight > current_weight`로 두어 현재 정책 self-play의 자기강화를 약화한다.
 3. exploration을 강화한다. 다만 이 선택지는 selectivity inducibility 자체를 직접 검증하기보다는 탐색 부족 가능성을 완화하는 쪽이다.
+
+### 종료 결정: iter 320 평가 이후
+
+상태: run 중단 결정. plateau 확인보다 다음 실험에 GPU를 넘기는 ROI가 더 높다고 판단했다.
+
+종료 직전 상태:
+
+- latest row: iter 322
+- latest full eval: iter 320
+- `node_limit_cutoff_traversal_rate`: 0.0%
+- `terminal_traversal_rate`: 100.0%
+- `safe_avg_diff`: -39.3, `eps1e4` baseline 대비 +25.5
+- `random_avg_diff`: +40.9
+
+iter 180 이후에도 큰 결론은 바뀌지 않았다. iter 235에서 `safe_avg_diff`가 -32.1까지 올라가며 회복 상단을 확인했지만, 이후에도 진동이 이어졌다. score oscillation은 `eps1e4`와 마찬가지로 약 10점대 폭으로 남아 있고, truncation 제거는 baseline을 위로 이동시켰지만 league non-stationarity 자체를 없애지는 못했다.
+
+최종 중간 결론:
+
+- truncation bias 가설은 확정적으로 지지된다. full-depth traversal은 discard-only pit을 탈출시켰고, safe 계열 점수를 `eps1e4` 대비 대략 +20~30점 위로 이동시켰다.
+- recovery skill은 pure self-play 안에서도 emerge했다. 정책은 거의 모든 expedition을 열지만, 열린 expedition에서 점수를 회수하는 능력은 학습했다.
+- selectivity emergence는 이 league 설정에서는 부정된다. `safe_opened_colors`는 4.7-4.96 근처에서 plateau를 보였고, 별도 checkpoint 분산 진단에서는 5-color 빈도가 iter 110의 91-92%에서 iter 180의 93-94%로 줄지 않았다.
+- safe heuristic 행동 진단에서도 selectivity gap이 정량화됐다. safe heuristic은 safe 계열 상대에게 평균 약 3.7색을 열고, safe vs safe 점수는 평균 +0.28로 거의 zero-sum 0 근처에 모였다. 반면 `full_depth` 정책은 같은 safe 계열 상대에게 평균 4.8-4.9색을 열었다. 대략 1색 이상의 over-opening gap이 있다.
+- 따라서 두 학습 phenomenon은 직교적으로 분리된다. recovery는 self-play로 emerge하지만, selectivity는 현재 self-play league 평형 안에서 emerge하지 않는다.
+
+다음 실험 우선순위:
+
+1. anchor opponent 실험. league에 `safe_heuristic` 계열을 weight 0.1-0.2로 주입한다. 이 실험은 selectivity inducibility를 직접 테스트하므로 가장 결정적이다.
+2. 후순위 ablation: network capacity 증가. 예: 256x3에서 512x5.
+3. 후순위 ablation: encoding feature engineering. anchor 결과를 본 뒤 필요한 경우 수행한다.
+
+운영 판단:
+
+- `full_depth`는 iter 322 저장 이후, iter 323 traversal 도중 중단한다.
+- 추가 plateau confirmation보다 anchor opponent 실험에 GPU를 넘기는 것이 더 높은 ROI다.

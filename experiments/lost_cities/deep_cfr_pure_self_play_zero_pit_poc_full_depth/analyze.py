@@ -16,6 +16,7 @@ DEFAULT_MARKDOWN_OUTPUT = EXPERIMENT_DIR / "report.md"
 DEFAULT_PLOT_OUTPUT = EXPERIMENT_DIR / "analysis_metrics.png"
 DEFAULT_HEATMAP_OUTPUT = EXPERIMENT_DIR / "analysis_latest_heatmap.png"
 DEFAULT_DELTA_HEATMAP_OUTPUT = EXPERIMENT_DIR / "analysis_delta_heatmap.png"
+DEFAULT_SUMMARY_OUTPUT = EXPERIMENT_DIR / "analysis_summary.png"
 
 TARGET_METRICS = (
     "win_rate",
@@ -53,6 +54,8 @@ HEATMAP_METRICS = (
     "avg_opened_colors",
     "max_step_timeouts",
 )
+
+SAFE_OPPONENTS = ("safe_heuristic", "safe_heuristic_loose", "safe_heuristic_strict")
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,6 +100,12 @@ def parse_args() -> argparse.Namespace:
         help=f"baseline delta heatmap PNG 저장 경로. 기본값은 {DEFAULT_DELTA_HEATMAP_OUTPUT}",
     )
     parser.add_argument(
+        "--summary-output",
+        type=Path,
+        default=DEFAULT_SUMMARY_OUTPUT,
+        help=f"summary PNG 저장 경로. 기본값은 {DEFAULT_SUMMARY_OUTPUT}",
+    )
+    parser.add_argument(
         "--write-report",
         action="store_true",
         help="report.md와 report.json을 갱신함. 기본 실행은 기록 파일을 덮어쓰지 않음",
@@ -108,6 +117,11 @@ def parse_args() -> argparse.Namespace:
         help="plot에만 적용할 이동 평균 window. 1이면 raw metrics를 그대로 그림",
     )
     parser.add_argument("--no-plot", action="store_true", help="plot 생성을 건너뜀")
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="중간 점검용 핵심 요약만 stdout에 출력함",
+    )
     return parser.parse_args()
 
 
@@ -197,6 +211,54 @@ def extract_opponents(eval_row: dict[str, Any] | None) -> dict[str, dict[str, An
     return opponents
 
 
+def extract_traversal_health(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "elapsed_seconds": normalize_value(row.get("elapsed_seconds")),
+        "total_nodes": normalize_value(row.get("total_nodes")),
+        "avg_nodes_per_traversal": normalize_value(row.get("avg_nodes_per_traversal")),
+        "endpoint_traversals": normalize_value(row.get("endpoint_traversals")),
+        "avg_endpoint_depth": normalize_value(row.get("avg_endpoint_depth")),
+        "max_depth_reached": normalize_value(row.get("max_depth_reached")),
+        "terminal_traversal_rate": normalize_value(row.get("terminal_traversal_rate")),
+        "node_limit_cutoff_traversal_rate": normalize_value(row.get("node_limit_cutoff_traversal_rate")),
+        "depth_cutoff_traversal_rate": normalize_value(row.get("depth_cutoff_traversal_rate")),
+    }
+
+
+def endpoint_bucket_items(row: dict[str, Any]) -> list[tuple[str, float]]:
+    items: list[tuple[str, float]] = []
+    for key, raw_value in row.items():
+        if not key.startswith("endpoint_depth_bucket_"):
+            continue
+        value = numeric(raw_value)
+        if value is not None:
+            label = key.removeprefix("endpoint_depth_bucket_").replace("_", "-")
+            items.append((label, value))
+    return sorted(items, key=lambda item: endpoint_bucket_sort_key(f"endpoint_depth_bucket_{item[0].replace('-', '_')}"))
+
+
+def summarize_endpoint_buckets(row: dict[str, Any], top_n: int = 3) -> list[dict[str, Any]]:
+    items = endpoint_bucket_items(row)
+    total = sum(value for _label, value in items)
+    ranked = sorted((item for item in items if item[1] > 0), key=lambda item: item[1], reverse=True)
+    return [
+        {
+            "bucket": label,
+            "count": value,
+            "rate": value / total if total > 0 else None,
+        }
+        for label, value in ranked[:top_n]
+    ]
+
+
+def average_metric(opponents: dict[str, dict[str, Any]], names: tuple[str, ...], metric: str) -> float | None:
+    values = [numeric(opponents.get(name, {}).get(metric)) for name in names]
+    finite_values = [value for value in values if value is not None]
+    if not finite_values:
+        return None
+    return sum(finite_values) / len(finite_values)
+
+
 def normalize_value(value: Any) -> Any:
     if isinstance(value, float) and not math.isfinite(value):
         return None
@@ -224,6 +286,8 @@ def summarize_run(run_dir: Path) -> tuple[dict[str, Any], list[str]]:
         },
         "latest_iteration": latest_row.get("iteration"),
         "latest_eval_iteration": latest_eval_row.get("iteration") if latest_eval_row else None,
+        "traversal": extract_traversal_health(latest_row),
+        "endpoint_depth_buckets_top": summarize_endpoint_buckets(latest_row),
         "opponents": extract_opponents(latest_eval_row),
     }
     return summary, warnings
@@ -250,10 +314,10 @@ def format_value(value: Any) -> str:
     number = numeric(value)
     if number is None:
         return "-"
-    if abs(number) >= 100:
-        return f"{number:.1f}"
     if float(number).is_integer():
         return str(int(number))
+    if abs(number) >= 100:
+        return f"{number:.1f}"
     return f"{number:.4f}".rstrip("0").rstrip(".")
 
 
@@ -265,12 +329,65 @@ def format_delta(value: Any) -> str:
     return f"{sign}{format_value(number)}"
 
 
-def render_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, float]] | None) -> str:
+def format_rate(value: Any) -> str:
+    number = numeric(value)
+    if number is None:
+        return "-"
+    return f"{number * 100:.1f}%"
+
+
+def render_bucket_summary(buckets: list[dict[str, Any]]) -> str:
+    if not buckets:
+        return "-"
+    parts = []
+    for bucket in buckets:
+        rate = format_rate(bucket.get("rate"))
+        parts.append(f"{bucket['bucket']}={format_value(bucket.get('count'))} ({rate})")
+    return ", ".join(parts)
+
+
+def render_compact_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, float]] | None) -> str:
+    opponents = summary["opponents"]
+    traversal = summary["traversal"]
+    safe_avg = average_metric(opponents, SAFE_OPPONENTS, "avg_diff")
+    safe_delta = average_metric(deltas or {}, SAFE_OPPONENTS, "avg_diff") if deltas else None
+    return "\n".join(
+        [
+            "Lost Cities full_depth compact",
+            f"- iteration: latest={summary['latest_iteration']}, eval={summary['latest_eval_iteration']}",
+            f"- traversal: node cutoff {format_rate(traversal.get('node_limit_cutoff_traversal_rate'))}, "
+            f"terminal {format_rate(traversal.get('terminal_traversal_rate'))}, "
+            f"avg depth {format_value(traversal.get('avg_endpoint_depth'))}, "
+            f"max depth {format_value(traversal.get('max_depth_reached'))}",
+            f"- safe avg_diff: {format_value(safe_avg)}"
+            + (f" (baseline delta {format_delta(safe_delta)})" if safe_delta is not None else ""),
+            f"- random avg_diff: {format_value(opponents.get('random', {}).get('avg_diff'))}",
+            f"- top endpoint buckets: {render_bucket_summary(summary['endpoint_depth_buckets_top'])}",
+        ]
+    )
+
+
+def render_stdout(
+    summary: dict[str, Any],
+    deltas: dict[str, dict[str, float]] | None,
+    *,
+    compact: bool = False,
+) -> str:
+    if compact:
+        return render_compact_stdout(summary, deltas)
+
+    traversal = summary["traversal"]
     lines = [
         "Lost Cities zero-pit 분석 리포트",
         f"- run: {summary['run']['path']}",
         f"- 최신 row iteration: {summary['latest_iteration']}",
         f"- 최신 eval iteration: {summary['latest_eval_iteration']}",
+        "- traversal health: "
+        f"node cutoff {format_rate(traversal.get('node_limit_cutoff_traversal_rate'))}, "
+        f"terminal {format_rate(traversal.get('terminal_traversal_rate'))}, "
+        f"avg endpoint depth {format_value(traversal.get('avg_endpoint_depth'))}, "
+        f"max depth {format_value(traversal.get('max_depth_reached'))}",
+        f"- endpoint depth bucket top: {render_bucket_summary(summary['endpoint_depth_buckets_top'])}",
     ]
 
     opponents = summary["opponents"]
@@ -280,9 +397,13 @@ def render_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, float]] |
 
     lines.append("- opponent별 핵심 지표:")
     for opponent, metrics in opponents.items():
-        delta_part = ""
-        if deltas and opponent in deltas and "win_rate" in deltas[opponent]:
-            delta_part = f", 승률 delta {format_delta(deltas[opponent]['win_rate'])}"
+        delta_parts = []
+        if deltas and opponent in deltas:
+            if "win_rate" in deltas[opponent]:
+                delta_parts.append(f"승률 delta {format_delta(deltas[opponent]['win_rate'])}")
+            if "avg_diff" in deltas[opponent]:
+                delta_parts.append(f"평균 점수차 delta {format_delta(deltas[opponent]['avg_diff'])}")
+        delta_part = f", {', '.join(delta_parts)}" if delta_parts else ""
         lines.append(
             f"  - {opponent}: 승률 {format_value(metrics.get('win_rate'))}, "
             f"평균 점수차 {format_value(metrics.get('avg_diff'))}, "
@@ -310,6 +431,21 @@ def render_markdown(summary: dict[str, Any], payload: dict[str, Any]) -> str:
             ]
         )
     lines.append("")
+
+    traversal = summary["traversal"]
+    lines.extend(
+        [
+            "## traversal health",
+            "",
+            f"- node limit cutoff traversal rate: `{format_rate(traversal.get('node_limit_cutoff_traversal_rate'))}`",
+            f"- terminal traversal rate: `{format_rate(traversal.get('terminal_traversal_rate'))}`",
+            f"- avg endpoint depth: `{format_value(traversal.get('avg_endpoint_depth'))}`",
+            f"- max depth reached: `{format_value(traversal.get('max_depth_reached'))}`",
+            f"- avg nodes per traversal: `{format_value(traversal.get('avg_nodes_per_traversal'))}`",
+            f"- top endpoint buckets: `{render_bucket_summary(summary['endpoint_depth_buckets_top'])}`",
+            "",
+        ]
+    )
 
     opponents = summary["opponents"]
     if not opponents:
@@ -458,8 +594,21 @@ def draw_latest_endpoint_bucket_panel(sns: Any, axis: Any, rows: list[dict[str, 
     )
     labels = [key.removeprefix("endpoint_depth_bucket_").replace("_", "-") for key in keys]
     values = [numeric(row.get(key)) or 0.0 for key in keys]
+    total = sum(values)
     records = {"bucket": labels, "traversals": values}
     sns.barplot(data=records, x="bucket", y="traversals", ax=axis, color="#4C78A8")
+    for index, value in enumerate(values):
+        if value <= 0:
+            continue
+        rate = value / total if total > 0 else 0.0
+        axis.text(
+            index,
+            value,
+            f"{value:.0f}\n{rate:.1%}",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+        )
     axis.tick_params(axis="x", rotation=35)
     axis.grid(True, axis="y", alpha=0.35)
 
@@ -784,6 +933,162 @@ def plot_delta_heatmap(
     return output
 
 
+def draw_heatmap_axis(
+    sns: Any,
+    axis: Any,
+    *,
+    title: str,
+    names: list[str],
+    labels: list[str],
+    colors: list[list[float]],
+    annotations: list[list[str]],
+    cmap: str,
+    cbar_label: str,
+    center: float | None = None,
+) -> None:
+    axis.set_title(title, fontsize=12, fontweight="bold")
+    if names:
+        heatmap_kwargs: dict[str, Any] = {
+            "annot": annotations,
+            "fmt": "",
+            "cmap": cmap,
+            "xticklabels": labels,
+            "yticklabels": names,
+            "linewidths": 0.5,
+            "linecolor": "white",
+            "vmin": -1.0 if center is not None else 0.0,
+            "vmax": 1.0,
+            "cbar_kws": {"label": cbar_label},
+            "ax": axis,
+        }
+        if center is not None:
+            heatmap_kwargs["center"] = center
+        sns.heatmap(colors, **heatmap_kwargs)
+    else:
+        axis.text(0.5, 0.5, "No data", ha="center", va="center", transform=axis.transAxes)
+        axis.set_axis_off()
+    axis.tick_params(axis="x", rotation=35)
+    axis.tick_params(axis="y", rotation=0)
+
+
+def plot_summary(
+    summary: dict[str, Any],
+    deltas: dict[str, dict[str, float]] | None,
+    output: Path,
+) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    sns.set_theme(style="whitegrid", context="notebook")
+
+    fig = plt.figure(figsize=(20, 17))
+    grid = fig.add_gridspec(
+        4,
+        2,
+        height_ratios=[0.55, 0.75, 1.8, 1.25],
+        width_ratios=[1.0, 1.0],
+        hspace=0.55,
+        wspace=0.32,
+    )
+    title_axis = fig.add_subplot(grid[0, :])
+    health_axis = fig.add_subplot(grid[1, :])
+    latest_axis = fig.add_subplot(grid[2, 0])
+    delta_axis = fig.add_subplot(grid[2, 1])
+    bucket_axis = fig.add_subplot(grid[3, :])
+
+    title_axis.set_axis_off()
+    title_axis.set_title(
+        f"Lost Cities full_depth summary: {Path(summary['run']['path']).name}",
+        fontsize=18,
+        fontweight="bold",
+        loc="left",
+        pad=6,
+    )
+    guide = (
+        "Reading guide: full_depth tests whether removing max_depth=16 truncation recovers "
+        "safe-opponent performance. Key checks: safe avg_diff vs eps1e4 baseline, "
+        "node_limit_cutoff_traversal_rate near 0, and random avg_diff not collapsing. "
+        "Endpoint buckets show traversal endpoint depth distribution. "
+        "Config: max_depth=null, max_nodes_per_traversal=1000, traversals_per_player=70."
+    )
+    title_axis.text(0.0, 0.25, guide, ha="left", va="top", wrap=True, fontsize=10)
+
+    traversal = summary["traversal"]
+    safe_avg = average_metric(summary["opponents"], SAFE_OPPONENTS, "avg_diff")
+    safe_delta = average_metric(deltas or {}, SAFE_OPPONENTS, "avg_diff") if deltas else None
+    health_axis.set_axis_off()
+    health_cells = [
+        ["latest iter", format_value(summary["latest_iteration"])],
+        ["latest eval", format_value(summary["latest_eval_iteration"])],
+        ["node cutoff", format_rate(traversal.get("node_limit_cutoff_traversal_rate"))],
+        ["terminal", format_rate(traversal.get("terminal_traversal_rate"))],
+        ["avg endpoint depth", format_value(traversal.get("avg_endpoint_depth"))],
+        ["max depth", format_value(traversal.get("max_depth_reached"))],
+        ["safe avg_diff", format_value(safe_avg)],
+        ["safe avg_diff delta", format_delta(safe_delta)],
+        ["random avg_diff", format_value(summary["opponents"].get("random", {}).get("avg_diff"))],
+    ]
+    table = health_axis.table(
+        cellText=health_cells,
+        colLabels=["metric", "value"],
+        loc="center",
+        cellLoc="left",
+        colLoc="left",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.0, 1.25)
+    for (row, _column), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_text_props(weight="bold")
+            cell.set_facecolor("#E8EEF7")
+
+    names, labels, values, annotations = heatmap_matrix(summary["opponents"])
+    draw_heatmap_axis(
+        sns,
+        latest_axis,
+        title="Latest Eval Metrics",
+        names=names,
+        labels=labels,
+        colors=column_normalized_values(values),
+        annotations=annotations,
+        cmap="viridis",
+        cbar_label="column-normalized value",
+    )
+
+    delta_values: list[list[float]]
+    delta_annotations: list[list[str]]
+    delta_names: list[str]
+    delta_labels: list[str]
+    if deltas:
+        delta_names, delta_labels, delta_values, delta_annotations = delta_heatmap_matrix(deltas)
+    else:
+        delta_names, delta_labels, delta_values, delta_annotations = [], [], [], []
+    draw_heatmap_axis(
+        sns,
+        delta_axis,
+        title="Baseline Delta",
+        names=delta_names,
+        labels=delta_labels,
+        colors=column_scaled_delta_values(delta_values),
+        annotations=delta_annotations,
+        cmap="vlag",
+        cbar_label="column-normalized delta",
+        center=0.0,
+    )
+
+    draw_latest_endpoint_bucket_panel(sns, bucket_axis, read_metrics(Path(summary["run"]["path"]))[0])
+
+    fig.subplots_adjust(left=0.06, right=0.96, top=0.95, bottom=0.06, hspace=0.75, wspace=0.45)
+    fig.savefig(output, dpi=150, bbox_inches="tight", pad_inches=0.25)
+    plt.close(fig)
+    return output
+
+
 def main() -> int:
     args = parse_args()
     summary, warnings = summarize_run(args.run)
@@ -800,7 +1105,7 @@ def main() -> int:
     for warning in warnings:
         print(f"경고: {warning}", file=sys.stderr)
 
-    stdout_summary = render_stdout(summary, deltas)
+    stdout_summary = render_stdout(summary, deltas, compact=args.compact)
     print(stdout_summary)
 
     if args.write_report:
@@ -821,6 +1126,8 @@ def main() -> int:
                 args.delta_heatmap_output,
             )
             print(f"- delta heatmap: {delta_heatmap_path}")
+        summary_path = plot_summary(summary, deltas, args.summary_output)
+        print(f"- summary: {summary_path}")
 
     return 0
 
