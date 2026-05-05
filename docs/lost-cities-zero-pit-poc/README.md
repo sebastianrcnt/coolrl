@@ -19,13 +19,13 @@ lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
 Config:
 
 ```text
-configs/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3.yaml
+configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
 ```
 
-Checkpoint:
+Run output:
 
 ```text
-checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
+runs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3
 ```
 
 ## 기준 실험과 차이
@@ -61,14 +61,14 @@ discard-loop가 "경험 부족"보다 "조기 확률 몰빵" 문제에 가까운
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3.yaml
+  --config configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
 ```
 
 상태 확인:
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli status \
-  --checkpoint-dir checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
+  --checkpoint-dir runs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3
 ```
 
 ## 판정 기준
