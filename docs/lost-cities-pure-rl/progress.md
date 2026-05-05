@@ -130,3 +130,23 @@ Iteration 5의 첫 eval 결과:
 | `noisy_safe` | 0.16 | -49.04 | 36 | 587.2 | 1.381 |
 
 초기 상태는 아직 `safe_heuristic` 계열에 크게 밀리고, `random` 기준도 미달이다. 이는 Run A 초반 random-init baseline의 예상 범위로 보고 계속 진행한다.
+
+Claude 자문 반영 전 pilot은 중단했다. 이후 공식 Run A 2h를 안정화 코드로 새로 시작했다.
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli train \
+  --config configs/lost_cities_deep_cfr_pure_self_play_a.yaml \
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official \
+  --max-hours 2
+```
+
+- PID: `225797`
+- Console log: `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/console.log`
+- Training log: `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/train.log`
+- Metrics: `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/metrics.jsonl`
+
+시작 확인:
+
+- `traversal_worker_chunk_size=32` 적용으로 batch 수가 `126`에서 `32`로 줄었다.
+- Iteration 1-2가 정상 완료됐다.
+- `cutoff_rollouts=0` 유지.
