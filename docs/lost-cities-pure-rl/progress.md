@@ -237,3 +237,16 @@ expedition_lengths=[0, 0, 0, 0, 0]
 - safe 계열 timeout 악화는 policy가 game-ending pressure를 충분히 학습하지 못한 신호다.
 
 Run B는 원래 계획상 같은 pure self-play 조건으로 실행하되, 결과 해석에서는 위 두 실패 모드를 별도 기준으로 추적한다.
+
+Iteration 50 eval:
+
+| Opponent | win_rate | avg_diff | timeouts |
+| --- | ---: | ---: | ---: |
+| `random` | 0.56 | -1.65 | 0 |
+| `passive_discard` | 0.01 | -14.10 | 0 |
+| `safe_heuristic` | 0.15 | -63.27 | 86 |
+| `safe_heuristic_loose` | 0.13 | -74.81 | 77 |
+| `safe_heuristic_strict` | 0.16 | -55.32 | 86 |
+| `noisy_safe` | 0.15 | -52.56 | 49 |
+
+Iteration 54 기준 elapsed는 18분이다. safe family timeout이 iteration 20보다 악화했으므로, Run A는 현재까지 game-ending pressure를 학습하지 못하고 있다.
