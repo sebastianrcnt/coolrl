@@ -1,0 +1,74 @@
+# 실험 계획
+
+## 질문
+
+`eps1e3` 실험에서 `regret_matching_epsilon=1.0e-3`은 zero-pit을 완화했지만 safe 계열 상대 성능은 개선하지 못했다. 이 실험은 epsilon을 `1.0e-4`로 낮춰 zero-pit 탈출을 유지하면서 과한 opening과 낮은 selectivity를 줄일 수 있는지 확인한다.
+
+## 기준 실험과 차이
+
+기준은 종료된 `eps1e3` PoC다.
+
+```text
+experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
+```
+
+의도한 주요 차이는 `regret_matching_epsilon` 하나다.
+
+```yaml
+regret_matching_epsilon: 1.0e-3  # eps1e3
+regret_matching_epsilon: 1.0e-4  # 이 PoC
+```
+
+checkpoint는 디스크 사용량을 줄이기 위해 10 iteration마다 보존한다.
+
+```yaml
+save_every_iteration: false
+save_iteration_interval: 10
+save_latest_only: false
+```
+
+checkpoint 디렉터리는 repo 아래 portable path를 유지하되, 필요한 경우 로컬 대용량 디스크로 symlink한다. 실제 디스크 경로는 git에 기록하지 않는다.
+
+```text
+checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+```
+
+```bash
+mkdir -p checkpoints /path/to/large-disk/coolrl-checkpoints
+ln -s /path/to/large-disk/coolrl-checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4 \
+  checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+```
+
+## 운영 계획
+
+config에는 `max_hours: 2`가 들어 있지만, 이 실험은 최종 성능 run보다 진단 run에 가깝다. 30~60분 지점에서 행동 분포와 safe 계열 지표를 먼저 확인하고, 신호가 애매하거나 유효할 때만 2시간까지 연장한다.
+
+상태 확인:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli status \
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+```
+
+plot 생성:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli plot \
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+```
+
+## 판정 기준
+
+좋은 신호:
+
+- `eps1e3` 대비 safe 계열 `avg_diff`가 개선된다.
+- `play_action_rate`가 완전히 0 근처로 돌아가지 않는다.
+- `eval_*_max_step_timeouts`가 낮게 유지된다.
+- `random` 상대 성능이 크게 무너지지 않는다.
+- `passive_discard` 평균 점수차가 덜 음수로 이동한다.
+
+나쁜 신호:
+
+- `play_action_rate`가 다시 0.01~0.02 근처로 내려가고 timeout이 증가한다.
+- safe 계열 `avg_diff`가 여전히 -70~-100에 머문다.
+- `random` 성능이 붕괴한다.

@@ -1,4 +1,4 @@
-# Lost Cities zero-pit 분석 요약
+# Lost Cities zero-pit 분석 리포트
 
 - run: `checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3`
 - 최신 row iteration: `211`

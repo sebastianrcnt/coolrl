@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lost Cities zero-pit POC 실험 전용 metrics 분석 스크립트."""
+"""Lost Cities zero-pit POC 실험 전용 metrics 리포트 스크립트."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ METRIC_LABELS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Lost Cities zero-pit POC metrics를 opponent별로 요약합니다."
+        description="Lost Cities zero-pit POC metrics를 opponent별로 리포트합니다."
     )
     parser.add_argument("--run", required=True, type=Path, help="metrics.jsonl이 있는 run directory")
     parser.add_argument(
@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="비교 기준 metrics.jsonl이 있는 run directory",
     )
-    parser.add_argument("--json-output", type=Path, default=None, help="JSON 요약 저장 경로")
-    parser.add_argument("--markdown-output", type=Path, default=None, help="Markdown 요약 저장 경로")
+    parser.add_argument("--json-output", type=Path, default=None, help="JSON 리포트 저장 경로")
+    parser.add_argument("--markdown-output", type=Path, default=None, help="Markdown 리포트 저장 경로")
     return parser.parse_args()
 
 
@@ -198,7 +198,7 @@ def format_delta(value: Any) -> str:
 
 def render_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, float]] | None) -> str:
     lines = [
-        "Lost Cities zero-pit 분석 요약",
+        "Lost Cities zero-pit 분석 리포트",
         f"- run: {summary['run']['path']}",
         f"- 최신 row iteration: {summary['latest_iteration']}",
         f"- 최신 eval iteration: {summary['latest_eval_iteration']}",
@@ -227,7 +227,7 @@ def render_markdown(summary: dict[str, Any], payload: dict[str, Any]) -> str:
     baseline = payload.get("baseline")
     deltas = payload.get("deltas", {})
     lines = [
-        "# Lost Cities zero-pit 분석 요약",
+        "# Lost Cities zero-pit 분석 리포트",
         "",
         f"- run: `{summary['run']['path']}`",
         f"- 최신 row iteration: `{summary['latest_iteration']}`",
