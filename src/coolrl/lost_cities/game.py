@@ -296,7 +296,21 @@ class GameState:
         }
 
     def clone(self) -> GameState:
-        return self.from_snapshot(self.to_snapshot())
+        return GameState(
+            config=self.config,
+            deck=list(self.deck),
+            hands=[list(self.hands[0]), list(self.hands[1])],
+            expeditions=[
+                [list(exp) for exp in self.expeditions[0]],
+                [list(exp) for exp in self.expeditions[1]],
+            ],
+            discards=[list(pile) for pile in self.discards],
+            current_player=self.current_player,
+            phase=self.phase,
+            pending_discarded_color=self.pending_discarded_color,
+            turn_count=self.turn_count,
+            terminal=self.terminal,
+        )
 
     @property
     def card_action_size(self) -> int:
