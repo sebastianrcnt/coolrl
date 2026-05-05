@@ -192,3 +192,41 @@ Iteration 20 eval:
 | `noisy_safe` | 0.17 | -52.42 | 37 |
 
 Iteration 21 기준 `self_play_league_snapshots=20`으로 configured cap에 도달했다. `traversal_seconds`는 `4.91s`로 pilot의 `14` snapshots 시점 `13.81s`보다 낮아, chunk size 조정과 snapshot deepcopy 캐시가 IPC 병목을 줄인 것으로 보인다.
+
+### Run A 진단 trace
+
+Claude 2차 자문은 Run B 전 `passive_discard` 패배와 safe 계열 timeout의 원인을 trace하라고 권했다. 공식 Run A 최신 checkpoint로 1게임씩 덤프했다.
+
+`passive_discard` 상대 losing seed:
+
+```text
+seed=610000 tracked_player=0
+timed_out=False steps=132 diff=-25 final_score=-25 opponent_score=0 deck=0
+opened=4 expedition_cards=8
+counts={'play': 8, 'discard': 25, 'draw_deck': 11, 'draw_pile': 22}
+expedition_lengths=[2, 2, 3, 1, 0]
+```
+
+해석:
+
+- 초반에 4색 expedition을 열고 충분히 회수하지 못했다.
+- 이후 `draw_pile`이 `draw_deck`보다 많아, passive 상대에서도 점수 회수보다 pile cycling 성향이 강하다.
+- passive 기준 실패는 단순 timeout 문제가 아니라 bad expedition opening과 회수 실패다.
+
+`safe_heuristic` 상대 timeout seed:
+
+```text
+seed=620000 tracked_player=0
+timed_out=True steps=1000 diff=5 final_score=0 opponent_score=-5 deck=22
+opened=0 expedition_cards=0
+counts={'play': 0, 'discard': 250, 'draw_deck': 7, 'draw_pile': 243}
+expedition_lengths=[0, 0, 0, 0, 0]
+```
+
+해석:
+
+- expedition을 전혀 열지 않았다.
+- `draw_pile` 243회, `draw_deck` 7회로 deck-out을 회피하는 루프 성향이 명확하다.
+- safe 계열 timeout 악화는 policy가 game-ending pressure를 충분히 학습하지 못한 신호다.
+
+Run B는 원래 계획상 같은 pure self-play 조건으로 실행하되, 결과 해석에서는 위 두 실패 모드를 별도 기준으로 추적한다.
