@@ -69,6 +69,7 @@ dev = [
 ]
 
 [project.scripts]
+check-doc-links = "coolrl.dev.check_doc_links:main"
 omok-train = "coolrl.omok.train:main"
 omok-plot = "coolrl.omok.plot_metrics:main"
 omok-tui = "coolrl.omok.tui:main"

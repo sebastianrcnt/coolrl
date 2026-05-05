@@ -57,3 +57,19 @@ Omok 빠른 테스트용:
 ```bash
 uv run python -m coolrl.omok.train --config configs/omok_smoke.yaml --device CPU
 ```
+
+## 5) 문서 링크 확인
+
+문서의 로컬 링크가 깨졌는지 확인하려면 `lychee` CLI가 필요합니다. `lychee`는 Python 패키지가 아니므로 별도로 설치합니다:
+
+```bash
+cargo install lychee
+```
+
+프로젝트 루트에서 다음 명령을 실행합니다:
+
+```bash
+uv run check-doc-links
+```
+
+이 명령은 `README.md`, `docs/**/*.md`, `src/**/*.md`, `configs/**/*.md`의 Markdown 링크를 `lychee --offline`으로 검사합니다. 외부 URL은 네트워크로 확인하지 않습니다.
