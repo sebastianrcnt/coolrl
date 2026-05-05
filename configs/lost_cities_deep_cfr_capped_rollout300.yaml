@@ -1,0 +1,73 @@
+experiment_name: lost_cities_deep_cfr_capped_rollout300
+seed: 41
+max_hours: null
+max_iterations: 50
+device: CUDA
+use_amp: true
+
+rules:
+  tier: tier3
+  n_colors: null
+  n_ranks: null
+  min_rank: null
+  n_handshakes: null
+  hand_size: null
+  expedition_penalty: null
+  bonus_threshold: null
+  bonus_amount: null
+
+network:
+  hidden_size: 256
+  num_layers: 3
+  activation: relu
+
+traversal:
+  backend: python
+  traversals_per_player: 100
+  strategy_sample_interval: 1
+  store_strategy_on_opponent_nodes: true
+  store_strategy_on_traverser_nodes: true
+  max_depth: 16
+  max_nodes_per_traversal: 10000
+  cutoff_value_mode: random_rollout
+  cutoff_rollouts: 1
+  cutoff_rollout_policy: random
+  cutoff_rollout_max_steps: 300
+  progress_every_traversals: 10
+  # Rollout cutoff work is CPU-heavy; keep enough batches for worker parallelism.
+  num_workers: 8
+  traversal_worker_chunk_size: 4
+  profile_hotspots: false
+  regret_matching_epsilon: 1.0e-8
+  outcome_sampling_epsilon: 0.05
+
+optimization:
+  advantage_batch_size: 1024
+  strategy_batch_size: 1024
+  advantage_updates_per_iteration: 256
+  strategy_updates_per_iteration: 256
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  grad_clip: 1.0
+
+memory:
+  advantage_capacity: 2000000
+  strategy_capacity: 2000000
+
+evaluation:
+  # Periodic eval is only for trend monitoring; run larger standalone evals for claims.
+  eval_every: 10
+  games: 50
+  max_steps: 1000
+  on_max_steps: score_diff
+  opponents:
+    - random
+    - safe_heuristic
+    - passive_discard
+
+checkpoint:
+  directory: checkpoints/lost_cities_deep_cfr_capped_rollout300
+  save_every_iteration: true
+  save_iteration_interval: 1
+  save_latest_only: false
+  progress_interval_seconds: 20.0

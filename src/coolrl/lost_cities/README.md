@@ -59,6 +59,7 @@ CLI 진입점은 `python -m coolrl.lost_cities.deep_cfr.cli` 다.
 | --- | --- |
 | `lost_cities_deep_cfr_probe.yaml` | 1 iteration짜리 스모크 — 파이프라인 점검용 |
 | `lost_cities_deep_cfr_tier3.yaml` | 기존 score-diff cutoff 기반 tier3 baseline / CLI 기본 config |
+| `lost_cities_deep_cfr_capped_rollout300.yaml` | `random_rollout` cutoff cap 300 실험 — eval 비용 절감, CPU traversal workers |
 
 과거 실험용 `overnight`, `small_run`, `diagnostic_depth16_nodes20k`, `cutoff_random_rollout` config는 결과가 문서화된 뒤 제거했다. 관련 기록은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)와 [`docs/lost-cities-deep-cfr-worker-benchmark-notes.md`](../../../docs/lost-cities-deep-cfr-worker-benchmark-notes.md)를 참고한다.
 
