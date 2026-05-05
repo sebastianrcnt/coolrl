@@ -8,6 +8,9 @@ wheels/
 *.egg-info
 checkpoints/
 
+# Cython-generated C sources
+src/coolrl/lost_cities/*.c
+
 # Virtual environments
 .venv
 node_modules/
