@@ -453,3 +453,16 @@ Iteration 100 eval:
 | `noisy_safe` | 0.16 | -37.13 | 69 | 886.84 | 0.553 | 0.28 | 0.002 | 0.998 |
 
 Run B iteration 100은 Claude가 제안한 booster 판정 지점이다. 이 시점에서 safe family timeout은 95-99/100으로 높게 유지되고, `policy_entropy`는 iteration 70보다 더 낮아졌으며, `passive_discard`는 여전히 0승이다. Run B는 현재까지 safe pretrain이 collapse를 막는 booster라는 증거가 약하고, self-play 중 safe prior가 discard-loop로 희석되는 쪽에 가깝다.
+
+Iteration 125 eval:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy | avg_opened_colors | play_rate | discard_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.49 | -1.74 | 0 | 575.16 | 0.807 | 0.30 | 0.003 | 0.997 |
+| `passive_discard` | 0.00 | 0.00 | 0 | 93.92 | 1.114 | 0.00 | 0.000 | 1.000 |
+| `safe_heuristic` | 0.21 | -48.25 | 92 | 953.26 | 0.554 | 1.06 | 0.006 | 0.994 |
+| `safe_heuristic_loose` | 0.18 | -62.77 | 88 | 930.02 | 0.578 | 1.10 | 0.006 | 0.994 |
+| `safe_heuristic_strict` | 0.22 | -44.49 | 91 | 943.62 | 0.538 | 0.96 | 0.005 | 0.995 |
+| `noisy_safe` | 0.14 | -49.47 | 45 | 727.98 | 0.627 | 1.04 | 0.007 | 0.993 |
+
+Run B iteration 125는 `random` win rate가 0.49까지 떨어져 general opponent 성능도 흔들린다. safe family는 opened colors와 play rate가 iteration 100보다 조금 늘었지만, score diff는 여전히 크게 음수이고 timeout도 88-92/100으로 높다. safe pretrain이 잠깐 더 많은 expedition opening을 유도해도, score 회수와 게임 종료 압력을 충분히 만들지는 못하고 있다.
