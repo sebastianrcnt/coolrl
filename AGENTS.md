@@ -50,11 +50,13 @@ Recommended layout:
 
 ```text
 experiments/<domain>/<experiment_slug>/
-  config.yaml
   README.md
+  config.yaml
+  plan.md                # optional
+  progress.md            # optional
   analyze.py              # optional
-  *_summary.md            # optional
-  *_summary.json          # optional
+  report.md              # optional
+  report.json            # optional
 ```
 
 Experiment records are nested for human navigation, but checkpoint directories stay flat for runtime operations:
@@ -85,7 +87,8 @@ Naming and storage rules:
 - Keep raw artifacts such as model checkpoints, logs, and large runtime outputs in `checkpoints/`, which is git-ignored.
 - If a run needs HDD/SSD/NVMe offload, create a local symlink at `checkpoints/<experiment_name>` and keep the real hardware path out of git.
 - Keep `configs/` for reusable presets and legacy configs that have not moved yet.
-- Prefer recording per-experiment design, progress, analysis, and final interpretation in `experiments/<domain>/<experiment_slug>/README.md` rather than growing `docs/` with one document per experiment.
+- Use `README.md` as the experiment's anchor/index: concise purpose, current status, and links to the detailed files in the same directory.
+- Prefer recording per-experiment design in `plan.md`, chronological run notes in `progress.md`, and final analysis/interpretation in `report.md` or `report.json` rather than growing `docs/` with one document per experiment.
 - Use `docs/` for current usage guides, domain-level overviews, and archive material.
 
 ## Advisory workflow
