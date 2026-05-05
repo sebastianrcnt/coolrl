@@ -120,13 +120,11 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli status \
 고정 평가 suite는 다음 opponent 전체를 사용한다.
 
 ```bash
-for opponent in random passive_discard safe_heuristic safe_heuristic_loose safe_heuristic_strict noisy_safe; do
-  uv run python -m coolrl.lost_cities.deep_cfr.cli eval \
-    --checkpoint checkpoints/lost_cities_deep_cfr_pure_self_play_a/latest.pt \
-    --games 500 \
-    --max-steps 1000 \
-    --opponent "$opponent"
-done
+uv run python -m coolrl.lost_cities.deep_cfr.cli eval-suite \
+  --checkpoint checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/latest.pt \
+  --games 500 \
+  --max-steps 1000 \
+  --output docs/lost-cities-pure-rl/eval-a-2h.json
 ```
 
 Run B는 checkpoint path만 바꿔 같은 명령으로 평가한다.
@@ -134,11 +132,13 @@ Run B는 checkpoint path만 바꿔 같은 명령으로 평가한다.
 과거 self-play checkpoint나 best historical checkpoint 상대 평가는 `--opponent-checkpoint`를 사용한다.
 
 ```bash
-uv run python -m coolrl.lost_cities.deep_cfr.cli eval \
-  --checkpoint checkpoints/lost_cities_deep_cfr_pure_self_play_a/latest.pt \
+uv run python -m coolrl.lost_cities.deep_cfr.cli eval-suite \
+  --checkpoint checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/latest.pt \
   --games 500 \
   --max-steps 1000 \
-  --opponent-checkpoint checkpoints/lost_cities_deep_cfr_pure_self_play_a/iteration_00005.pt
+  --opponent-checkpoints \
+    checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/iteration_00005.pt \
+  --output docs/lost-cities-pure-rl/eval-a-2h-with-checkpoints.json
 ```
 
 ## 성공 기준

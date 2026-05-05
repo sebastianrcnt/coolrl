@@ -9,6 +9,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from pathlib import Path
 import shutil
@@ -132,6 +133,108 @@ def eval_command(args: argparse.Namespace) -> None:
         result["draws"],
         result["max_step_timeouts"],
     )
+
+
+def _load_strategy_net_from_checkpoint(
+    checkpoint_path: str | Path,
+    config: RunConfig,
+    device: torch.device,
+) -> tuple[dict, StrategyNet]:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    strategy_net = StrategyNet(
+        int(checkpoint["input_dim"]),
+        int(checkpoint["action_size"]),
+        config.network,
+    ).to(device)
+    strategy_net.load_state_dict(checkpoint["strategy_net"])
+    return checkpoint, strategy_net
+
+
+def eval_suite_command(args: argparse.Namespace) -> None:
+    checkpoint = torch.load(args.checkpoint, map_location="cpu")
+    config = load_config(args.config) if args.config else config_from_dict(checkpoint["config"])
+    device = _torch_device(config.device)
+    _, strategy_net = _load_strategy_net_from_checkpoint(args.checkpoint, config, device)
+    lc_config = config.rules.to_lost_cities_config(seed=config.seed)
+    games = int(args.games)
+    max_steps = args.max_steps if args.max_steps is not None else config.evaluation.max_steps
+    results: list[dict] = []
+
+    for opponent_name in args.opponents:
+        opponent = make_opponent(opponent_name, seed=config.seed + 99)
+        result = evaluate_against_bot(
+            strategy_net,
+            opponent,
+            lc_config,
+            games,
+            config.seed + 123_000,
+            device=device,
+            max_steps=max_steps,
+            on_max_steps=config.evaluation.on_max_steps,
+            sample=args.sample,
+        )
+        row = {"opponent": opponent_name, "opponent_type": "bot", **result}
+        results.append(row)
+        logger.info(
+            "Suite eval {}: type=bot games={} win_rate={:.3f} avg_diff={:.2f} max_step_timeouts={} avg_game_length={:.1f} policy_entropy={:.3f}",
+            opponent_name,
+            result["games"],
+            result["win_rate"],
+            result["avg_diff"],
+            result["max_step_timeouts"],
+            result["avg_game_length"],
+            result["policy_entropy"],
+        )
+
+    for opponent_checkpoint in args.opponent_checkpoints:
+        opponent, _ = load_strategy_bot_from_checkpoint(
+            opponent_checkpoint,
+            device=device,
+            sample=args.opponent_sample,
+            seed=config.seed + 99,
+        )
+        result = evaluate_against_bot(
+            strategy_net,
+            opponent,
+            lc_config,
+            games,
+            config.seed + 223_000,
+            device=device,
+            max_steps=max_steps,
+            on_max_steps=config.evaluation.on_max_steps,
+            sample=args.sample,
+        )
+        row = {
+            "opponent": str(opponent_checkpoint),
+            "opponent_type": "checkpoint",
+            **result,
+        }
+        results.append(row)
+        logger.info(
+            "Suite eval {}: type=checkpoint games={} win_rate={:.3f} avg_diff={:.2f} max_step_timeouts={} avg_game_length={:.1f} policy_entropy={:.3f}",
+            opponent_checkpoint,
+            result["games"],
+            result["win_rate"],
+            result["avg_diff"],
+            result["max_step_timeouts"],
+            result["avg_game_length"],
+            result["policy_entropy"],
+        )
+
+    payload = {
+        "checkpoint": str(args.checkpoint),
+        "games": games,
+        "max_steps": max_steps,
+        "sample": bool(args.sample),
+        "opponent_sample": bool(args.opponent_sample),
+        "results": results,
+    }
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        logger.info("Saved eval suite results to {}", args.output)
+    else:
+        logger.info(json.dumps(payload, sort_keys=True))
 
 
 def pretrain_heuristic_command(args: argparse.Namespace) -> None:
@@ -354,6 +457,36 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--sample", action="store_true", help="Sample from the strategy policy instead of using argmax.")
     eval_parser.add_argument("--max-steps", type=int, default=None, help="Override evaluation.max_steps from the config/checkpoint.")
     eval_parser.set_defaults(func=eval_command)
+
+    eval_suite = subparsers.add_parser("eval-suite")
+    eval_suite.add_argument("--checkpoint", required=True)
+    eval_suite.add_argument("--config", type=Path, default=None)
+    eval_suite.add_argument("--games", type=int, default=500)
+    eval_suite.add_argument(
+        "--opponents",
+        nargs="+",
+        choices=SUPPORTED_OPPONENTS,
+        default=[
+            "random",
+            "passive_discard",
+            "safe_heuristic",
+            "safe_heuristic_loose",
+            "safe_heuristic_strict",
+            "noisy_safe",
+        ],
+    )
+    eval_suite.add_argument(
+        "--opponent-checkpoints",
+        nargs="*",
+        type=Path,
+        default=[],
+        help="Additional StrategyNet checkpoints to evaluate as opponents.",
+    )
+    eval_suite.add_argument("--sample", action="store_true", help="Sample from the evaluated checkpoint policy.")
+    eval_suite.add_argument("--opponent-sample", action="store_true", help="Sample from checkpoint opponents.")
+    eval_suite.add_argument("--max-steps", type=int, default=None, help="Override evaluation.max_steps from the config/checkpoint.")
+    eval_suite.add_argument("--output", type=Path, default=None, help="Optional JSON output path.")
+    eval_suite.set_defaults(func=eval_suite_command)
 
     pretrain = subparsers.add_parser("pretrain-heuristic")
     pretrain.add_argument("--config", type=Path, default=Path("configs/lost_cities_deep_cfr_tier3.yaml"))

@@ -1033,6 +1033,39 @@ def test_deep_cfr_eval_cli_accepts_checkpoint_opponent() -> None:
     assert args.opponent_sample is True
 
 
+def test_deep_cfr_eval_suite_cli_accepts_fixed_suite_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "eval-suite",
+            "--checkpoint",
+            "candidate.pt",
+            "--games",
+            "500",
+            "--max-steps",
+            "1000",
+            "--opponent-checkpoints",
+            "old.pt",
+            "best.pt",
+            "--output",
+            "eval.json",
+        ]
+    )
+
+    assert str(args.checkpoint) == "candidate.pt"
+    assert args.opponents == [
+        "random",
+        "passive_discard",
+        "safe_heuristic",
+        "safe_heuristic_loose",
+        "safe_heuristic_strict",
+        "noisy_safe",
+    ]
+    assert [str(path) for path in args.opponent_checkpoints] == ["old.pt", "best.pt"]
+    assert args.games == 500
+    assert args.max_steps == 1000
+    assert str(args.output) == "eval.json"
+
+
 def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:
     cfg = config_from_dict(
         {

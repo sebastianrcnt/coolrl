@@ -18,6 +18,7 @@
 - `train` command에 `--max-hours`, `--max-iterations`, `--checkpoint-dir` override를 추가했다.
 - Run B가 pretrain optimizer/iteration을 이어받지 않도록 `train --init-checkpoint`를 추가했다.
 - old/best checkpoint 상대 평가를 위해 `eval --opponent-checkpoint`를 추가했다.
+- 고정 평가 suite를 재현 가능하게 남기기 위해 `eval-suite` command를 추가했다.
 
 ### Claude 자문 반영
 
@@ -49,6 +50,21 @@ uv run pytest \
 
 ```text
 79 passed in 12.38s
+```
+
+`eval-suite` 추가 후 다시 검증했다.
+
+```bash
+uv run pytest \
+  src/coolrl/lost_cities/tests/test_deep_cfr_config.py \
+  src/coolrl/lost_cities/tests/test_deep_cfr_traversal.py \
+  src/coolrl/lost_cities/tests/test_deep_cfr_smoke.py
+```
+
+결과:
+
+```text
+80 passed in 12.48s
 ```
 
 보류한 결정:
