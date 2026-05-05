@@ -276,3 +276,16 @@ Iteration 230 eval:
 | `noisy_safe` | 0.11 | -47.91 | 0 |
 
 Iteration 234 기준 elapsed는 65분이다. `random`과 `passive_discard` avg_diff는 개선됐지만, safe family 승률과 score diff는 여전히 크게 실패하고 있다. Timeout은 줄었으므로 루프는 줄었지만, safe 상대 전략 품질은 개선되지 않았다.
+
+Iteration 355 eval:
+
+| Opponent | win_rate | avg_diff | timeouts |
+| --- | ---: | ---: | ---: |
+| `random` | 0.55 | 2.41 | 0 |
+| `passive_discard` | 0.00 | -22.48 | 0 |
+| `safe_heuristic` | 0.06 | -93.81 | 48 |
+| `safe_heuristic_loose` | 0.04 | -101.34 | 43 |
+| `safe_heuristic_strict` | 0.05 | -88.13 | 53 |
+| `noisy_safe` | 0.10 | -70.02 | 32 |
+
+Iteration 358 기준 elapsed는 100분이다. 중반에 좋아졌던 `random`/`passive_discard`도 다시 악화했고, safe family score diff는 더 나빠졌다. Run A는 현재까지 pure self-play만으로 안정적인 개선 곡선을 만들지 못하고 있다.
