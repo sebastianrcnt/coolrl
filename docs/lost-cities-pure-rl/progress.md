@@ -479,3 +479,16 @@ Iteration 170 eval:
 | `noisy_safe` | 0.12 | -60.73 | 30 | 593.08 | 0.663 | 1.85 | 0.016 | 0.984 |
 
 Run B iteration 170은 약 61분 지점이다. `avg_opened_colors`와 `play_rate`는 iteration 125보다 늘었지만, `random`과 safe family win rate가 모두 낮아지고 safe score diff가 다시 악화했다. 이는 단순히 expedition을 더 여는 것만으로는 충분하지 않고, self-play가 score 회수와 game-ending pressure를 안정적으로 학습하지 못한다는 신호다.
+
+Iteration 185 eval:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy | avg_opened_colors | play_rate | discard_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.49 | 2.29 | 0 | 562.64 | 0.794 | 1.12 | 0.013 | 0.987 |
+| `passive_discard` | 0.00 | 0.00 | 0 | 98.22 | 1.213 | 0.00 | 0.000 | 1.000 |
+| `safe_heuristic` | 0.08 | -73.45 | 80 | 862.84 | 0.530 | 2.02 | 0.012 | 0.988 |
+| `safe_heuristic_loose` | 0.10 | -78.33 | 77 | 837.54 | 0.538 | 1.97 | 0.012 | 0.988 |
+| `safe_heuristic_strict` | 0.09 | -63.78 | 81 | 869.32 | 0.534 | 2.00 | 0.011 | 0.989 |
+| `noisy_safe` | 0.08 | -62.82 | 24 | 557.80 | 0.696 | 2.08 | 0.020 | 0.980 |
+
+Run B iteration 185는 약 67분 지점이다. Expedition opening 자체는 더 늘었지만, safe family win rate가 0.08-0.10으로 떨어지고 score diff가 Run A 최종 수준에 가까워졌다. Run B의 safe pretrain 효과는 중반 이후 성능 향상으로 유지되지 못하고 있다.
