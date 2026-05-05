@@ -505,3 +505,51 @@ Iteration 200 eval:
 | `noisy_safe` | 0.06 | -71.58 | 30 | 582.72 | 0.667 | 2.15 | 0.020 | 0.980 |
 
 Run B iteration 200은 약 73분 지점이다. `random` win rate가 0.32까지 하락했고 safe family도 0.06-0.07로 떨어졌다. 이는 강한 중반 회귀 신호다. safe pretrain은 초반 score diff를 개선했지만, self-play 학습이 진행되면서 general opponent와 safe family 성능이 함께 무너지고 있다.
+
+Iteration 215 eval:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy | avg_opened_colors | play_rate | discard_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.38 | -5.01 | 0 | 560.72 | 0.790 | 1.73 | 0.019 | 0.981 |
+| `passive_discard` | 0.00 | 0.00 | 0 | 101.40 | 1.284 | 0.00 | 0.000 | 1.000 |
+| `safe_heuristic` | 0.03 | -84.63 | 76 | 857.56 | 0.527 | 2.24 | 0.014 | 0.986 |
+| `safe_heuristic_loose` | 0.04 | -87.19 | 68 | 780.08 | 0.539 | 2.27 | 0.015 | 0.985 |
+| `safe_heuristic_strict` | 0.05 | -67.73 | 76 | 847.98 | 0.515 | 2.15 | 0.013 | 0.987 |
+| `noisy_safe` | 0.09 | -66.75 | 19 | 530.70 | 0.723 | 2.30 | 0.024 | 0.976 |
+
+Run B는 iteration 217, elapsed 4709초 지점에서 더 진행되지 않았다. 당시 루트 디스크가 checkpoint 누적으로 100%에 도달해 학습을 정상적으로 2시간까지 완료하지 못한 것으로 본다. 최신 progress는 다음과 같다.
+
+```text
+iteration=217
+elapsed_seconds=4709.26
+self_play_league_snapshots=20
+strategy_memory_size=1736000
+advantage_memory_size_p0=868000
+advantage_memory_size_p1=868000
+```
+
+현재까지 Run B의 best safe-family 평균 승률은 iteration 90의 `0.285`였지만, 이후 iteration 215에서는 safe-family 평균 승률이 약 `0.053`까지 떨어졌다. Run B도 Run A와 마찬가지로 순수 self-play 조건에서 성공 기준을 만족하지 못했고, safe pretrain이 초반 완충 역할을 일부 했더라도 장기적으로 성능을 유지하지 못했다.
+
+### Checkpoint 정리와 저장 정책 변경
+
+Pure self-play A/B official run은 `save_latest_only: false` 상태에서 매 iteration 약 98MiB checkpoint를 저장했다. 두 run 합계로 `iteration_*.pt` 631개가 쌓여 루트 디스크가 100%까지 찼다.
+
+정리 작업:
+
+- `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/iteration_*.pt` 삭제
+- `checkpoints/lost_cities_deep_cfr_pure_self_play_b_2h_official/iteration_*.pt` 삭제
+- `latest.pt`, `metrics.jsonl`, `train.log`, `runtime_progress.json`, `console.log`는 유지
+
+정리 후 상태:
+
+```text
+checkpoints: 74G -> 15G
+루트 파일시스템: 100% 사용 / 0 여유 -> 73% 사용 / 59G 여유
+```
+
+`self_play_league_snapshots`는 `latest.pt` 안에 포함되므로, 중간 `iteration_*.pt`를 삭제해도 최신 checkpoint에서 resume하는 self-play league 복원에는 영향이 없다. 다만 quartile/best checkpoint 상대 평가에는 중간 checkpoint가 필요하므로, 앞으로 그런 평가가 필요한 run은 별도 보존 정책을 명시해야 한다.
+
+재발 방지를 위해 다음 config를 `save_latest_only: true`로 변경했다.
+
+- `configs/lost_cities_deep_cfr_pure_self_play_a.yaml`
+- `configs/lost_cities_deep_cfr_pure_self_play_b.yaml`

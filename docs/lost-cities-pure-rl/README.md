@@ -44,6 +44,7 @@
 
 - League는 Deep CFR traversal의 `advantage_nets` snapshot을 상대 정책으로 쓴다. 평가/플레이에 쓰는 `strategy_net`과는 다르다.
 - 현재 `older_weight` bucket은 시간순 older snapshot만 균등 샘플한다. 별도의 best-history 슬롯은 아직 없다.
+- `self_play_league_snapshots`는 trainer 메모리에 유지되고 checkpoint 저장 시 `latest.pt` 안에 포함된다. 학습 중 상대 정책은 디스크의 과거 `iteration_*.pt` 파일을 다시 읽지 않는다.
 
 평가 지표에는 기존 `win_rate`, `avg_diff`, timeout 관련 지표에 더해 다음을 추가했다.
 
@@ -74,7 +75,7 @@ configs/lost_cities_deep_cfr_pure_self_play_b.yaml
 
 ## 실행 명령
 
-먼저 2시간 budget을 같은 조건으로 비교한다.
+먼저 2시간 budget을 같은 조건으로 비교한다. Pure self-play checkpoint는 league snapshot 20개를 포함해 파일 하나가 약 100MB가 되므로, 기본 config는 `latest.pt`만 유지한다.
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
@@ -143,6 +144,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli eval-suite \
 
 Old/best checkpoint 선정 규칙:
 
+- 현재 기본 checkpoint 정책은 `save_latest_only: true`다. quartile 또는 best checkpoint 상대 평가가 필요하면 해당 run에서 별도 보존 디렉터리를 쓰거나 `save_latest_only: false`와 더 큰 `save_iteration_interval`을 명시적으로 설정한다.
 - old checkpoint는 각 run의 총 iteration `N` 기준 `N/4`, `N/2`, `3N/4`, `N`에 가장 가까운 checkpoint로 고른다.
 - A/B throughput이 다를 수 있으므로 absolute iteration number가 아니라 각 run 내부의 상대 위치를 쓴다.
 - best checkpoint는 training 중 6개 bot opponent 평균 win rate가 가장 높은 eval iteration으로 고른다.
