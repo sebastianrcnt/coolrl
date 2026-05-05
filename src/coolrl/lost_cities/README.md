@@ -188,9 +188,25 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
   --base-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
   --init-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
   --games 200 --epochs 2 --batch-size 1024 --max-steps 1000 \
+  --learning-rate 1e-5 \
   --improvement-rollouts 1 \
   --improvement-rollout-max-steps 300 \
-  --improvement-max-examples 2000
+  --improvement-max-examples 2000 \
+  --improvement-top-k 4
+```
+
+`--improvement-top-k`는 policy top-k action과 safe action만 rollout 평가한다. 전체 legal action을 모두 평가하는 것보다 훨씬 빠르고, 로그에는 label 진행률, safe action과 다른 label 비율(`disagreement_rate`), 평균 후보 수가 출력된다.
+
+Policy-gradient 후속 fine-tune은 여러 게임을 묶어 advantage를 정규화할 수 있다:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli fine-tune-policy \
+  --config configs/lost_cities_deep_cfr_safe_dagger_256.yaml \
+  --checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --output checkpoints/lost_cities_deep_cfr_safe_dagger_256/policy_gradient_batch.pt \
+  --games 4000 --opponent safe_heuristic --max-steps 1000 \
+  --learning-rate 1e-5 --reward-scale 60 --kl-coef 0.10 \
+  --batch-games 16 --normalize-advantages
 ```
 
 현재 training caveat와 다음 실험 기준은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)를 참고한다.

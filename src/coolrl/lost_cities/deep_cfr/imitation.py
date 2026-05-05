@@ -32,6 +32,14 @@ class HeuristicPretrainResult:
     advantage_loss_p1: float
 
 
+_LAST_PRETRAIN_COLLECTION_METRICS: dict[str, float | int] = {}
+
+
+def _set_collection_metrics(metrics: dict[str, float | int]) -> None:
+    _LAST_PRETRAIN_COLLECTION_METRICS.clear()
+    _LAST_PRETRAIN_COLLECTION_METRICS.update(metrics)
+
+
 def _split_counts(total: int, ratios: tuple[float, ...]) -> tuple[int, ...]:
     if total <= 0:
         raise ValueError("total must be positive")
@@ -368,11 +376,24 @@ def _safe_action_rollout_target(
     policy_sample: bool,
     rollouts: int,
     rollout_max_steps: int,
+    top_k: int | None,
     seed: int,
-) -> int:
+) -> tuple[int, int]:
     legal_actions = np.flatnonzero(state.unified_legal_mask())
     if len(legal_actions) == 0:
         raise RuntimeError("cannot label terminal/no-legal state")
+
+    if top_k is not None and top_k > 0 and len(legal_actions) > top_k:
+        info = encode_information_state(state, policy_player)
+        with torch.inference_mode():
+            x = torch.as_tensor(info, dtype=torch.float32, device=device).unsqueeze(0)
+            logits = policy_template.strategy_net(x).squeeze(0).detach().cpu().numpy()
+        legal_order = sorted(legal_actions, key=lambda action: float(logits[action]), reverse=True)
+        candidate_actions = set(int(action) for action in legal_order[:top_k])
+        safe_action = SafeHeuristicBot().act(state)
+        candidate_actions.add(state.to_unified_action(safe_action))
+        legal_actions = np.asarray(sorted(candidate_actions), dtype=np.int64)
+
     best_action = int(legal_actions[0])
     best_value = -float("inf")
     for action_index, action in enumerate(legal_actions):
@@ -395,7 +416,7 @@ def _safe_action_rollout_target(
         if value > best_value:
             best_value = value
             best_action = int(action)
-    return state.from_unified_action(best_action)
+    return state.from_unified_action(best_action), int(len(legal_actions))
 
 
 def _collect_safe_action_rollout_dataset(
@@ -410,6 +431,8 @@ def _collect_safe_action_rollout_dataset(
     rollouts: int,
     rollout_max_steps: int,
     max_examples: int | None,
+    top_k: int | None,
+    progress_every: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     if rollouts <= 0:
         raise ValueError("improvement_rollouts must be positive")
@@ -428,8 +451,12 @@ def _collect_safe_action_rollout_dataset(
     target_actions: list[int] = []
     players: list[int] = []
     hard_trajectories = 0
+    labeled_states = 0
+    disagree_with_safe = 0
+    candidate_counts: list[int] = []
     fallback_trajectories: list[list[tuple[GameState, int]]] = []
     max_examples = games * 20 if max_examples is None else max_examples
+    progress_every = max(0, int(progress_every))
 
     for game_index in range(games):
         state = GameState.new_game(lc_config, seed=seed + game_index)
@@ -461,7 +488,7 @@ def _collect_safe_action_rollout_dataset(
             continue
         hard_trajectories += 1
         for example_state, player in trajectory:
-            action = _safe_action_rollout_target(
+            action, candidate_count = _safe_action_rollout_target(
                 example_state,
                 policy_player=policy_player,
                 policy_template=policy_template,
@@ -469,8 +496,14 @@ def _collect_safe_action_rollout_dataset(
                 policy_sample=policy_sample,
                 rollouts=rollouts,
                 rollout_max_steps=rollout_max_steps,
+                top_k=top_k,
                 seed=seed + game_index * 1_000_000 + len(target_actions),
             )
+            safe_action = SafeHeuristicBot().act(example_state)
+            labeled_states += 1
+            if action != safe_action:
+                disagree_with_safe += 1
+            candidate_counts.append(candidate_count)
             _append_example(
                 example_state,
                 player,
@@ -480,6 +513,15 @@ def _collect_safe_action_rollout_dataset(
                 target_actions=target_actions,
                 players=players,
             )
+            if progress_every and len(target_actions) % progress_every == 0:
+                logger.info(
+                    "Safe-action rollout progress: states={} games_seen={} hard_trajectories={} disagreement_rate={:.3f} avg_candidates={:.1f}",
+                    len(target_actions),
+                    game_index + 1,
+                    hard_trajectories,
+                    disagree_with_safe / max(1, labeled_states),
+                    float(np.mean(candidate_counts)) if candidate_counts else 0.0,
+                )
             if len(target_actions) >= max_examples:
                 break
         if len(target_actions) >= max_examples:
@@ -489,7 +531,7 @@ def _collect_safe_action_rollout_dataset(
         logger.info("No hard safe-action rollout states found; falling back to early trajectories")
         for trajectory in fallback_trajectories:
             for example_state, player in trajectory:
-                action = _safe_action_rollout_target(
+                action, candidate_count = _safe_action_rollout_target(
                     example_state,
                     policy_player=player,
                     policy_template=policy_template,
@@ -497,8 +539,14 @@ def _collect_safe_action_rollout_dataset(
                     policy_sample=policy_sample,
                     rollouts=rollouts,
                     rollout_max_steps=rollout_max_steps,
+                    top_k=top_k,
                     seed=seed + len(target_actions),
                 )
+                safe_action = SafeHeuristicBot().act(example_state)
+                labeled_states += 1
+                if action != safe_action:
+                    disagree_with_safe += 1
+                candidate_counts.append(candidate_count)
                 _append_example(
                     example_state,
                     player,
@@ -514,13 +562,26 @@ def _collect_safe_action_rollout_dataset(
                 break
     if not infos:
         raise RuntimeError("safe action rollout collection produced no states")
+    disagreement_rate = disagree_with_safe / max(1, labeled_states)
+    avg_candidates = float(np.mean(candidate_counts)) if candidate_counts else 0.0
+    _set_collection_metrics(
+        {
+            "pretrain_safe_action_rollout_hard_trajectories": hard_trajectories,
+            "pretrain_safe_action_rollout_disagreements": disagree_with_safe,
+            "pretrain_safe_action_rollout_disagreement_rate": disagreement_rate,
+            "pretrain_safe_action_rollout_avg_candidates": avg_candidates,
+            "pretrain_safe_action_rollout_top_k": int(top_k) if top_k is not None else 0,
+        }
+    )
     logger.info(
-        "Collected safe-action rollout examples: games={} hard_trajectories={} states={} rollouts={} rollout_max_steps={}",
+        "Collected safe-action rollout examples: games={} hard_trajectories={} states={} rollouts={} rollout_max_steps={} disagreement_rate={:.3f} avg_candidates={:.1f}",
         games,
         hard_trajectories,
         len(target_actions),
         rollouts,
         rollout_max_steps,
+        disagreement_rate,
+        avg_candidates,
     )
     return (
         np.stack(infos).astype(np.float32),
@@ -558,6 +619,9 @@ def pretrain_safe_heuristic_checkpoint(
     improvement_rollouts: int = 1,
     improvement_rollout_max_steps: int = 300,
     improvement_max_examples: int | None = None,
+    improvement_top_k: int | None = None,
+    improvement_progress_every: int = 100,
+    learning_rate: float | None = None,
 ) -> HeuristicPretrainResult:
     if games <= 0:
         raise ValueError("games must be positive")
@@ -567,9 +631,12 @@ def pretrain_safe_heuristic_checkpoint(
         raise ValueError("batch_size must be positive")
     if max_steps <= 0:
         raise ValueError("max_steps must be positive")
+    if learning_rate is not None and learning_rate <= 0.0:
+        raise ValueError("learning_rate must be positive when set")
 
     pretrain_seed = config.seed + 200_000 if seed is None else seed
     set_seed(pretrain_seed)
+    _set_collection_metrics({})
     lc_config = config.rules.to_lost_cities_config(seed=config.seed)
     input_dim = infer_input_dim(lc_config)
     action_size = lc_config.action_size
@@ -620,6 +687,8 @@ def pretrain_safe_heuristic_checkpoint(
             rollouts=improvement_rollouts,
             rollout_max_steps=improvement_rollout_max_steps,
             max_examples=improvement_max_examples,
+            top_k=improvement_top_k,
+            progress_every=improvement_progress_every,
         )
     else:
         raise ValueError(
@@ -657,15 +726,18 @@ def pretrain_safe_heuristic_checkpoint(
                 "init checkpoint network architecture does not match the pretrain config"
             ) from exc
         logger.info("Initialized safe heuristic pretrain networks from {}", init_checkpoint)
+    optimizer_learning_rate = (
+        config.optimization.learning_rate if learning_rate is None else learning_rate
+    )
     strategy_optimizer = torch.optim.AdamW(
         strategy_net.parameters(),
-        lr=config.optimization.learning_rate,
+        lr=optimizer_learning_rate,
         weight_decay=config.optimization.weight_decay,
     )
     advantage_optimizers = [
         torch.optim.AdamW(
             net.parameters(),
-            lr=config.optimization.learning_rate,
+            lr=optimizer_learning_rate,
             weight_decay=config.optimization.weight_decay,
         )
         for net in advantage_nets
@@ -773,9 +845,12 @@ def pretrain_safe_heuristic_checkpoint(
                 "pretrain_base_checkpoint": str(base_checkpoint) if base_checkpoint is not None else None,
                 "pretrain_init_checkpoint": str(init_checkpoint) if init_checkpoint is not None else None,
                 "pretrain_policy_sample": bool(policy_sample),
+                "pretrain_learning_rate": float(optimizer_learning_rate),
                 "pretrain_improvement_rollouts": int(improvement_rollouts),
                 "pretrain_improvement_rollout_max_steps": int(improvement_rollout_max_steps),
                 "pretrain_improvement_max_examples": improvement_max_examples,
+                "pretrain_improvement_top_k": improvement_top_k,
+                **_LAST_PRETRAIN_COLLECTION_METRICS,
                 "pretrain_games": games,
                 "pretrain_states": int(len(actions_np)),
                 "pretrain_strategy_loss": last_strategy_loss,

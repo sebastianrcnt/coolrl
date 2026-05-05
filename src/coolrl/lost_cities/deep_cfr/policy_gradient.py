@@ -63,6 +63,9 @@ def fine_tune_policy_gradient_checkpoint(
     kl_coef: float = 0.05,
     entropy_coef: float = 0.001,
     grad_clip: float = 0.5,
+    batch_games: int = 1,
+    normalize_advantages: bool = False,
+    baseline_decay: float | None = None,
     seed: int | None = None,
 ) -> PolicyGradientResult:
     if games <= 0:
@@ -75,6 +78,10 @@ def fine_tune_policy_gradient_checkpoint(
         raise ValueError("reward_scale must be positive")
     if reward_clip <= 0.0:
         raise ValueError("reward_clip must be positive")
+    if batch_games <= 0:
+        raise ValueError("batch_games must be positive")
+    if baseline_decay is not None and not 0.0 <= baseline_decay < 1.0:
+        raise ValueError("baseline_decay must be in [0, 1) when set")
 
     train_seed = config.seed + 300_000 if seed is None else seed
     set_seed(train_seed)
@@ -118,6 +125,45 @@ def fine_tune_policy_gradient_checkpoint(
     losses_seen: list[float] = []
     kls_seen: list[float] = []
     entropies_seen: list[float] = []
+    pending_terms: list[tuple[float, torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    reward_baseline: float | None = None
+
+    def flush_policy_batch() -> None:
+        if not pending_terms:
+            return
+        rewards = torch.as_tensor(
+            [term[0] for term in pending_terms],
+            dtype=torch.float32,
+            device=device,
+        )
+        advantages = rewards
+        if normalize_advantages and len(pending_terms) > 1:
+            advantages = (rewards - rewards.mean()) / rewards.std(unbiased=False).clamp_min(1.0e-6)
+        elif baseline_decay is not None:
+            baseline_value = 0.0 if reward_baseline is None else reward_baseline
+            advantages = rewards - baseline_value
+        losses = []
+        batch_kls = []
+        batch_entropies = []
+        for index, (_, log_prob_term, kl_term, entropy_term) in enumerate(pending_terms):
+            losses.append(
+                -(advantages[index].detach() * log_prob_term)
+                + kl_coef * kl_term
+                - entropy_coef * entropy_term
+            )
+            batch_kls.append(kl_term)
+            batch_entropies.append(entropy_term)
+        loss = torch.stack(losses).mean()
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        if grad_clip > 0.0:
+            torch.nn.utils.clip_grad_norm_(strategy_net.parameters(), grad_clip)
+        optimizer.step()
+        losses_seen.append(float(loss.detach().cpu()))
+        kls_seen.append(float(torch.stack(batch_kls).mean().detach().cpu()))
+        entropies_seen.append(float(torch.stack(batch_entropies).mean().detach().cpu()))
+        pending_terms.clear()
+
     for game_index in range(games):
         state = GameState.new_game(lc_config, seed=train_seed + game_index)
         policy_player = game_index % 2
@@ -166,17 +212,15 @@ def fine_tune_policy_gradient_checkpoint(
         log_prob_term = torch.stack(log_probs).mean()
         kl_term = torch.stack(kls).mean()
         entropy_term = torch.stack(entropies).mean()
-        loss = -(reward * log_prob_term) + kl_coef * kl_term - entropy_coef * entropy_term
-
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        if grad_clip > 0.0:
-            torch.nn.utils.clip_grad_norm_(strategy_net.parameters(), grad_clip)
-        optimizer.step()
-
-        losses_seen.append(float(loss.detach().cpu()))
-        kls_seen.append(float(kl_term.detach().cpu()))
-        entropies_seen.append(float(entropy_term.detach().cpu()))
+        pending_terms.append((reward, log_prob_term, kl_term, entropy_term))
+        if len(pending_terms) >= batch_games:
+            flush_policy_batch()
+        if baseline_decay is not None:
+            reward_baseline = (
+                reward
+                if reward_baseline is None
+                else baseline_decay * reward_baseline + (1.0 - baseline_decay) * reward
+            )
         if (game_index + 1) % 100 == 0:
             logger.info(
                 "Policy gradient fine-tune progress: games={} win_rate={:.3f} avg_diff={:.2f} avg_loss={:.4f} avg_kl={:.4f}",
@@ -186,6 +230,7 @@ def fine_tune_policy_gradient_checkpoint(
                 float(np.mean(losses_seen)) if losses_seen else 0.0,
                 float(np.mean(kls_seen)) if kls_seen else 0.0,
             )
+    flush_policy_batch()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -211,6 +256,9 @@ def fine_tune_policy_gradient_checkpoint(
                 "policy_gradient_avg_loss": float(np.mean(losses_seen)) if losses_seen else 0.0,
                 "policy_gradient_avg_kl": float(np.mean(kls_seen)) if kls_seen else 0.0,
                 "policy_gradient_avg_entropy": float(np.mean(entropies_seen)) if entropies_seen else 0.0,
+                "policy_gradient_batch_games": int(batch_games),
+                "policy_gradient_normalize_advantages": bool(normalize_advantages),
+                "policy_gradient_baseline_decay": baseline_decay,
             },
         },
         output_path,

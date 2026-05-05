@@ -127,6 +127,9 @@ def pretrain_heuristic_command(args: argparse.Namespace) -> None:
         improvement_rollouts=args.improvement_rollouts,
         improvement_rollout_max_steps=args.improvement_rollout_max_steps,
         improvement_max_examples=args.improvement_max_examples,
+        improvement_top_k=args.improvement_top_k,
+        improvement_progress_every=args.improvement_progress_every,
+        learning_rate=args.learning_rate,
     )
     logger.info(
         "Safe heuristic pretrain complete: output={} games={} states={} strategy_loss={:.4f} strategy_accuracy={:.4f} advantage_loss=({:.4f},{:.4f})",
@@ -155,6 +158,9 @@ def fine_tune_policy_command(args: argparse.Namespace) -> None:
         kl_coef=args.kl_coef,
         entropy_coef=args.entropy_coef,
         grad_clip=args.grad_clip,
+        batch_games=args.batch_games,
+        normalize_advantages=args.normalize_advantages,
+        baseline_decay=args.baseline_decay,
         seed=args.seed,
     )
     logger.info(
@@ -311,6 +317,12 @@ def build_parser() -> argparse.ArgumentParser:
     pretrain.add_argument("--max-steps", type=int, default=1000)
     pretrain.add_argument("--seed", type=int, default=None)
     pretrain.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Override optimization.learning_rate for this pretrain run.",
+    )
+    pretrain.add_argument(
         "--dataset-mode",
         choices=["safe_self_play", "aggregated", "successful_policy_vs_safe", "safe_action_rollout"],
         default="safe_self_play",
@@ -355,6 +367,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional cap on safe_action_rollout labeled states.",
     )
+    pretrain.add_argument(
+        "--improvement-top-k",
+        type=int,
+        default=None,
+        help="Limit safe_action_rollout candidate actions to policy top-k plus the safe action.",
+    )
+    pretrain.add_argument(
+        "--improvement-progress-every",
+        type=int,
+        default=100,
+        help="Log safe_action_rollout collection progress every N labeled states; 0 disables progress logs.",
+    )
     pretrain.set_defaults(func=pretrain_heuristic_command)
 
     fine_tune = subparsers.add_parser("fine-tune-policy")
@@ -370,6 +394,9 @@ def build_parser() -> argparse.ArgumentParser:
     fine_tune.add_argument("--kl-coef", type=float, default=0.05)
     fine_tune.add_argument("--entropy-coef", type=float, default=0.001)
     fine_tune.add_argument("--grad-clip", type=float, default=0.5)
+    fine_tune.add_argument("--batch-games", type=int, default=1)
+    fine_tune.add_argument("--normalize-advantages", action="store_true")
+    fine_tune.add_argument("--baseline-decay", type=float, default=None)
     fine_tune.add_argument("--seed", type=int, default=None)
     fine_tune.set_defaults(func=fine_tune_policy_command)
 

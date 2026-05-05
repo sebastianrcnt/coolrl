@@ -95,6 +95,8 @@ def test_pretrain_heuristic_parser_accepts_training_options() -> None:
             "100",
             "--seed",
             "123",
+            "--learning-rate",
+            "1e-5",
             "--dataset-mode",
             "successful_policy_vs_safe",
             "--base-checkpoint",
@@ -108,6 +110,10 @@ def test_pretrain_heuristic_parser_accepts_training_options() -> None:
             "50",
             "--improvement-max-examples",
             "100",
+            "--improvement-top-k",
+            "4",
+            "--improvement-progress-every",
+            "10",
         ]
     )
 
@@ -118,6 +124,7 @@ def test_pretrain_heuristic_parser_accepts_training_options() -> None:
     assert args.batch_size == 32
     assert args.max_steps == 100
     assert args.seed == 123
+    assert args.learning_rate == 1.0e-5
     assert args.dataset_mode == "successful_policy_vs_safe"
     assert str(args.base_checkpoint) == "checkpoints/example/base.pt"
     assert str(args.init_checkpoint) == "checkpoints/example/init.pt"
@@ -125,6 +132,8 @@ def test_pretrain_heuristic_parser_accepts_training_options() -> None:
     assert args.improvement_rollouts == 2
     assert args.improvement_rollout_max_steps == 50
     assert args.improvement_max_examples == 100
+    assert args.improvement_top_k == 4
+    assert args.improvement_progress_every == 10
 
 
 def test_fine_tune_policy_parser_accepts_training_options() -> None:
@@ -156,6 +165,9 @@ def test_fine_tune_policy_parser_accepts_training_options() -> None:
             "0.002",
             "--grad-clip",
             "0.25",
+            "--batch-games",
+            "16",
+            "--normalize-advantages",
             "--seed",
             "123",
         ]
@@ -173,6 +185,8 @@ def test_fine_tune_policy_parser_accepts_training_options() -> None:
     assert args.kl_coef == 0.1
     assert args.entropy_coef == 0.002
     assert args.grad_clip == 0.25
+    assert args.batch_games == 16
+    assert args.normalize_advantages is True
     assert args.seed == 123
 
 
@@ -346,6 +360,9 @@ def test_safe_action_rollout_pretrain_checkpoint_uses_rollout_improvement_labels
         improvement_rollouts=1,
         improvement_rollout_max_steps=20,
         improvement_max_examples=4,
+        improvement_top_k=3,
+        improvement_progress_every=2,
+        learning_rate=1.0e-5,
     )
 
     assert result.dataset_mode == "safe_action_rollout"
@@ -354,6 +371,9 @@ def test_safe_action_rollout_pretrain_checkpoint_uses_rollout_improvement_labels
     assert checkpoint["metrics"]["pretrain_dataset_mode"] == "safe_action_rollout"
     assert checkpoint["metrics"]["pretrain_improvement_rollouts"] == 1
     assert checkpoint["metrics"]["pretrain_improvement_max_examples"] == 4
+    assert checkpoint["metrics"]["pretrain_improvement_top_k"] == 3
+    assert checkpoint["metrics"]["pretrain_learning_rate"] == 1.0e-5
+    assert "pretrain_safe_action_rollout_disagreement_rate" in checkpoint["metrics"]
 
 
 def test_tiny_training_run_completes_with_parallel_traversal(tmp_path: Path) -> None:
