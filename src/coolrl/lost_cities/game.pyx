@@ -4,6 +4,8 @@ from dataclasses import dataclass, fields
 import random
 from typing import Any, Literal
 
+import numpy as np
+
 cimport cython
 
 
@@ -485,6 +487,46 @@ cdef class GameState:
         result = [False] * card_size
         result.extend(self.legal_draw_mask())
         return result
+
+    cpdef object unified_legal_mask_np(self):
+        cdef int n_colors = self.config.n_colors
+        cdef int hand_size = self.config.hand_size
+        cdef int card_action_size = 2 * hand_size
+        cdef int draw_action_size = 1 + n_colors
+        cdef int total = card_action_size + draw_action_size
+
+        mask_arr = np.zeros(total, dtype=bool)
+        cdef unsigned char[::1] view = mask_arr.view(np.uint8)
+        if self.terminal:
+            return mask_arr
+
+        cdef int slot, n, color
+        cdef Card card
+        cdef list hand
+        cdef int p = self.current_player
+        cdef object pending
+
+        if self.phase == "card":
+            hand = self.hands[p]
+            n = len(hand)
+            for slot in range(hand_size):
+                if slot >= n:
+                    continue
+                card = <Card>hand[slot]
+                if self.can_play_card(p, card):
+                    view[2 * slot] = 1
+                view[2 * slot + 1] = 1
+        else:
+            pending = self.pending_discarded_color
+            if len(self.deck) > 0:
+                view[card_action_size] = 1
+            for color in range(n_colors):
+                if (
+                    len(self.discards[color]) > 0
+                    and (pending is None or color != pending)
+                ):
+                    view[card_action_size + 1 + color] = 1
+        return mask_arr
 
     def to_unified_action(self, int action_id, phase=None):
         cdef str p = self.phase if phase is None else phase
