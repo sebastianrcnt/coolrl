@@ -150,3 +150,16 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 - `traversal_worker_chunk_size=32` 적용으로 batch 수가 `126`에서 `32`로 줄었다.
 - Iteration 1-2가 정상 완료됐다.
 - `cutoff_rollouts=0` 유지.
+
+Iteration 5의 첫 eval 결과:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.37 | -11.49 | 0 | 516.0 | 1.685 |
+| `passive_discard` | 0.01 | -26.18 | 0 | 168.4 | 1.805 |
+| `safe_heuristic` | 0.13 | -59.88 | 68 | 757.9 | 1.632 |
+| `safe_heuristic_loose` | 0.12 | -63.62 | 66 | 731.7 | 1.610 |
+| `safe_heuristic_strict` | 0.15 | -56.89 | 67 | 727.5 | 1.624 |
+| `noisy_safe` | 0.13 | -60.66 | 38 | 575.9 | 1.633 |
+
+공식 Run A 초반은 random/passive/safe 모두에서 기준 미달이다. `cutoff_rollouts=0`과 `self_play_league_snapshots=5`는 의도대로 기록됐다.
