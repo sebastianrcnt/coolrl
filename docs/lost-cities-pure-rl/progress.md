@@ -397,3 +397,20 @@ Iteration 25 eval:
 | `noisy_safe` | 0.06 | -67.71 | 7 |
 
 Run B 초반은 safe pretrain 초기화에도 safe family 승률이 낮다. 다만 timeout은 Run A 같은 시간대보다 낮아, game-ending loop는 아직 덜하지만 score diff는 여전히 크게 음수다. 이후 곡선에서 timeout이 다시 증가하는지와 `passive_discard` 실패가 완화되는지를 함께 본다.
+
+### Claude 3차 자문
+
+Run A 최종 결과와 Run B iteration 25 결과를 바탕으로 Claude Opus 4.7 xhigh에 다시 자문했다. 받은 해석은 다음과 같다.
+
+- Run A 2h 실패는 단순 budget 부족보다 `on_max_steps: score_diff`와 timeout penalty 부재가 만드는 reward/game-ending pressure 결함 신호가 강하다.
+- latest-vs-latest checkpoint 평가에서 500게임 중 497회 timeout이 난 것은, self-play가 0-0 또는 expedition 미개시 균형으로 수렴하는 강한 증거다.
+- Run B는 iteration 100 전후에 safe family timeout, `avg_opened_colors`, `avg_play_actions`, `policy_entropy`, mirror match timeout을 같이 봐야 한다.
+- Run B가 booster라면 safe family timeout이 Run A 같은 시점보다 낮게 유지되고, expedition opening과 entropy가 단조 붕괴하지 않으며, safe score diff가 유의미하게 개선되어야 한다.
+- Run B가 bias/붕괴라면 `discard_action_rate` 증가, `avg_opened_colors` 감소, timeout 증가, `passive_discard` 0승 회귀가 함께 나타날 것이다.
+- Run C 전에는 timeout penalty, cutoff/max-depth 설계, best-history league slot, exploration schedule을 다시 검토해야 한다. 다만 Run C는 A/B pure self-play 비교 후에만 검토한다.
+
+채택한 결정:
+
+- Run B는 계획대로 pure self-play 조건을 깨지 않고 끝까지 실행한다.
+- Run B 중간 문서화에서는 win rate만 보지 않고 timeout, `avg_game_length`, policy entropy, opening/play/discard 계열 지표도 같이 비교한다.
+- Run B 종료 후에는 Run A와 같은 bot suite, quartile/best checkpoint suite, 그리고 가능하면 Run A latest와 Run B latest cross match를 평가 전용으로 추가한다.
