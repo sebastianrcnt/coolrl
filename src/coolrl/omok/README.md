@@ -46,7 +46,7 @@ uv run python -m coolrl.omok.train --config configs/omok15_smoke.yaml --device C
 
 아래 문서들은 구현 배경, 과거 성능 측정, 장애 회고에 가깝습니다. 처음 읽는 문서라기보다는 디버깅하거나 설계를 따라갈 때 참고하세요.
 
-- [`docs/omok_cuda_tuning.md`](../../../docs/omok_cuda_tuning.md)
-- [`docs/omok-dynamic-board-size.md`](../../../docs/omok-dynamic-board-size.md)
-- [`docs/omok-mcts-memory.md`](../../../docs/omok-mcts-memory.md)
-- [`docs/omok-web-ios-memory.md`](../../../docs/omok-web-ios-memory.md)
+- [`docs/archive/omok/cuda-tuning.md`](../../../docs/archive/omok/cuda-tuning.md)
+- [`docs/archive/omok/dynamic-board-size.md`](../../../docs/archive/omok/dynamic-board-size.md)
+- [`docs/archive/omok/mcts-memory-incident.md`](../../../docs/archive/omok/mcts-memory-incident.md)
+- [`docs/archive/omok/web-ios-memory.md`](../../../docs/archive/omok/web-ios-memory.md)

@@ -29,6 +29,8 @@ Omok training loop는 대략 다음 순서로 움직입니다.
 - `configs/omok15_full_cuda.yaml`
 - `configs/omok15_full_cuda_hdd.yaml`
 
+보존 중인 `omok15_full_cuda_hdd` checkpoint의 위치와 run 요약은 [`omok15-full-cuda-hdd-run.md`](omok15-full-cuda-hdd-run.md)에 기록합니다.
+
 Smoke/quick에서 시작한 뒤 `max_iterations`, `games_per_iteration`, `simulations`, `updates_per_iteration`, `arena.games`를 키우는 방식이 안전합니다.
 
 ## Self-play knobs

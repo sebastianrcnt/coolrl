@@ -175,3 +175,7 @@ Old/best checkpoint 선정 규칙:
 - A/B 모두 실패: pure 검증을 닫고 외부 opponent pool 또는 rollout label을 검토한다.
 
 Run C는 A/B가 실패한 뒤에만 검토한다. Run C는 pure self-play 실험이 아니므로 이 문서의 성공 판정에는 섞지 않는다.
+
+## 후속 진단
+
+Run A/B에서 확인한 zero-pit 가능성은 [`../lost-cities-zero-pit-poc/README.md`](../lost-cities-zero-pit-poc/README.md)에 별도 PoC로 분리했다. 해당 문서는 `regret_matching_epsilon=1.0e-3` 실험의 config, checkpoint, 판정 기준을 기록한다.

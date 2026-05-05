@@ -342,7 +342,7 @@ Saved-time reinvestment order:
 
 6. `Benchmark torch-only CUDA baseline`
    - fixed iteration benchmark를 실행합니다
-   - `docs/omok_cuda_tuning.md`에서 timings을 document합니다
+   - [`cuda-tuning.md`](cuda-tuning.md)에서 timings을 document합니다
    - search를 아직 retune하지 마세요
 
 7. `Enable torch optimizations and retune search`
