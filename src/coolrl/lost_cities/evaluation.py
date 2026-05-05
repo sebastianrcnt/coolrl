@@ -230,7 +230,18 @@ def evaluate_agent_against_bot(
         "avg_final_score": float(np.mean(final_scores)) if final_scores else 0.0,
         "avg_opponent_score": float(np.mean(opponent_scores)) if opponent_scores else 0.0,
         "avg_opened_colors": float(np.mean(opened_colors)) if opened_colors else 0.0,
+        "opened_colors_std": float(np.std(opened_colors)) if opened_colors else 0.0,
+        "opened_colors_min": int(min(opened_colors)) if opened_colors else 0,
+        "opened_colors_max": int(max(opened_colors)) if opened_colors else 0,
+        **{f"opened_colors_count_{count}": int(opened_colors.count(count)) for count in range(config.n_colors + 1)},
         "avg_opponent_opened_colors": float(np.mean(opponent_opened_colors)) if opponent_opened_colors else 0.0,
+        "opponent_opened_colors_std": float(np.std(opponent_opened_colors)) if opponent_opened_colors else 0.0,
+        "opponent_opened_colors_min": int(min(opponent_opened_colors)) if opponent_opened_colors else 0,
+        "opponent_opened_colors_max": int(max(opponent_opened_colors)) if opponent_opened_colors else 0,
+        **{
+            f"opponent_opened_colors_count_{count}": int(opponent_opened_colors.count(count))
+            for count in range(config.n_colors + 1)
+        },
         "avg_expedition_cards": float(np.mean(expedition_cards)) if expedition_cards else 0.0,
         "avg_discard_actions": float(discard_actions / max(1, games)),
         "avg_play_actions": float(play_actions / max(1, games)),

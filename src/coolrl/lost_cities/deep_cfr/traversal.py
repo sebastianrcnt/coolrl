@@ -46,6 +46,10 @@ class TraversalStats:
     endpoint_depth_bucket_width: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_WIDTH
     endpoint_depth_bucket_max: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_MAX
     endpoint_depth_buckets: dict[str, int] = field(default_factory=dict)
+    league_current_traversals: int = 0
+    league_recent_traversals: int = 0
+    league_older_traversals: int = 0
+    league_anchor_traversals: int = 0
     cutoff_rollouts: int = 0
     cutoff_rollout_steps: int = 0
     cutoff_rollout_max_step_timeouts: int = 0
@@ -79,6 +83,10 @@ class TraversalStats:
         self.node_limit_cutoff_depth_sum += other.node_limit_cutoff_depth_sum
         for key, value in other.endpoint_depth_buckets.items():
             self.endpoint_depth_buckets[key] = self.endpoint_depth_buckets.get(key, 0) + value
+        self.league_current_traversals += other.league_current_traversals
+        self.league_recent_traversals += other.league_recent_traversals
+        self.league_older_traversals += other.league_older_traversals
+        self.league_anchor_traversals += other.league_anchor_traversals
         self.cutoff_rollouts += other.cutoff_rollouts
         self.cutoff_rollout_steps += other.cutoff_rollout_steps
         self.cutoff_rollout_max_step_timeouts += other.cutoff_rollout_max_step_timeouts
@@ -171,6 +179,7 @@ class DeepCFRTraverser:
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
         self._active_league_snapshot: list[AdvantageNet] | None = None
+        self._active_league_bucket: str | None = None
         self._safe_heuristic_rollout_bot = (
             SafeHeuristicBot() if self.cutoff_rollout_policy == "safe_heuristic" else None
         )
@@ -201,6 +210,8 @@ class DeepCFRTraverser:
             endpoint_depth_bucket_max=self.endpoint_depth_bucket_max,
         )
         if self.opponent_policy == "self_play_league":
+            self._active_league_bucket = self._league_bucket()
+            self._record_league_bucket(stats, self._active_league_bucket)
             self._active_league_snapshot = self._select_league_snapshot()
         try:
             if self.timing_stats is None:
@@ -212,6 +223,7 @@ class DeepCFRTraverser:
             return value, stats
         finally:
             self._active_league_snapshot = None
+            self._active_league_bucket = None
 
     def _policy_from_net(
         self,
@@ -255,6 +267,7 @@ class DeepCFRTraverser:
                 cfg.current_weight,
                 cfg.recent_weight if recent_count > 0 else 0.0,
                 cfg.older_weight if older_count > 0 else 0.0,
+                cfg.anchor_weight,
             ],
             dtype=np.float64,
         )
@@ -262,11 +275,22 @@ class DeepCFRTraverser:
         if total <= 0.0:
             return "current"
         weights /= total
-        return str(self.rng.choice(["current", "recent", "older"], p=weights))
+        return str(self.rng.choice(["current", "recent", "older", "anchor"], p=weights))
 
-    def _select_league_snapshot(self) -> list[AdvantageNet] | None:
-        bucket = self._league_bucket()
-        if bucket == "current" or not self.league_advantage_nets:
+    def _record_league_bucket(self, stats: TraversalStats, bucket: str) -> None:
+        if bucket == "current":
+            stats.league_current_traversals += 1
+        elif bucket == "recent":
+            stats.league_recent_traversals += 1
+        elif bucket == "older":
+            stats.league_older_traversals += 1
+        elif bucket == "anchor":
+            stats.league_anchor_traversals += 1
+
+    def _select_league_snapshot(self, bucket: str | None = None) -> list[AdvantageNet] | None:
+        if bucket is None:
+            bucket = self._active_league_bucket or "current"
+        if bucket in {"current", "anchor"} or not self.league_advantage_nets:
             return None
         recent_count = min(len(self.league_advantage_nets), self.self_play_league.recent_window)
         if bucket == "recent" and recent_count > 0:
@@ -284,6 +308,8 @@ class DeepCFRTraverser:
         return snapshot[player]
 
     def _self_play_league_action(self, state: GameState, player: int) -> int | None:
+        if self._active_league_bucket == "anchor":
+            return self._rollout_bot_action(state, self.self_play_league.anchor_policy)
         net = self._league_advantage_net(player)
         _, legal, policy = self._policy_from_net(net, state, player)
         legal_actions = np.flatnonzero(legal)

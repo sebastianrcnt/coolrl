@@ -51,6 +51,8 @@ class SelfPlayLeagueConfig:
     current_weight: float = 0.5
     recent_weight: float = 0.3
     older_weight: float = 0.2
+    anchor_weight: float = 0.0
+    anchor_policy: str = "safe_heuristic"
     recent_window: int = 5
     max_snapshots: int = 20
     snapshot_every: int = 1
@@ -59,11 +61,15 @@ class SelfPlayLeagueConfig:
         self.current_weight = float(self.current_weight)
         self.recent_weight = float(self.recent_weight)
         self.older_weight = float(self.older_weight)
-        weights = (self.current_weight, self.recent_weight, self.older_weight)
+        self.anchor_weight = float(self.anchor_weight)
+        weights = (self.current_weight, self.recent_weight, self.older_weight, self.anchor_weight)
         if any(weight < 0.0 for weight in weights):
             raise ValueError("traversal.self_play_league weights must be nonnegative")
         if sum(weights) <= 0.0:
             raise ValueError("traversal.self_play_league weights must sum to a positive value")
+        self.anchor_policy = str(self.anchor_policy).strip().lower()
+        if self.anchor_policy not in {"safe_heuristic"}:
+            raise ValueError("traversal.self_play_league.anchor_policy must be 'safe_heuristic'")
         self.recent_window = int(self.recent_window)
         if self.recent_window < 0:
             raise ValueError("traversal.self_play_league.recent_window must be nonnegative")

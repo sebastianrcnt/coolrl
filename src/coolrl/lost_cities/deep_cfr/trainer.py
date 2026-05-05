@@ -191,7 +191,27 @@ class DeepCFRTrainer:
                 eval_metrics[f"eval_{opponent_name}_avg_final_score"] = result["avg_final_score"]
                 eval_metrics[f"eval_{opponent_name}_avg_opponent_score"] = result["avg_opponent_score"]
                 eval_metrics[f"eval_{opponent_name}_avg_opened_colors"] = result["avg_opened_colors"]
+                eval_metrics[f"eval_{opponent_name}_opened_colors_std"] = result["opened_colors_std"]
+                eval_metrics[f"eval_{opponent_name}_opened_colors_min"] = result["opened_colors_min"]
+                eval_metrics[f"eval_{opponent_name}_opened_colors_max"] = result["opened_colors_max"]
+                for count in range(self.lc_config.n_colors + 1):
+                    eval_metrics[f"eval_{opponent_name}_opened_colors_count_{count}"] = result[
+                        f"opened_colors_count_{count}"
+                    ]
                 eval_metrics[f"eval_{opponent_name}_avg_opponent_opened_colors"] = result["avg_opponent_opened_colors"]
+                eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_std"] = result[
+                    "opponent_opened_colors_std"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_min"] = result[
+                    "opponent_opened_colors_min"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_max"] = result[
+                    "opponent_opened_colors_max"
+                ]
+                for count in range(self.lc_config.n_colors + 1):
+                    eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_count_{count}"] = result[
+                        f"opponent_opened_colors_count_{count}"
+                    ]
                 eval_metrics[f"eval_{opponent_name}_avg_expedition_cards"] = result["avg_expedition_cards"]
                 eval_metrics[f"eval_{opponent_name}_avg_play_actions"] = result["avg_play_actions"]
                 eval_metrics[f"eval_{opponent_name}_avg_discard_actions"] = result["avg_discard_actions"]
@@ -248,6 +268,14 @@ class DeepCFRTrainer:
             "avg_depth_cutoff_depth": avg_depth_cutoff_depth,
             "avg_node_limit_cutoff_depth": avg_node_limit_cutoff_depth,
             **endpoint_depth_bucket_metrics,
+            "league_current_traversals": total_stats.league_current_traversals,
+            "league_recent_traversals": total_stats.league_recent_traversals,
+            "league_older_traversals": total_stats.league_older_traversals,
+            "league_anchor_traversals": total_stats.league_anchor_traversals,
+            "league_current_traversal_rate": total_stats.league_current_traversals / max(1, traversals),
+            "league_recent_traversal_rate": total_stats.league_recent_traversals / max(1, traversals),
+            "league_older_traversal_rate": total_stats.league_older_traversals / max(1, traversals),
+            "league_anchor_traversal_rate": total_stats.league_anchor_traversals / max(1, traversals),
             "cutoff_rollouts": total_stats.cutoff_rollouts,
             "cutoff_rollout_steps": total_stats.cutoff_rollout_steps,
             "cutoff_rollout_max_step_timeouts": total_stats.cutoff_rollout_max_step_timeouts,
