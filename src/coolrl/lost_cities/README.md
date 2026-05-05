@@ -59,17 +59,16 @@ CLI 진입점은 `python -m coolrl.lost_cities.deep_cfr.cli` 다.
 | --- | --- |
 | `lost_cities_deep_cfr_probe.yaml` | 1 iteration짜리 스모크 — 파이프라인 점검용 |
 | `lost_cities_deep_cfr_tier3.yaml` | 기존 score-diff cutoff 기반 tier3 baseline / CLI 기본 config |
-| `lost_cities_deep_cfr_cutoff_random_rollout.yaml` | 현재 active diagnostic config — `random_rollout` cutoff, CPU, auto workers |
 
-과거 실험용 `overnight`, `small_run`, `diagnostic_depth16_nodes20k` config는 결과가 문서화된 뒤 제거했다. 관련 기록은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)와 [`docs/lost-cities-deep-cfr-worker-benchmark-notes.md`](../../../docs/lost-cities-deep-cfr-worker-benchmark-notes.md)를 참고한다.
+과거 실험용 `overnight`, `small_run`, `diagnostic_depth16_nodes20k`, `cutoff_random_rollout` config는 결과가 문서화된 뒤 제거했다. 관련 기록은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)와 [`docs/lost-cities-deep-cfr-worker-benchmark-notes.md`](../../../docs/lost-cities-deep-cfr-worker-benchmark-notes.md)를 참고한다.
 
 ### 학습 시작
 
-현재 passive-collapse intervention 실험은 `random_rollout` cutoff config를 사용한다:
+기본 tier3 baseline config로 학습을 시작한다:
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml
+  --config configs/lost_cities_deep_cfr_tier3.yaml
 ```
 
 체크포인트는 config의 `checkpoint.directory`에 저장된다. 디렉터리에 이미 `metrics.jsonl`이 있는데 `--resume` 없이 train을 다시 돌리면 트레이너가 기존 metrics를 timestamp suffix로 archive한다.
@@ -78,8 +77,8 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml \
-  --resume checkpoints/lost_cities_deep_cfr_cutoff_random_rollout/latest.pt
+  --config configs/lost_cities_deep_cfr_tier3.yaml \
+  --resume checkpoints/lost_cities_deep_cfr_tier3/latest.pt
 ```
 
 - `--config`는 처음 돌릴 때와 같은 YAML을 그대로 지정한다.
@@ -89,18 +88,42 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 
 ### 진행 상태 / 시각화 / 평가
 
+긴 학습은 로그를 파일로 남겨두면 진행 상황과 실패 원인을 나중에 확인하기 쉽다:
+
+```bash
+mkdir -p logs
+uv run python -m coolrl.lost_cities.deep_cfr.cli train \
+  --config configs/lost_cities_deep_cfr_tier3.yaml \
+  2>&1 | tee logs/lost-cities-tier3.log
+```
+
+실행 중에는 다음 명령으로 모니터링한다:
+
+```bash
+# 실시간 로그
+tail -f logs/lost-cities-tier3.log
+
+# 최근 완료 iteration 요약
+watch -n 10 'uv run python -m coolrl.lost_cities.deep_cfr.cli status --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3'
+
+# iteration별 raw metrics
+tail -f checkpoints/lost_cities_deep_cfr_tier3/metrics.jsonl
+```
+
+`runtime_progress.json`과 `metrics.jsonl`은 iteration이 끝날 때 갱신된다. `status`는 이 파일들을 읽어 최신 iteration, loss, traversal 속도, eval 결과를 요약한다.
+
 ```bash
 # 메트릭 요약
 uv run python -m coolrl.lost_cities.deep_cfr.cli status \
-  --checkpoint-dir checkpoints/lost_cities_deep_cfr_cutoff_random_rollout
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3
 
 # 학습 곡선 플롯
 uv run python -m coolrl.lost_cities.deep_cfr.cli plot \
-  --checkpoint-dir checkpoints/lost_cities_deep_cfr_cutoff_random_rollout
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3
 
 # 봇과 N판 평가
 uv run python -m coolrl.lost_cities.deep_cfr.cli eval \
-  --checkpoint checkpoints/lost_cities_deep_cfr_cutoff_random_rollout/latest.pt \
+  --checkpoint checkpoints/lost_cities_deep_cfr_tier3/latest.pt \
   --games 500 --opponent safe_heuristic
 ```
 

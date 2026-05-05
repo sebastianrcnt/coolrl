@@ -16,7 +16,7 @@ A separate depth and node-budget diagnostic run did not fix this behavior, so th
 
 ## Experiment setup
 
-Active config:
+Historical config, removed after the experiment was documented:
 
 ```text
 configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml

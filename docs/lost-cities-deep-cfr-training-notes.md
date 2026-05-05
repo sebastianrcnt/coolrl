@@ -206,12 +206,12 @@ traversal:
 Benchmark 관련:
 
 - `origin/main`에는 `benchmark-traversal --mode {compare,single,mp}`가 추가되었습니다.
-- rollout config에서는 `--mode compare`가 single-process benchmark까지 먼저 실행하므로 매우 느립니다.
-- 빠른 multiprocessing benchmark만 보려면 다음 형태를 사용합니다.
+- 삭제된 rollout config에서는 `--mode compare`가 single-process benchmark까지 먼저 실행하므로 매우 느렸습니다.
+- 현재 남아 있는 tier3 config로 빠른 multiprocessing benchmark만 보려면 다음 형태를 사용합니다.
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli benchmark-traversal \
-  --config configs/lost_cities_deep_cfr_cutoff_random_rollout.yaml \
+  --config configs/lost_cities_deep_cfr_tier3.yaml \
   --mp-workers 4 \
   --iteration 1 \
   --mode mp
