@@ -263,3 +263,16 @@ Iteration 95 eval:
 | `noisy_safe` | 0.10 | -62.43 | 20 |
 
 Iteration 99 기준 elapsed는 34분이다. `random`은 iteration 50보다 조금 회복했지만, `passive_discard`는 여전히 0%이고 safe family 승률은 더 낮아졌다. Timeout 수는 줄었지만 score diff가 악화되어, 단순히 게임을 끝내는 방향이 강해진 것이 성능 개선으로 이어지지는 않았다.
+
+Iteration 230 eval:
+
+| Opponent | win_rate | avg_diff | timeouts |
+| --- | ---: | ---: | ---: |
+| `random` | 0.88 | 35.00 | 0 |
+| `passive_discard` | 0.00 | -0.81 | 0 |
+| `safe_heuristic` | 0.03 | -72.48 | 10 |
+| `safe_heuristic_loose` | 0.03 | -81.74 | 8 |
+| `safe_heuristic_strict` | 0.05 | -64.69 | 12 |
+| `noisy_safe` | 0.11 | -47.91 | 0 |
+
+Iteration 234 기준 elapsed는 65분이다. `random`과 `passive_discard` avg_diff는 개선됐지만, safe family 승률과 score diff는 여전히 크게 실패하고 있다. Timeout은 줄었으므로 루프는 줄었지만, safe 상대 전략 품질은 개선되지 않았다.
