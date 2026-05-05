@@ -1,5 +1,7 @@
 # Lost Cities Deep CFR Worker Benchmark Notes
 
+> 역사적 참고: 이 문서는 삭제된 `random_rollout` cutoff 실험 config를 기준으로 한 CPU traversal multiprocessing benchmark 기록입니다. 현재 실행 가능한 기본 학습 config와 명령은 [`src/coolrl/lost_cities/README.md`](../src/coolrl/lost_cities/README.md)를 먼저 보세요.
+
 ## Purpose
 
 This note records short CPU-only traversal benchmarks for the Lost Cities Deep CFR `random_rollout` cutoff experiment. The goal was to choose a practical multiprocessing worker count before running longer training.
@@ -118,9 +120,9 @@ For maximum throughput on a known machine, explicit values are still useful:
 - 5600X: `num_workers: 8`
 - 7950X: `num_workers: 16`
 
-## Conclusion
+## Historical conclusion
 
-For the current `random_rollout` cutoff experiment:
+For the historical `random_rollout` cutoff experiment:
 
 - Use `num_workers: 8`, `traversal_worker_chunk_size: 1` on 5600X.
 - Use `num_workers: 16`, `traversal_worker_chunk_size: 1` on 7950X.

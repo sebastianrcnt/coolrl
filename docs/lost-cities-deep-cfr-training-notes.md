@@ -1,12 +1,14 @@
 # Lost Cities Deep CFR 학습 노트
 
+> 역사적 참고: 이 문서는 이전 Lost Cities Deep CFR 실험 기록입니다. 여기서 언급하는 `overnight`, `diagnostic_depth16_nodes20k`, `cutoff_random_rollout` config 파일은 결과가 문서화된 뒤 제거됐습니다. 현재 실행 가능한 기본 학습/모니터링 명령은 [`src/coolrl/lost_cities/README.md`](../src/coolrl/lost_cities/README.md)를 먼저 보세요.
+
 ## Overnight Run 요약
 
 첫 번째 overnight Deep CFR run은 플레이 가능한 checkpoint를 만들었지만, 학습된 행동은 수동적인 discard-only policy로 붕괴한 것으로 보입니다.
 
 Run 설정과 규모:
 
-- Config: `configs/lost_cities_deep_cfr_overnight.yaml`
+- 문서화 후 제거된 historical config: `configs/lost_cities_deep_cfr_overnight.yaml`
 - Checkpoint directory: `checkpoints/lost_cities_deep_cfr_overnight`
 - Runtime target: CPU 기준 약 8 wall-clock hours
 - Completed iterations: `746`
@@ -269,7 +271,9 @@ worker를 더 사용하고 싶다면:
 - `traversal_worker_chunk_size`를 줄여 배치 수를 늘리거나
 - `traversals_per_player`를 늘려 배치 수를 늘립니다.
 
-## Commands
+## Historical checkpoint 명령
+
+아래 명령은 첫 overnight run 기록을 재현하거나 기존 historical checkpoint를 조사할 때만 사용합니다. 현재 실행 가능한 기본 학습/모니터링 명령은 [`src/coolrl/lost_cities/README.md`](../src/coolrl/lost_cities/README.md)를 참고하세요.
 
 Status:
 

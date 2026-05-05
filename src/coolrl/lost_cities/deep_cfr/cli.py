@@ -1,9 +1,9 @@
 """Lost Cities Deep CFR command-line tools.
 
 Examples:
-  uv run python -m coolrl.lost_cities.deep_cfr.cli status --checkpoint-dir checkpoints/lost_cities_deep_cfr_overnight
-  uv run python -m coolrl.lost_cities.deep_cfr.cli plot --checkpoint-dir checkpoints/lost_cities_deep_cfr_overnight
-  uv run python -m coolrl.lost_cities.deep_cfr.cli eval --checkpoint checkpoints/lost_cities_deep_cfr_overnight/latest.pt --games 500 --opponent safe_heuristic
+  uv run python -m coolrl.lost_cities.deep_cfr.cli train --config configs/lost_cities_deep_cfr_tier3.yaml
+  uv run python -m coolrl.lost_cities.deep_cfr.cli status --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3
+  uv run python -m coolrl.lost_cities.deep_cfr.cli eval --checkpoint checkpoints/lost_cities_deep_cfr_tier3/latest.pt --games 500 --opponent safe_heuristic
 """
 
 from __future__ import annotations

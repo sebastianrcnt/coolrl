@@ -1,7 +1,7 @@
 """Lost Cities pygame GUI.
 
 Example:
-  uv run python -m coolrl.lost_cities.pygame_pvp --mode pvc --tier tier3 --backend python --deep-cfr-checkpoint checkpoints/lost_cities_deep_cfr_overnight/latest.pt
+  uv run python -m coolrl.lost_cities.pygame_pvp --mode pvc --tier tier3 --backend python --deep-cfr-checkpoint checkpoints/lost_cities_deep_cfr_tier3/latest.pt
 """
 
 from __future__ import annotations

@@ -1,5 +1,7 @@
 # Lost Cities Deep CFR Rollout Cutoff Experiment
 
+> Historical note: this experiment config was removed after the result was documented. Use [`src/coolrl/lost_cities/README.md`](../src/coolrl/lost_cities/README.md) for current runnable training commands.
+
 ## Goal
 
 This experiment checks whether rollout-based cutoff values can move Lost Cities Deep CFR away from the previous no-expedition behavior.
@@ -177,7 +179,7 @@ Concern: more implementation complexity and another model to validate.
 
 ### Candidate D: Better rollout policy without hand-coded Lost Cities heuristics
 
-The current terminal rollout uses uniformly random legal actions. That may produce extremely poor terminal estimates.
+The historical terminal rollout used uniformly random legal actions. That may produce extremely poor terminal estimates.
 
 Possible directions:
 
@@ -187,9 +189,9 @@ Possible directions:
 
 Concern: rollout policy coupling can introduce feedback loops and must be tested carefully.
 
-## Recommended next step
+## Historical recommended next step
 
-Start with the smallest new experiment that changes one thing:
+This was the recommended next step when the rollout cutoff experiment was active. The config is not part of the current runnable presets:
 
 ```text
 capped random rollout cutoff
