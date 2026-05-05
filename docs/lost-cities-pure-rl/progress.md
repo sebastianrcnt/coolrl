@@ -80,3 +80,16 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 - Iteration 1 완료.
 - `self_play_league_snapshots=1`로 snapshot 기록이 시작됐다.
 - `cutoff_rollouts=0`, `cutoff_rollout_max_step_timeouts=0`라서 rollout label은 쓰지 않았다.
+
+Iteration 5의 첫 eval 결과:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.74 | 17.26 | 0 | 450.9 | 1.329 |
+| `passive_discard` | 0.00 | 0.00 | 0 | 134.1 | 1.037 |
+| `safe_heuristic` | 0.15 | -58.02 | 65 | 790.4 | 1.489 |
+| `safe_heuristic_loose` | 0.16 | -60.31 | 69 | 796.9 | 1.475 |
+| `safe_heuristic_strict` | 0.17 | -50.81 | 62 | 762.8 | 1.514 |
+| `noisy_safe` | 0.16 | -49.04 | 36 | 587.2 | 1.381 |
+
+초기 상태는 아직 `safe_heuristic` 계열에 크게 밀리고, `random` 기준도 미달이다. 이는 Run A 초반 random-init baseline의 예상 범위로 보고 계속 진행한다.
