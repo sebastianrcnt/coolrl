@@ -38,6 +38,12 @@
 - `traversal.self_play_league.snapshot_every: 1`
 
 이 mode는 opponent node에서 외부 bot을 쓰지 않고, current advantage policy와 이전 iteration의 advantage snapshot을 비율대로 섞어 action을 샘플한다. `max_snapshots`를 넘으면 가장 오래된 snapshot부터 버린다.
+상대 snapshot은 traversal 시작 시 한 번 고정한다. 한 traversal 안에서 opponent identity가 node마다 바뀌지 않게 하기 위해서다.
+
+주의할 점:
+
+- League는 Deep CFR traversal의 `advantage_nets` snapshot을 상대 정책으로 쓴다. 평가/플레이에 쓰는 `strategy_net`과는 다르다.
+- 현재 `older_weight` bucket은 시간순 older snapshot만 균등 샘플한다. 별도의 best-history 슬롯은 아직 없다.
 
 평가 지표에는 기존 `win_rate`, `avg_diff`, timeout 관련 지표에 더해 다음을 추가했다.
 

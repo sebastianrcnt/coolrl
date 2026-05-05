@@ -235,6 +235,7 @@ def test_load_pure_self_play_a_yaml_profile() -> None:
     cfg = load_config(Path("configs/lost_cities_deep_cfr_pure_self_play_a.yaml"))
 
     assert cfg.experiment_name == "lost_cities_deep_cfr_pure_self_play_a"
+    assert cfg.max_hours == 2.0
     assert cfg.traversal.opponent_policy == "self_play_league"
     assert cfg.traversal.cutoff_value_mode == "score_diff"
     assert cfg.traversal.cutoff_rollouts == 0
@@ -243,6 +244,7 @@ def test_load_pure_self_play_a_yaml_profile() -> None:
     assert cfg.traversal.self_play_league.older_weight == 0.2
     assert cfg.traversal.self_play_league.recent_window == 5
     assert cfg.traversal.self_play_league.max_snapshots == 20
+    assert cfg.traversal.traversal_worker_chunk_size == 32
     assert cfg.traversal.store_strategy_on_opponent_nodes is False
     assert cfg.evaluation.opponents == [
         "random",

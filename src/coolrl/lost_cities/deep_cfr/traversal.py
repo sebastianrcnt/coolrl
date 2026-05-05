@@ -118,6 +118,7 @@ class DeepCFRTraverser:
         self.sampling_probability_floor = 1.0e-12
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
+        self._active_league_snapshot: list[AdvantageNet] | None = None
         self._safe_heuristic_rollout_bot = (
             SafeHeuristicBot() if self.cutoff_rollout_policy == "safe_heuristic" else None
         )
@@ -127,13 +128,18 @@ class DeepCFRTraverser:
 
     def traverse(self, state: GameState, traverser: int, iteration: int) -> tuple[float, TraversalStats]:
         stats = TraversalStats()
-        if self.timing_stats is None:
+        if self.opponent_policy == "self_play_league":
+            self._active_league_snapshot = self._select_league_snapshot()
+        try:
+            if self.timing_stats is None:
+                value = self._traverse(state, traverser, iteration, 0, stats)
+                return value, stats
+            started = time.perf_counter()
             value = self._traverse(state, traverser, iteration, 0, stats)
+            self.timing_stats.traversal_wall_seconds += time.perf_counter() - started
             return value, stats
-        started = time.perf_counter()
-        value = self._traverse(state, traverser, iteration, 0, stats)
-        self.timing_stats.traversal_wall_seconds += time.perf_counter() - started
-        return value, stats
+        finally:
+            self._active_league_snapshot = None
 
     def _policy_from_net(
         self,
@@ -186,18 +192,23 @@ class DeepCFRTraverser:
         weights /= total
         return str(self.rng.choice(["current", "recent", "older"], p=weights))
 
-    def _league_advantage_net(self, player: int) -> AdvantageNet:
+    def _select_league_snapshot(self) -> list[AdvantageNet] | None:
         bucket = self._league_bucket()
         if bucket == "current" or not self.league_advantage_nets:
-            return self.advantage_nets[player]
+            return None
         recent_count = min(len(self.league_advantage_nets), self.self_play_league.recent_window)
         if bucket == "recent" and recent_count > 0:
             candidates = self.league_advantage_nets[-recent_count:]
         else:
             candidates = self.league_advantage_nets[: max(0, len(self.league_advantage_nets) - recent_count)]
         if not candidates:
+            return None
+        return candidates[int(self.rng.integers(0, len(candidates)))]
+
+    def _league_advantage_net(self, player: int) -> AdvantageNet:
+        snapshot = self._active_league_snapshot
+        if snapshot is None:
             return self.advantage_nets[player]
-        snapshot = candidates[int(self.rng.integers(0, len(candidates)))]
         return snapshot[player]
 
     def _self_play_league_action(self, state: GameState, player: int) -> int | None:

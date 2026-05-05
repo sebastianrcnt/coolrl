@@ -1,7 +1,7 @@
 experiment_name: lost_cities_deep_cfr_pure_self_play_b
 seed: 62
 max_iterations: null
-max_hours: null
+max_hours: 2
 device: CUDA
 use_amp: false
 
@@ -28,7 +28,7 @@ traversal:
   cutoff_rollout_max_steps: 300
   progress_every_traversals: 50
   num_workers: 8
-  traversal_worker_chunk_size: 8
+  traversal_worker_chunk_size: 32
   profile_hotspots: false
   regret_matching_epsilon: 1.0e-8
   outcome_sampling_epsilon: 0.2

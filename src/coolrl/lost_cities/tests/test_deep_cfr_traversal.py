@@ -360,6 +360,44 @@ def test_cfr_traversal_can_use_safe_heuristic_fixed_opponent() -> None:
     assert len(strategy_memory) > 0
 
 
+def test_cfr_traversal_fixes_self_play_league_opponent_for_traversal() -> None:
+    config = tier_config("tier1", seed=20)
+    input_dim = infer_input_dim(config)
+    nets = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    snapshot = [
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+        AdvantageNet(input_dim, config.action_size, NetworkConfig(hidden_size=16, num_layers=1)),
+    ]
+    traverser = DeepCFRTraverser(
+        nets,
+        [AdvantageMemory(100), AdvantageMemory(100)],
+        StrategyMemory(100),
+        device=torch.device("cpu"),
+        max_depth=4,
+        opponent_policy="self_play_league",
+        league_advantage_nets=[snapshot],
+        rng=np.random.default_rng(24),
+    )
+    calls = 0
+
+    def _select_once():
+        nonlocal calls
+        calls += 1
+        return snapshot
+
+    traverser._select_league_snapshot = _select_once  # type: ignore[method-assign]
+
+    value, stats = traverser.traverse(GameState.new_game(config, seed=20), 0, 1)
+
+    assert math.isfinite(value)
+    assert stats.nodes > 0
+    assert calls == 1
+    assert traverser._active_league_snapshot is None
+
+
 def test_cfr_traversal_node_limit_cutoff_returns_current_score_diff() -> None:
     config = tier_config("tier1", seed=21)
     input_dim = infer_input_dim(config)

@@ -391,6 +391,7 @@ class DeepCFRTrainer:
     ) -> list[TraversalWorkerBatch]:
         batches: list[TraversalWorkerBatch] = []
         batch_index = 0
+        league_advantage_net_state_dicts = self._frozen_self_play_league_state_dicts()
         for player in (0, 1):
             seeds = [
                 self._traversal_seed(iteration, player, index)
@@ -416,7 +417,7 @@ class DeepCFRTrainer:
                         cutoff_rollout_policy=self.config.traversal.cutoff_rollout_policy,
                         cutoff_rollout_max_steps=self.config.traversal.cutoff_rollout_max_steps,
                         opponent_policy=self.config.traversal.opponent_policy,
-                        league_advantage_net_state_dicts=self._frozen_self_play_league_state_dicts(),
+                        league_advantage_net_state_dicts=league_advantage_net_state_dicts,
                         self_play_league=self.config.traversal.self_play_league,
                         strategy_sample_interval=self.config.traversal.strategy_sample_interval,
                         store_strategy_on_opponent_nodes=self.config.traversal.store_strategy_on_opponent_nodes,
