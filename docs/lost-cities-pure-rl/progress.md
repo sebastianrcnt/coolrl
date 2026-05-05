@@ -72,6 +72,13 @@ uv run pytest \
 - best-history training slot은 아직 추가하지 않는다. 요청의 `older or best` 중 chronological older path로 먼저 pure self-play를 검증한다.
 - checkpoint-vs-checkpoint 평가는 학습 루프 자동 통합 대신, 우선 `eval --opponent-checkpoint`를 고정 평가 절차에 둔다.
 
+Claude 2차 자문에서 post-run checkpoint opponent 선정 기준을 추가로 받았다.
+
+- old checkpoint는 각 run의 총 iteration `N` 기준 `N/4`, `N/2`, `3N/4`, `N`에 가장 가까운 checkpoint로 고른다.
+- best checkpoint는 6개 bot opponent의 training eval 평균 win rate가 가장 높은 eval iteration으로 고른다.
+- best 선정 eval과 최종 500-game eval은 분리한다.
+- Run B는 원래 실험 목적상 같은 pure self-play 조건으로 실행하되, Run A의 passive/safe timeout 실패 모드를 반드시 별도 trace한다.
+
 ### 아직 실행 전
 
 장시간 학습 run은 아직 시작하지 않았다. 먼저 config/test 검증 후 2h Run A/B부터 실행한다.

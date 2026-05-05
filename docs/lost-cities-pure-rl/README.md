@@ -141,6 +141,14 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli eval-suite \
   --output docs/lost-cities-pure-rl/eval-a-2h-with-checkpoints.json
 ```
 
+Old/best checkpoint 선정 규칙:
+
+- old checkpoint는 각 run의 총 iteration `N` 기준 `N/4`, `N/2`, `3N/4`, `N`에 가장 가까운 checkpoint로 고른다.
+- A/B throughput이 다를 수 있으므로 absolute iteration number가 아니라 각 run 내부의 상대 위치를 쓴다.
+- best checkpoint는 training 중 6개 bot opponent 평균 win rate가 가장 높은 eval iteration으로 고른다.
+- best 선정에 쓴 100-game training eval과 최종 500-game eval은 분리한다. 최종 판단은 `eval-suite --games 500` 결과만 사용한다.
+- A/B head-to-head는 가능하면 `A_final vs B_final`, `A_best vs B_best`, `A_final vs A_best`를 모두 본다.
+
 ## 성공 기준
 
 최소 기준:
