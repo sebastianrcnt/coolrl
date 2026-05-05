@@ -14,6 +14,8 @@ EXPERIMENT_DIR = Path(__file__).resolve().parent
 DEFAULT_JSON_OUTPUT = EXPERIMENT_DIR / "report.json"
 DEFAULT_MARKDOWN_OUTPUT = EXPERIMENT_DIR / "report.md"
 DEFAULT_PLOT_OUTPUT = EXPERIMENT_DIR / "analysis_metrics.png"
+DEFAULT_HEATMAP_OUTPUT = EXPERIMENT_DIR / "analysis_latest_heatmap.png"
+DEFAULT_DELTA_HEATMAP_OUTPUT = EXPERIMENT_DIR / "analysis_delta_heatmap.png"
 
 TARGET_METRICS = (
     "win_rate",
@@ -40,6 +42,17 @@ METRIC_LABELS = {
     "max_step_timeouts": "max step timeout",
     "policy_entropy": "policy entropy",
 }
+
+HEATMAP_METRICS = (
+    "win_rate",
+    "avg_diff",
+    "play_action_rate",
+    "discard_action_rate",
+    "draw_deck_rate",
+    "draw_pile_rate",
+    "avg_opened_colors",
+    "max_step_timeouts",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +83,23 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_PLOT_OUTPUT,
         help=f"PNG plot 저장 경로. 기본값은 {DEFAULT_PLOT_OUTPUT}",
+    )
+    parser.add_argument(
+        "--heatmap-output",
+        type=Path,
+        default=DEFAULT_HEATMAP_OUTPUT,
+        help=f"최신 eval heatmap PNG 저장 경로. 기본값은 {DEFAULT_HEATMAP_OUTPUT}",
+    )
+    parser.add_argument(
+        "--delta-heatmap-output",
+        type=Path,
+        default=DEFAULT_DELTA_HEATMAP_OUTPUT,
+        help=f"baseline delta heatmap PNG 저장 경로. 기본값은 {DEFAULT_DELTA_HEATMAP_OUTPUT}",
+    )
+    parser.add_argument(
+        "--write-report",
+        action="store_true",
+        help="report.md와 report.json을 갱신함. 기본 실행은 기록 파일을 덮어쓰지 않음",
     )
     parser.add_argument(
         "--smooth-window",
@@ -512,6 +542,187 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
     return output_path
 
 
+def heatmap_matrix(
+    opponents: dict[str, dict[str, Any]],
+    metrics: tuple[str, ...] = HEATMAP_METRICS,
+) -> tuple[list[str], list[str], list[list[float]], list[list[str]]]:
+    names = sorted(opponents)
+    labels = list(metrics)
+    values: list[list[float]] = []
+    annotations: list[list[str]] = []
+    for opponent in names:
+        value_row: list[float] = []
+        annotation_row: list[str] = []
+        for metric in metrics:
+            value = numeric(opponents[opponent].get(metric))
+            value_row.append(float("nan") if value is None else value)
+            annotation_row.append(format_value(value))
+        values.append(value_row)
+        annotations.append(annotation_row)
+    return names, labels, values, annotations
+
+
+def delta_heatmap_matrix(
+    deltas: dict[str, dict[str, float]],
+    metrics: tuple[str, ...] = HEATMAP_METRICS,
+) -> tuple[list[str], list[str], list[list[float]], list[list[str]]]:
+    names = sorted(deltas)
+    labels = [f"{metric} delta" for metric in metrics]
+    values: list[list[float]] = []
+    annotations: list[list[str]] = []
+    for opponent in names:
+        value_row: list[float] = []
+        annotation_row: list[str] = []
+        for metric in metrics:
+            value = numeric(deltas[opponent].get(metric))
+            value_row.append(float("nan") if value is None else value)
+            annotation_row.append(format_delta(value))
+        values.append(value_row)
+        annotations.append(annotation_row)
+    return names, labels, values, annotations
+
+
+def column_normalized_values(values: list[list[float]]) -> list[list[float]]:
+    if not values:
+        return values
+
+    column_count = len(values[0])
+    normalized = [[float("nan") for _ in range(column_count)] for _ in values]
+    for column in range(column_count):
+        column_values = [
+            row[column]
+            for row in values
+            if isinstance(row[column], float) and math.isfinite(row[column])
+        ]
+        if not column_values:
+            continue
+        minimum = min(column_values)
+        maximum = max(column_values)
+        span = maximum - minimum
+        for row_index, row in enumerate(values):
+            value = row[column]
+            if not math.isfinite(value):
+                continue
+            normalized[row_index][column] = 0.5 if span == 0 else (value - minimum) / span
+    return normalized
+
+
+def column_scaled_delta_values(values: list[list[float]]) -> list[list[float]]:
+    if not values:
+        return values
+
+    column_count = len(values[0])
+    scaled = [[float("nan") for _ in range(column_count)] for _ in values]
+    for column in range(column_count):
+        column_values = [
+            abs(row[column])
+            for row in values
+            if isinstance(row[column], float) and math.isfinite(row[column])
+        ]
+        maximum = max(column_values) if column_values else 0.0
+        if maximum == 0:
+            maximum = 1.0
+        for row_index, row in enumerate(values):
+            value = row[column]
+            if math.isfinite(value):
+                scaled[row_index][column] = value / maximum
+    return scaled
+
+
+def plot_latest_heatmap(summary: dict[str, Any], output: Path) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    names, labels, values, annotations = heatmap_matrix(summary["opponents"])
+    colors = column_normalized_values(values)
+
+    height = max(4.0, 0.5 * max(1, len(names)) + 1.8)
+    fig, axis = plt.subplots(figsize=(13, height))
+    axis.set_title(
+        f"Latest eval metrics: {Path(summary['run']['path']).name}",
+        fontsize=14,
+        fontweight="bold",
+    )
+    if names:
+        sns.heatmap(
+            colors,
+            annot=annotations,
+            fmt="",
+            cmap="viridis",
+            xticklabels=labels,
+            yticklabels=names,
+            linewidths=0.5,
+            linecolor="white",
+            vmin=0.0,
+            vmax=1.0,
+            cbar_kws={"label": "column-normalized value"},
+            ax=axis,
+        )
+    else:
+        axis.text(0.5, 0.5, "No eval data", ha="center", va="center")
+        axis.set_axis_off()
+    axis.tick_params(axis="x", rotation=35)
+    axis.tick_params(axis="y", rotation=0)
+    fig.tight_layout()
+    fig.savefig(output, dpi=150, bbox_inches="tight", pad_inches=0.2)
+    plt.close(fig)
+    return output
+
+
+def plot_delta_heatmap(
+    deltas: dict[str, dict[str, float]],
+    run_name: str,
+    baseline_name: str,
+    output: Path,
+) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    names, labels, values, annotations = delta_heatmap_matrix(deltas)
+    colors = column_scaled_delta_values(values)
+
+    height = max(4.0, 0.5 * max(1, len(names)) + 1.8)
+    fig, axis = plt.subplots(figsize=(13, height))
+    axis.set_title(
+        f"Eval delta: {run_name} - {baseline_name}",
+        fontsize=14,
+        fontweight="bold",
+    )
+    if names:
+        sns.heatmap(
+            colors,
+            annot=annotations,
+            fmt="",
+            cmap="vlag",
+            center=0.0,
+            vmin=-1.0,
+            vmax=1.0,
+            xticklabels=labels,
+            yticklabels=names,
+            linewidths=0.5,
+            linecolor="white",
+            cbar_kws={"label": "column-normalized delta"},
+            ax=axis,
+        )
+    else:
+        axis.text(0.5, 0.5, "No shared eval metrics", ha="center", va="center")
+        axis.set_axis_off()
+    axis.tick_params(axis="x", rotation=35)
+    axis.tick_params(axis="y", rotation=0)
+    fig.tight_layout()
+    fig.savefig(output, dpi=150, bbox_inches="tight", pad_inches=0.2)
+    plt.close(fig)
+    return output
+
+
 def main() -> int:
     args = parse_args()
     summary, warnings = summarize_run(args.run)
@@ -531,11 +742,24 @@ def main() -> int:
     stdout_summary = render_stdout(summary, deltas)
     print(stdout_summary)
 
-    write_text(args.json_output, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-    write_text(args.markdown_output, render_markdown(summary, payload))
+    if args.write_report:
+        write_text(args.json_output, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        write_text(args.markdown_output, render_markdown(summary, payload))
+        print(f"- json report: {args.json_output}")
+        print(f"- markdown report: {args.markdown_output}")
     if not args.no_plot:
         plot_path = plot_run(args.run, output=args.plot_output, smooth_window=args.smooth_window)
         print(f"- plot: {plot_path}")
+        heatmap_path = plot_latest_heatmap(summary, args.heatmap_output)
+        print(f"- latest heatmap: {heatmap_path}")
+        if deltas:
+            delta_heatmap_path = plot_delta_heatmap(
+                deltas,
+                args.run.name,
+                args.baseline_run.name if args.baseline_run is not None else "baseline",
+                args.delta_heatmap_output,
+            )
+            print(f"- delta heatmap: {delta_heatmap_path}")
 
     return 0
 

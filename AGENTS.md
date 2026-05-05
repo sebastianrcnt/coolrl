@@ -112,10 +112,11 @@ experiments/<domain>/<experiment_slug>/analyze.py
 - `--json-output`
 - `--markdown-output`
 - `--plot-output`
+- `--write-report`
 - `--smooth-window`
 - `--no-plot`
 
-실험별 `analyze.py`는 기본 실행에서 plot을 생성할 수 있다. 빠른 text-only 분석을 위해 `--no-plot`을 제공한다. 기본 plot 파일명은 `analysis_metrics.png`를 사용한다.
+실험별 `analyze.py`는 기본 실행에서 plot을 생성할 수 있다. 빠른 text-only 분석을 위해 `--no-plot`을 제공한다. 기본 plot 파일명은 `analysis_metrics.png`를 사용한다. `report.md`와 `report.json` 같은 기록 파일은 기본 검증 실행에서 덮어쓰지 말고, 명시적인 `--write-report` 옵션으로만 갱신한다.
 
 실험별 monitoring plot은 `seaborn`과 `matplotlib`을 직접 사용해 단순하고 읽기 쉽게 만든다:
 - `sns.set_theme(...)` 또는 local seaborn style/context 설정
