@@ -223,6 +223,29 @@ Decision criteria for the next run:
 - If it keeps `opened≈5` and `avg_final_score<0`, capped rollout did not solve over-opening.
 - If it keeps nonzero opening while improving `avg_final_score` and `passive_discard` avg diff, continue or scale up.
 
+## Follow-up: safe heuristic rollout cutoff
+
+The next runnable intervention replaced uniformly random cutoff rollouts with the existing `safe_heuristic` bot:
+
+```yaml
+experiment_name: lost_cities_deep_cfr_safe_rollout300
+traversal:
+  cutoff_value_mode: random_rollout
+  cutoff_rollouts: 1
+  cutoff_rollout_policy: safe_heuristic
+  cutoff_rollout_max_steps: 300
+```
+
+Iteration 50 completed in about 357 seconds. Compared with capped random rollout, cutoff rollout length fell from about 257 to about 152 average steps. The final 50-game training eval moved `random` to `win_rate=0.54`, `avg_diff=+2.72`, `avg_final_score=-39.06`, `avg_opened_colors=4.16`.
+
+A separate 500-game eval of `checkpoints/lost_cities_deep_cfr_safe_rollout300/latest.pt` confirmed the random-bot improvement:
+
+```text
+Evaluation vs random: games=500 win_rate=0.548 avg_diff=6.41 avg_final_score=-34.22 avg_opponent_score=-40.63 avg_opened_colors=4.22 play_action_rate=0.132 discard_action_rate=0.868 wins=274 losses=220 draws=6 max_step_timeouts=0
+```
+
+This is enough to clear the first practical bar: stable improvement over `random`. It does not solve the stronger bot problem; the same checkpoint remained far behind `safe_heuristic` in the 50-game training eval.
+
 ## Status
 
 This experiment is complete enough to guide the next intervention. Final long-run strength is not established, but the cutoff-value failure mode is now better localized:
@@ -230,4 +253,5 @@ This experiment is complete enough to guide the next intervention. Final long-ru
 ```text
 score_diff cutoff -> passive no-expedition collapse
 terminal random rollout cutoff -> expedition play appears, but over-opening remains
+safe_heuristic rollout cutoff -> clears random bot, still loses badly to safe_heuristic
 ```

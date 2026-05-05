@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from ..game import GameState
+from ..bots.heuristic import SafeHeuristicBot
 from .encoding import encode_information_state, legal_mask_array
 from .memory import AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet, regret_matching
@@ -104,6 +105,9 @@ class DeepCFRTraverser:
         self.sampling_probability_floor = 1.0e-12
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
+        self._safe_heuristic_rollout_bot = (
+            SafeHeuristicBot() if self.cutoff_rollout_policy == "safe_heuristic" else None
+        )
 
     def _node_budget_reached(self, stats: TraversalStats) -> bool:
         return self.max_nodes_per_traversal is not None and stats.nodes >= self.max_nodes_per_traversal
@@ -239,14 +243,26 @@ class DeepCFRTraverser:
         regrets[sampled_action] = np.float32(sampled_action_value - node_value)
         return regrets
 
-    def _random_rollout_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
+    def _cutoff_rollout_action(self, rollout_state: GameState) -> int | None:
+        legal_actions = np.flatnonzero(rollout_state.unified_legal_mask())
+        if len(legal_actions) == 0:
+            return None
+        if self.cutoff_rollout_policy == "random":
+            return int(self.rng.choice(legal_actions))
+        if self.cutoff_rollout_policy == "safe_heuristic":
+            if self._safe_heuristic_rollout_bot is None:
+                self._safe_heuristic_rollout_bot = SafeHeuristicBot()
+            action = self._safe_heuristic_rollout_bot.act(rollout_state)
+            return rollout_state.to_unified_action(action)
+        raise ValueError(f"unsupported cutoff_rollout_policy: {self.cutoff_rollout_policy!r}")
+
+    def _rollout_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
         rollout_state = clone_state(state)
         steps = 0
         while not rollout_state.terminal and steps < self.cutoff_rollout_max_steps:
-            legal_actions = np.flatnonzero(rollout_state.unified_legal_mask())
-            if len(legal_actions) == 0:
+            action = self._cutoff_rollout_action(rollout_state)
+            if action is None:
                 break
-            action = int(self.rng.choice(legal_actions))
             self._sample_deck_draw_chance(rollout_state, action)
             rollout_state.apply_unified_action(action)
             steps += 1
@@ -261,11 +277,9 @@ class DeepCFRTraverser:
             return float(state.score_diff(traverser))
         if self.cutoff_value_mode != "random_rollout":
             raise ValueError(f"unsupported cutoff_value_mode: {self.cutoff_value_mode!r}")
-        if self.cutoff_rollout_policy != "random":
-            raise ValueError(f"unsupported cutoff_rollout_policy: {self.cutoff_rollout_policy!r}")
         total = 0.0
         for _ in range(self.cutoff_rollouts):
-            total += self._random_rollout_value(state, traverser, stats)
+            total += self._rollout_value(state, traverser, stats)
         return total / float(self.cutoff_rollouts)
 
     def _traverse(

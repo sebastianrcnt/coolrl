@@ -72,8 +72,10 @@ class TraversalConfig:
             raise ValueError("traversal.cutoff_value_mode must be one of 'score_diff' or 'random_rollout'")
         self.cutoff_value_mode = mode
         policy = str(self.cutoff_rollout_policy).strip().lower()
-        if policy != "random":
-            raise ValueError("traversal.cutoff_rollout_policy currently only supports 'random'")
+        if policy not in {"random", "safe_heuristic"}:
+            raise ValueError(
+                "traversal.cutoff_rollout_policy must be one of 'random' or 'safe_heuristic'"
+            )
         self.cutoff_rollout_policy = policy
         self.cutoff_rollouts = int(self.cutoff_rollouts)
         if self.cutoff_rollouts < 0:

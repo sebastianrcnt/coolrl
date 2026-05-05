@@ -55,6 +55,7 @@ def test_load_capped_rollout300_yaml_profile() -> None:
     assert cfg.experiment_name == "lost_cities_deep_cfr_capped_rollout300"
     assert cfg.traversal.cutoff_value_mode == "random_rollout"
     assert cfg.traversal.cutoff_rollouts == 1
+    assert cfg.traversal.cutoff_rollout_policy == "random"
     assert cfg.traversal.cutoff_rollout_max_steps == 300
     assert cfg.traversal.max_depth == 16
     assert cfg.traversal.num_workers == 8
@@ -64,6 +65,22 @@ def test_load_capped_rollout300_yaml_profile() -> None:
     assert cfg.evaluation.games == 50
     assert cfg.evaluation.max_steps == 1000
     assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_capped_rollout300"
+
+
+def test_load_safe_rollout300_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_safe_rollout300.yaml"))
+    assert cfg.experiment_name == "lost_cities_deep_cfr_safe_rollout300"
+    assert cfg.traversal.cutoff_value_mode == "random_rollout"
+    assert cfg.traversal.cutoff_rollouts == 1
+    assert cfg.traversal.cutoff_rollout_policy == "safe_heuristic"
+    assert cfg.traversal.cutoff_rollout_max_steps == 300
+    assert cfg.traversal.max_depth == 16
+    assert cfg.traversal.num_workers == 8
+    assert cfg.traversal.traversal_worker_chunk_size == 4
+    assert cfg.evaluation.eval_every == 10
+    assert cfg.evaluation.games == 50
+    assert cfg.evaluation.max_steps == 1000
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_rollout300"
 
 
 def test_default_cutoff_config_preserves_score_diff_behavior() -> None:
