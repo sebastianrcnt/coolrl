@@ -250,3 +250,16 @@ Iteration 50 eval:
 | `noisy_safe` | 0.15 | -52.56 | 49 |
 
 Iteration 54 기준 elapsed는 18분이다. safe family timeout이 iteration 20보다 악화했으므로, Run A는 현재까지 game-ending pressure를 학습하지 못하고 있다.
+
+Iteration 95 eval:
+
+| Opponent | win_rate | avg_diff | timeouts |
+| --- | ---: | ---: | ---: |
+| `random` | 0.63 | 4.84 | 0 |
+| `passive_discard` | 0.00 | -12.26 | 0 |
+| `safe_heuristic` | 0.03 | -69.13 | 43 |
+| `safe_heuristic_loose` | 0.07 | -81.77 | 38 |
+| `safe_heuristic_strict` | 0.04 | -55.95 | 26 |
+| `noisy_safe` | 0.10 | -62.43 | 20 |
+
+Iteration 99 기준 elapsed는 34분이다. `random`은 iteration 50보다 조금 회복했지만, `passive_discard`는 여전히 0%이고 safe family 승률은 더 낮아졌다. Timeout 수는 줄었지만 score diff가 악화되어, 단순히 게임을 끝내는 방향이 강해진 것이 성능 개선으로 이어지지는 않았다.
