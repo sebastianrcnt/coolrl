@@ -20,7 +20,7 @@ traversal:
   store_strategy_on_opponent_nodes: false
   store_strategy_on_traverser_nodes: true
   max_depth: null
-  max_nodes_per_traversal: 300
+  max_nodes_per_traversal: 1000
   opponent_policy: self_play_league
   cutoff_value_mode: score_diff
   cutoff_rollouts: 0
@@ -34,6 +34,8 @@ traversal:
   outcome_sampling_epsilon: 0.2
   outcome_sampling_value_clip: 500
   outcome_unsampled_regret: zero
+  endpoint_depth_bucket_width: 100
+  endpoint_depth_bucket_max: 1000
   self_play_league:
     current_weight: 0.5
     recent_weight: 0.3

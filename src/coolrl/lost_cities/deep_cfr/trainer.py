@@ -21,7 +21,7 @@ from .encoding import infer_input_dim
 from .evaluate import evaluate_against_bot, make_opponent
 from .memory import AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet, StrategyNet
-from .traversal import DeepCFRTraverser, TraversalStats, TraversalTimingStats
+from .traversal import DeepCFRTraverser, TraversalStats, TraversalTimingStats, endpoint_depth_bucket_keys
 from .traversal_worker import (
     TraversalWorkerBatch,
     TraversalWorkerBatchResult,
@@ -209,7 +209,23 @@ class DeepCFRTrainer:
         nodes_per_second = total_stats.nodes / max(1.0e-9, traversal_seconds)
         cutoff_rate = total_stats.cutoffs / max(1, total_stats.nodes)
         node_limit_cutoff_rate = total_stats.node_limit_cutoffs / max(1, total_stats.nodes)
+        depth_cutoff_traversal_rate = total_stats.cutoffs / max(1, traversals)
+        node_limit_cutoff_traversal_rate = total_stats.node_limit_cutoffs / max(1, traversals)
+        terminal_traversal_rate = total_stats.terminals / max(1, traversals)
+        avg_endpoint_depth = total_stats.endpoint_depth_sum / max(1, total_stats.endpoint_traversals)
+        avg_terminal_depth = total_stats.terminal_depth_sum / max(1, total_stats.terminals)
+        avg_depth_cutoff_depth = total_stats.cutoff_depth_sum / max(1, total_stats.cutoffs)
+        avg_node_limit_cutoff_depth = (
+            total_stats.node_limit_cutoff_depth_sum / max(1, total_stats.node_limit_cutoffs)
+        )
         avg_cutoff_rollout_steps = total_stats.cutoff_rollout_steps / max(1, total_stats.cutoff_rollouts)
+        endpoint_depth_bucket_metrics = {
+            f"endpoint_depth_bucket_{key}": total_stats.endpoint_depth_buckets.get(key, 0)
+            for key in endpoint_depth_bucket_keys(
+                self.config.traversal.endpoint_depth_bucket_width,
+                self.config.traversal.endpoint_depth_bucket_max,
+            )
+        }
         metrics: dict[str, Any] = {
             "iteration": iteration,
             "elapsed_seconds": self.elapsed_seconds,
@@ -222,6 +238,16 @@ class DeepCFRTrainer:
             "cutoff_rate": cutoff_rate,
             "total_node_limit_cutoffs": total_stats.node_limit_cutoffs,
             "node_limit_cutoff_rate": node_limit_cutoff_rate,
+            "depth_cutoff_traversal_rate": depth_cutoff_traversal_rate,
+            "node_limit_cutoff_traversal_rate": node_limit_cutoff_traversal_rate,
+            "terminal_traversal_rate": terminal_traversal_rate,
+            "max_depth_reached": total_stats.max_depth_reached,
+            "endpoint_traversals": total_stats.endpoint_traversals,
+            "avg_endpoint_depth": avg_endpoint_depth,
+            "avg_terminal_depth": avg_terminal_depth,
+            "avg_depth_cutoff_depth": avg_depth_cutoff_depth,
+            "avg_node_limit_cutoff_depth": avg_node_limit_cutoff_depth,
+            **endpoint_depth_bucket_metrics,
             "cutoff_rollouts": total_stats.cutoff_rollouts,
             "cutoff_rollout_steps": total_stats.cutoff_rollout_steps,
             "cutoff_rollout_max_step_timeouts": total_stats.cutoff_rollout_max_step_timeouts,
@@ -309,6 +335,8 @@ class DeepCFRTrainer:
             outcome_sampling_epsilon=self.config.traversal.outcome_sampling_epsilon,
             outcome_sampling_value_clip=self.config.traversal.outcome_sampling_value_clip,
             outcome_unsampled_regret=self.config.traversal.outcome_unsampled_regret,
+            endpoint_depth_bucket_width=self.config.traversal.endpoint_depth_bucket_width,
+            endpoint_depth_bucket_max=self.config.traversal.endpoint_depth_bucket_max,
             rng=self.rng,
             timing_stats=hotspot_stats,
         )
@@ -431,6 +459,8 @@ class DeepCFRTrainer:
                         outcome_sampling_epsilon=self.config.traversal.outcome_sampling_epsilon,
                         outcome_sampling_value_clip=self.config.traversal.outcome_sampling_value_clip,
                         outcome_unsampled_regret=self.config.traversal.outcome_unsampled_regret,
+                        endpoint_depth_bucket_width=self.config.traversal.endpoint_depth_bucket_width,
+                        endpoint_depth_bucket_max=self.config.traversal.endpoint_depth_bucket_max,
                         worker_seed=self.config.seed + iteration * 10_000_019 + player * 1_000_003 + batch_index,
                     )
                 )

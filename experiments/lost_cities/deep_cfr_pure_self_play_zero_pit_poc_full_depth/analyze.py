@@ -425,6 +425,45 @@ def draw_panel(
             line.set_linewidth(1.8)
 
 
+def endpoint_bucket_sort_key(key: str) -> tuple[int, int]:
+    label = key.removeprefix("endpoint_depth_bucket_")
+    start_token = label.split("_", maxsplit=1)[0]
+    try:
+        start = int(start_token)
+    except ValueError:
+        start = 10**9
+    return start, 1 if label.endswith("_plus") else 0
+
+
+def latest_endpoint_bucket_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for row in reversed(rows):
+        if any(key.startswith("endpoint_depth_bucket_") for key in row):
+            return row
+    return None
+
+
+def draw_latest_endpoint_bucket_panel(sns: Any, axis: Any, rows: list[dict[str, Any]]) -> None:
+    axis.set_title("Latest Endpoint Depth Buckets", fontsize=11, fontweight="bold")
+    axis.set_xlabel("endpoint depth")
+    axis.set_ylabel("traversals")
+
+    row = latest_endpoint_bucket_row(rows)
+    if row is None:
+        axis.text(0.5, 0.5, "No data", ha="center", va="center", transform=axis.transAxes)
+        return
+
+    keys = sorted(
+        (key for key in row if key.startswith("endpoint_depth_bucket_")),
+        key=endpoint_bucket_sort_key,
+    )
+    labels = [key.removeprefix("endpoint_depth_bucket_").replace("_", "-") for key in keys]
+    values = [numeric(row.get(key)) or 0.0 for key in keys]
+    records = {"bucket": labels, "traversals": values}
+    sns.barplot(data=records, x="bucket", y="traversals", ax=axis, color="#4C78A8")
+    axis.tick_params(axis="x", rotation=35)
+    axis.grid(True, axis="y", alpha=0.35)
+
+
 def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 1) -> Path:
     import matplotlib
 
@@ -439,7 +478,7 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
     latest_eval_row = find_latest_eval_row(rows)
     opponents = discover_opponents(latest_eval_row)
     sns.set_theme(style="darkgrid", context="notebook")
-    fig, axes = plt.subplots(4, 3, figsize=(21, 16), sharex=False, sharey=False)
+    fig, axes = plt.subplots(5, 3, figsize=(21, 20), sharex=False, sharey=False)
     fig.suptitle(
         f"Lost Cities zero-pit metrics: {run_dir.name}",
         fontsize=18,
@@ -522,9 +561,30 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
             "entropy",
             False,
         ),
+        (
+            "Traversal Depth",
+            [
+                ("avg endpoint depth", "avg_endpoint_depth"),
+                ("max depth reached", "max_depth_reached"),
+                ("avg nodes/traversal", "avg_nodes_per_traversal"),
+            ],
+            "depth / nodes",
+            False,
+        ),
+        (
+            "Traversal Endpoint Rates",
+            [
+                ("terminal", "terminal_traversal_rate"),
+                ("node limit cutoff", "node_limit_cutoff_traversal_rate"),
+                ("depth cutoff", "depth_cutoff_traversal_rate"),
+            ],
+            "rate (%)",
+            True,
+        ),
     ]
 
-    for axis, (title, specs, ylabel, percent) in zip(axes.flat, panels, strict=True):
+    flat_axes = list(axes.flat)
+    for axis, (title, specs, ylabel, percent) in zip(flat_axes[: len(panels)], panels, strict=True):
         draw_panel(
             sns,
             axis,
@@ -535,6 +595,7 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
             percent=percent,
             smooth_window=smooth_window,
         )
+    draw_latest_endpoint_bucket_panel(sns, flat_axes[len(panels)], rows)
 
     fig.tight_layout(rect=(0, 0, 1, 0.965), w_pad=5.0, h_pad=2.0)
     fig.savefig(output_path, dpi=150, bbox_inches="tight", pad_inches=0.25)

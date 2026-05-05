@@ -6,6 +6,10 @@
 
 진행 예정. shallow clone과 Cython 적용 여부 확인 전에는 실행하지 않는다.
 
+## 실행 전 조정
+
+smoke에서 `max_nodes_per_traversal=300`은 너무 낮았다. 140 traversal 중 약 89.3%가 node cap에 걸렸고, `max_nodes_per_traversal=1000`에서는 같은 1 iteration smoke 기준 node limit cutoff가 0%로 내려갔다. endpoint depth 분포는 주로 300-500대에 있고 800대까지 긴 꼬리가 있어, full-depth 신호를 보존하기 위해 본 실험 config는 1000을 사용한다.
+
 ## 목적
 
 `max_depth=null`로 traversal truncation을 제거했을 때 safe 계열 휴리스틱 상대 성능이 회복되는지 확인한다.
@@ -21,7 +25,7 @@
 실험 종료 후 추가될 파일:
 
 - `report.md`, `report.json`: 최종 분석 리포트
-- `analysis_metrics.png`: 실험별 분석 plot
+- `analysis_metrics.png`: 실험별 분석 plot. eval 지표와 traversal depth, endpoint cutoff rate, 최신 endpoint depth bucket 분포를 함께 그린다.
 - `analysis_latest_heatmap.png`: 최신 eval opponent x metric heatmap
 - `analysis_delta_heatmap.png`: `eps1e4` baseline 대비 delta heatmap
 

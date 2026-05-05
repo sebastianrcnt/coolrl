@@ -45,6 +45,8 @@ class TraversalWorkerBatch:
     outcome_sampling_epsilon: float
     outcome_sampling_value_clip: float | None
     outcome_unsampled_regret: str
+    endpoint_depth_bucket_width: int
+    endpoint_depth_bucket_max: int
     worker_seed: int
 
 
@@ -142,6 +144,8 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         outcome_sampling_epsilon=batch.outcome_sampling_epsilon,
         outcome_sampling_value_clip=batch.outcome_sampling_value_clip,
         outcome_unsampled_regret=batch.outcome_unsampled_regret,
+        endpoint_depth_bucket_width=batch.endpoint_depth_bucket_width,
+        endpoint_depth_bucket_max=batch.endpoint_depth_bucket_max,
         rng=rng,
         timing_stats=timing_stats,
     )

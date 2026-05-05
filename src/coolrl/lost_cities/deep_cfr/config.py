@@ -97,6 +97,8 @@ class TraversalConfig:
     outcome_sampling_epsilon: float = 0.0
     outcome_sampling_value_clip: float | None = None
     outcome_unsampled_regret: str = "negative_node_value"
+    endpoint_depth_bucket_width: int = 100
+    endpoint_depth_bucket_max: int = 1000
     self_play_league: SelfPlayLeagueConfig = field(default_factory=SelfPlayLeagueConfig)
 
     def __post_init__(self) -> None:
@@ -139,6 +141,12 @@ class TraversalConfig:
                 "'negative_node_value' or 'zero'"
             )
         self.outcome_unsampled_regret = unsampled_regret
+        self.endpoint_depth_bucket_width = int(self.endpoint_depth_bucket_width)
+        if self.endpoint_depth_bucket_width <= 0:
+            raise ValueError("traversal.endpoint_depth_bucket_width must be positive")
+        self.endpoint_depth_bucket_max = int(self.endpoint_depth_bucket_max)
+        if self.endpoint_depth_bucket_max <= 0:
+            raise ValueError("traversal.endpoint_depth_bucket_max must be positive")
 
     def _cpu_worker_guess(self) -> int:
         logical = max(1, os.cpu_count() or 1)
