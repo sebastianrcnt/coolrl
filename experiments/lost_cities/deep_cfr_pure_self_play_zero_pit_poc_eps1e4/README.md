@@ -11,7 +11,7 @@
 기준은 종료된 `eps1e3` PoC다.
 
 ```text
-configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
+experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
 ```
 
 의도한 주요 차이는 `regret_matching_epsilon` 하나다.
@@ -29,18 +29,23 @@ save_iteration_interval: 10
 save_latest_only: false
 ```
 
-checkpoint 디렉터리는 repo 아래 경로를 유지하되, 실제 저장 위치는 2TB HDD로 연결한다.
+checkpoint 디렉터리는 repo 아래 portable path를 유지하되, 필요한 경우 로컬 대용량 디스크로 symlink한다. 실제 디스크 경로는 git에 기록하지 않는다.
 
 ```text
 checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
--> /mnt/2tbhdd/coolrl-checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+```
+
+```bash
+mkdir -p checkpoints /path/to/large-disk/coolrl-checkpoints
+ln -s /path/to/large-disk/coolrl-checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4 \
+  checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
 ```
 
 ## 실행
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/config.yaml
+  --config experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/config.yaml
 ```
 
 상태 확인:
@@ -60,7 +65,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli plot \
 분석 요약:
 
 ```bash
-uv run python configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/analyze.py \
+uv run python experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/analyze.py \
   --run checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
 ```
 

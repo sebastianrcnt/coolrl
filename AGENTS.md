@@ -40,6 +40,54 @@ For those research/operation commits, write enough concrete detail that `git sho
 
 Avoid generic filler such as "문서 수정" or "테스트 확인" when a concrete path, metric, or command is available.
 
+## Experiment record policy
+
+This repository treats individual experiments as research records, not only as reusable config presets.
+
+Use `experiments/<domain>/<experiment_slug>/` for new experiment records that need design notes, progress notes, analysis scripts, or result summaries.
+
+Recommended layout:
+
+```text
+experiments/<domain>/<experiment_slug>/
+  config.yaml
+  README.md
+  analyze.py              # optional
+  *_summary.md            # optional
+  *_summary.json          # optional
+```
+
+Experiment records are nested for human navigation, but checkpoint directories stay flat for runtime operations:
+
+- Experiment record path: `experiments/<domain>/<experiment_slug>/`
+- Experiment config path: `experiments/<domain>/<experiment_slug>/config.yaml`
+- Experiment name: `<domain>_<experiment_slug>`
+- Checkpoint path: `checkpoints/<experiment_name>`
+
+Do not mirror the nested `experiments/` path under `checkpoints/`.
+
+Good:
+
+```text
+experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/config.yaml
+experiment_name: lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+checkpoint.directory: checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+```
+
+Avoid:
+
+```text
+checkpoint.directory: checkpoints/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4
+```
+
+Naming and storage rules:
+- Use snake_case for `<domain>`, `<experiment_slug>`, `experiment_name`, and checkpoint directory names.
+- Keep raw artifacts such as model checkpoints, logs, and large runtime outputs in `checkpoints/`, which is git-ignored.
+- If a run needs HDD/SSD/NVMe offload, create a local symlink at `checkpoints/<experiment_name>` and keep the real hardware path out of git.
+- Keep `configs/` for reusable presets and legacy configs that have not moved yet.
+- Prefer recording per-experiment design, progress, analysis, and final interpretation in `experiments/<domain>/<experiment_slug>/README.md` rather than growing `docs/` with one document per experiment.
+- Use `docs/` for current usage guides, domain-level overviews, and archive material.
+
 ## Advisory workflow
 
 Lost Cities Deep CFR처럼 실험 해석, 학습 안정성, 알고리즘 설계 판단이 애매한 작업에서는 필요할 때 MCP를 통해 Claude Opus 4.7 xhigh thinking에게 2차 의견을 구할 수 있다.

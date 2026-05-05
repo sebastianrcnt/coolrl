@@ -19,7 +19,7 @@ lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
 Config:
 
 ```text
-configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
+experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
 ```
 
 Run output:
@@ -61,7 +61,7 @@ discard-loop가 "경험 부족"보다 "조기 확률 몰빵" 문제에 가까운
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
+  --config experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
 ```
 
 상태 확인:

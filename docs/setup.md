@@ -72,4 +72,4 @@ cargo install lychee
 uv run check-doc-links
 ```
 
-이 명령은 `README.md`, `docs/**/*.md`, `src/**/*.md`, `configs/**/*.md`의 Markdown 링크를 `lychee --offline`으로 검사합니다. 외부 URL은 네트워크로 확인하지 않습니다.
+이 명령은 `README.md`, `docs/**/*.md`, `src/**/*.md`, `configs/**/*.md`, `experiments/**/*.md`의 Markdown 링크를 `lychee --offline`으로 검사합니다. 외부 URL은 네트워크로 확인하지 않습니다.

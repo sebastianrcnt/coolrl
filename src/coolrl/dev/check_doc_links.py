@@ -38,7 +38,7 @@ def _markdown_files(root: Path) -> list[Path]:
     if readme.is_file():
         files.append(readme)
 
-    for base in ("docs", "src", "configs"):
+    for base in ("docs", "src", "configs", "experiments"):
         directory = root / base
         if not directory.is_dir():
             continue

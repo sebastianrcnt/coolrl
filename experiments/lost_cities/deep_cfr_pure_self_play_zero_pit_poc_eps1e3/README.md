@@ -27,7 +27,7 @@ seed, network, traversal budget, self-play league, evaluation opponent, memory, 
 
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
+  --config experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/config.yaml
 ```
 
 상태 확인:
@@ -47,10 +47,10 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli plot \
 분석 요약:
 
 ```bash
-uv run python configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/analyze.py \
+uv run python experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/analyze.py \
   --run checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3 \
-  --json-output configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/zero_pit_summary.json \
-  --markdown-output configs/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/zero_pit_summary.md
+  --json-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/zero_pit_summary.json \
+  --markdown-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/zero_pit_summary.md
 ```
 
 Run A checkpoint가 로컬에 있으면 `--baseline-run checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official`을 추가해 baseline delta를 함께 생성한다.
