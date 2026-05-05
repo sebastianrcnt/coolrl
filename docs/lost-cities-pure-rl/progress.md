@@ -58,3 +58,25 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 ```
 
 두 명령 모두 `device=cuda`, `input_dim=1500`, `actions=22`로 시작 조건을 로드했고, Run B는 safe checkpoint를 optimizer/iteration 없이 network weights만 초기화했다.
+
+### Run A 2h
+
+Run A 2h를 시작했다.
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli train \
+  --config configs/lost_cities_deep_cfr_pure_self_play_a.yaml \
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h \
+  --max-hours 2
+```
+
+- PID: `221133`
+- Console log: `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h/console.log`
+- Training log: `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h/train.log`
+- Metrics: `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h/metrics.jsonl`
+
+초기 확인:
+
+- Iteration 1 완료.
+- `self_play_league_snapshots=1`로 snapshot 기록이 시작됐다.
+- `cutoff_rollouts=0`, `cutoff_rollout_max_step_timeouts=0`라서 rollout label은 쓰지 않았다.
