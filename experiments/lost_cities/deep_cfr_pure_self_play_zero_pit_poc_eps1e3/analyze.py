@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+EXPERIMENT_DIR = Path(__file__).resolve().parent
+DEFAULT_JSON_OUTPUT = EXPERIMENT_DIR / "report.json"
+DEFAULT_MARKDOWN_OUTPUT = EXPERIMENT_DIR / "report.md"
+DEFAULT_PLOT_OUTPUT = EXPERIMENT_DIR / "analysis_metrics.png"
 
 TARGET_METRICS = (
     "win_rate",
@@ -49,13 +53,29 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="비교 기준 metrics.jsonl이 있는 run directory",
     )
-    parser.add_argument("--json-output", type=Path, default=None, help="JSON 리포트 저장 경로")
-    parser.add_argument("--markdown-output", type=Path, default=None, help="Markdown 리포트 저장 경로")
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        default=DEFAULT_JSON_OUTPUT,
+        help=f"JSON 리포트 저장 경로. 기본값은 {DEFAULT_JSON_OUTPUT}",
+    )
+    parser.add_argument(
+        "--markdown-output",
+        type=Path,
+        default=DEFAULT_MARKDOWN_OUTPUT,
+        help=f"Markdown 리포트 저장 경로. 기본값은 {DEFAULT_MARKDOWN_OUTPUT}",
+    )
     parser.add_argument(
         "--plot-output",
         type=Path,
-        default=None,
-        help="PNG plot 저장 경로. 기본값은 <run>/analysis_metrics.png",
+        default=DEFAULT_PLOT_OUTPUT,
+        help=f"PNG plot 저장 경로. 기본값은 {DEFAULT_PLOT_OUTPUT}",
+    )
+    parser.add_argument(
+        "--smooth-window",
+        type=int,
+        default=1,
+        help="plot에만 적용할 이동 평균 window. 1이면 raw metrics를 그대로 그림",
     )
     parser.add_argument("--no-plot", action="store_true", help="plot 생성을 건너뜀")
     return parser.parse_args()
@@ -297,109 +317,197 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def plot_run(run_dir: Path, output: Path | None = None) -> Path:
+def smooth_values(values: list[float], window: int) -> list[float]:
+    if window <= 1 or len(values) < 3:
+        return values
+    half_window = max(1, window // 2)
+    smoothed: list[float] = []
+    for index in range(len(values)):
+        start = max(0, index - half_window)
+        end = min(len(values), index + half_window + 1)
+        window_values = values[start:end]
+        smoothed.append(sum(window_values) / len(window_values))
+    return smoothed
+
+
+def plot_records(
+    rows: list[dict[str, Any]],
+    series_specs: list[tuple[str, str]],
+    *,
+    percent: bool = False,
+    smooth_window: int = 1,
+) -> dict[str, list[Any]]:
+    records: dict[str, list[Any]] = {"iteration": [], "value": [], "series": []}
+    for label, key in series_specs:
+        xs, ys = metric_series(rows, key)
+        if not xs:
+            continue
+        values = [value * 100 for value in ys] if percent else ys
+        values = smooth_values(values, smooth_window)
+        for iteration, value in zip(xs, values, strict=True):
+            records["iteration"].append(iteration)
+            records["value"].append(value)
+            records["series"].append(label)
+    return records
+
+
+def draw_panel(
+    sns: Any,
+    axis: Any,
+    rows: list[dict[str, Any]],
+    title: str,
+    series_specs: list[tuple[str, str]],
+    *,
+    ylabel: str,
+    percent: bool = False,
+    smooth_window: int = 1,
+) -> None:
+    records = plot_records(rows, series_specs, percent=percent, smooth_window=smooth_window)
+    axis.set_title(title, fontsize=11, fontweight="bold")
+    axis.set_xlabel("iteration")
+    axis.set_ylabel(ylabel)
+    if not records["iteration"]:
+        axis.text(0.5, 0.5, "No data", ha="center", va="center", transform=axis.transAxes)
+        return
+    sns.lineplot(
+        data=records,
+        x="iteration",
+        y="value",
+        hue="series",
+        ax=axis,
+        linewidth=1.5,
+        alpha=0.85,
+        marker="o",
+        markersize=2.5,
+        errorbar=None,
+    )
+    axis.grid(True, alpha=0.35)
+    legend = axis.legend(
+        title=None,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        borderaxespad=0,
+        frameon=False,
+        fontsize=8,
+    )
+    if legend is not None:
+        for line in legend.get_lines():
+            line.set_linewidth(1.8)
+
+
+def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 1) -> Path:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
-    from coolrl.plotting import (
-        DARK,
-        configure_fonts,
-        gradient_line,
-        moving_average_smooth,
-        panel_title,
-        style_axis,
-    )
+    import seaborn as sns
 
     rows, _warnings = read_metrics(run_dir)
-    output_path = output if output is not None else run_dir / "analysis_metrics.png"
+    output_path = output if output is not None else DEFAULT_PLOT_OUTPUT
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    configure_fonts()
-    theme = DARK
     latest_eval_row = find_latest_eval_row(rows)
     opponents = discover_opponents(latest_eval_row)
-    fig, axes = plt.subplots(3, 2, figsize=(15, 13), facecolor=theme.bg)
+    sns.set_theme(style="darkgrid", context="notebook")
+    fig, axes = plt.subplots(4, 3, figsize=(21, 16), sharex=False, sharey=False)
     fig.suptitle(
         f"Lost Cities zero-pit metrics: {run_dir.name}",
-        color=theme.text_primary,
-        fontsize=22,
-        fontweight=900,
+        fontsize=18,
+        fontweight="bold",
         y=0.985,
     )
+    if smooth_window > 1:
+        fig.text(0.01, 0.985, f"smooth window: {smooth_window}", fontsize=9, va="top")
 
     panels = [
         (
-            "Training Loss",
-            [("advantage p0", "advantage_loss_p0"), ("advantage p1", "advantage_loss_p1"), ("strategy", "strategy_loss")],
+            "Advantage Loss",
+            [("p0", "advantage_loss_p0"), ("p1", "advantage_loss_p1")],
+            "loss",
             False,
         ),
-        ("Win Rate", [(opponent, metric_key(opponent, "win_rate")) for opponent in opponents], True),
-        ("Avg Diff", [(opponent, metric_key(opponent, "avg_diff")) for opponent in opponents], False),
         (
-            "Action Rates",
-            [
-                (f"{opponent} play", metric_key(opponent, "play_action_rate"))
-                for opponent in opponents
-            ]
-            + [
-                (f"{opponent} discard", metric_key(opponent, "discard_action_rate"))
-                for opponent in opponents
-            ],
+            "Strategy Loss",
+            [("strategy", "strategy_loss")],
+            "loss",
+            False,
+        ),
+        (
+            "Win Rate",
+            [(opponent, metric_key(opponent, "win_rate")) for opponent in opponents],
+            "win rate (%)",
             True,
         ),
         (
-            "Expedition Shape",
-            [
-                (f"{opponent} colors", metric_key(opponent, "avg_opened_colors"))
-                for opponent in opponents
-            ]
-            + [
-                (f"{opponent} cards", metric_key(opponent, "avg_expedition_cards"))
-                for opponent in opponents
-            ],
+            "Avg Diff",
+            [(opponent, metric_key(opponent, "avg_diff")) for opponent in opponents],
+            "score diff",
             False,
         ),
         (
-            "Timeouts / Entropy",
-            [
-                (f"{opponent} timeout", metric_key(opponent, "max_step_timeouts"))
-                for opponent in opponents
-            ]
-            + [
-                (f"{opponent} entropy", metric_key(opponent, "policy_entropy"))
-                for opponent in opponents
-            ],
+            "Play Action Rate",
+            [(opponent, metric_key(opponent, "play_action_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Discard Action Rate",
+            [(opponent, metric_key(opponent, "discard_action_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Draw Deck Rate",
+            [(opponent, metric_key(opponent, "draw_deck_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Draw Pile Rate",
+            [(opponent, metric_key(opponent, "draw_pile_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Opened Colors",
+            [(opponent, metric_key(opponent, "avg_opened_colors")) for opponent in opponents],
+            "colors",
+            False,
+        ),
+        (
+            "Expedition Cards",
+            [(opponent, metric_key(opponent, "avg_expedition_cards")) for opponent in opponents],
+            "cards",
+            False,
+        ),
+        (
+            "Max Step Timeouts",
+            [(opponent, metric_key(opponent, "max_step_timeouts")) for opponent in opponents],
+            "timeouts",
+            False,
+        ),
+        (
+            "Policy Entropy",
+            [(opponent, metric_key(opponent, "policy_entropy")) for opponent in opponents],
+            "entropy",
             False,
         ),
     ]
-    accent_pairs = list(theme.accents.values())
 
-    for axis, (title, specs, percent) in zip(axes.flat, panels, strict=True):
-        axis.set_facecolor(theme.bg)
-        panel_title(axis, theme, title)
-        style_axis(axis, theme, percent=percent)
-        plotted = False
-        for index, (label, key) in enumerate(specs):
-            xs, ys = metric_series(rows, key)
-            if not xs:
-                continue
-            y_values = [value * 100 for value in ys] if percent else ys
-            y_arr = moving_average_smooth(y_values, window=5) if len(y_values) >= 5 else y_values
-            c0, c1 = accent_pairs[index % len(accent_pairs)]
-            gradient_line(axis, xs, y_arr, c0, c1, lw=2.0, alpha=theme.line_alpha)
-            axis.plot([], [], color=c1, label=label)
-            plotted = True
-        if plotted:
-            axis.legend(frameon=False, labelcolor=theme.text_secondary, fontsize=8)
-            axis.autoscale_view()
-        else:
-            axis.text(0.5, 0.5, "No data", ha="center", va="center", color=theme.text_tertiary, transform=axis.transAxes)
-        axis.set_xlabel("iteration", color=theme.text_secondary)
+    for axis, (title, specs, ylabel, percent) in zip(axes.flat, panels, strict=True):
+        draw_panel(
+            sns,
+            axis,
+            rows,
+            title,
+            specs,
+            ylabel=ylabel,
+            percent=percent,
+            smooth_window=smooth_window,
+        )
 
-    fig.tight_layout(rect=(0, 0, 1, 0.965))
-    fig.savefig(output_path, dpi=170, facecolor=theme.bg, bbox_inches="tight", pad_inches=0.25)
+    fig.tight_layout(rect=(0, 0, 1, 0.965), w_pad=5.0, h_pad=2.0)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight", pad_inches=0.25)
     plt.close(fig)
     return output_path
 
@@ -423,12 +531,10 @@ def main() -> int:
     stdout_summary = render_stdout(summary, deltas)
     print(stdout_summary)
 
-    if args.json_output is not None:
-        write_text(args.json_output, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-    if args.markdown_output is not None:
-        write_text(args.markdown_output, render_markdown(summary, payload))
+    write_text(args.json_output, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    write_text(args.markdown_output, render_markdown(summary, payload))
     if not args.no_plot:
-        plot_path = plot_run(args.run, output=args.plot_output)
+        plot_path = plot_run(args.run, output=args.plot_output, smooth_window=args.smooth_window)
         print(f"- plot: {plot_path}")
 
     return 0

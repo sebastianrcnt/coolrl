@@ -112,19 +112,19 @@ experiments/<domain>/<experiment_slug>/analyze.py
 - `--json-output`
 - `--markdown-output`
 - `--plot-output`
+- `--smooth-window`
 - `--no-plot`
 
 실험별 `analyze.py`는 기본 실행에서 plot을 생성할 수 있다. 빠른 text-only 분석을 위해 `--no-plot`을 제공한다. 기본 plot 파일명은 `analysis_metrics.png`를 사용한다.
 
-`src/coolrl/plotting/`은 표현 primitive만 공유한다:
-- theme
-- font 설정
-- axis styling
-- gradient line/fill
-- smoothing helper
-- title/layout primitive
+실험별 monitoring plot은 `seaborn`과 `matplotlib`을 직접 사용해 단순하고 읽기 쉽게 만든다:
+- `sns.set_theme(...)` 또는 local seaborn style/context 설정
+- 단순 line plot
+- 겹치지 않는 legend
+- scale이 다른 metric의 panel 분리
+- 명시적 smoothing 옵션이 필요한 경우 `--smooth-window`
 
-실험별 metric 이름, opponent 의미, threshold, 해석 규칙은 `src/coolrl/plotting/`으로 올리지 않는다.
+실험별 metric 이름, opponent 의미, threshold, 해석 규칙을 공용 plotting abstraction으로 올리지 않는다.
 
 `src/coolrl/lost_cities/deep_cfr/visualize.py`는 legacy compatibility 코드로 취급한다. 새 실험별 plot을 위해 이 파일을 확장하지 말고, 해당 실험의 `analyze.py`를 추가하거나 수정한다.
 

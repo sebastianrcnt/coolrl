@@ -54,10 +54,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli status \
 
 ```bash
 uv run python experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/analyze.py \
-  --run checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4 \
-  --json-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/report.json \
-  --markdown-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/report.md \
-  --plot-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/analysis_metrics.png
+  --run checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4
 ```
 
 ## 판정 기준

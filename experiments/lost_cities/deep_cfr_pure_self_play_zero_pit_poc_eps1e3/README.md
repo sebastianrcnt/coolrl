@@ -31,10 +31,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 
 ```bash
 uv run python experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/analyze.py \
-  --run checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3 \
-  --json-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/report.json \
-  --markdown-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/report.md \
-  --plot-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e3/analysis_metrics.png
+  --run checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3
 ```
 
 Run A checkpoint가 로컬에 있으면 `--baseline-run checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official`을 추가해 baseline delta를 함께 생성한다.
