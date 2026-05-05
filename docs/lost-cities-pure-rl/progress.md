@@ -289,3 +289,75 @@ Iteration 355 eval:
 | `noisy_safe` | 0.10 | -70.02 | 32 |
 
 Iteration 358 기준 elapsed는 100분이다. 중반에 좋아졌던 `random`/`passive_discard`도 다시 악화했고, safe family score diff는 더 나빠졌다. Run A는 현재까지 pure self-play만으로 안정적인 개선 곡선을 만들지 못하고 있다.
+
+Iteration 410 eval:
+
+| Opponent | win_rate | avg_diff | timeouts |
+| --- | ---: | ---: | ---: |
+| `random` | 0.70 | 21.93 | 0 |
+| `passive_discard` | 0.00 | -5.64 | 0 |
+| `safe_heuristic` | 0.13 | -77.46 | 69 |
+| `safe_heuristic_loose` | 0.14 | -88.96 | 60 |
+| `safe_heuristic_strict` | 0.11 | -71.35 | 73 |
+| `noisy_safe` | 0.10 | -63.32 | 37 |
+
+Run A 2h는 iteration 414, elapsed 120.1분에서 종료됐다. 최종 checkpoint는 `checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/latest.pt`다.
+
+최종 500-game bot eval suite:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli eval-suite \
+  --checkpoint checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/latest.pt \
+  --games 500 \
+  --max-steps 1000 \
+  --output docs/lost-cities-pure-rl/eval-a-2h.json
+```
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.658 | 15.328 | 0 | 395.224 | 1.794 |
+| `passive_discard` | 0.000 | -3.974 | 0 | 152.376 | 1.708 |
+| `safe_heuristic` | 0.116 | -76.424 | 321 | 728.536 | 1.567 |
+| `safe_heuristic_loose` | 0.094 | -87.752 | 279 | 658.204 | 1.573 |
+| `safe_heuristic_strict` | 0.122 | -67.700 | 374 | 822.592 | 1.558 |
+| `noisy_safe` | 0.106 | -64.404 | 185 | 616.516 | 1.640 |
+
+성공 기준 대비:
+
+- `safe_heuristic` win rate는 0.116으로 0.50 기준에 크게 못 미친다.
+- `safe_heuristic` mean score diff는 -76.424로 양수가 아니다.
+- `random` win rate는 0.658로 0.95 기준에 못 미친다.
+- `passive_discard`는 win rate 0.000이고 avg diff도 -3.974다.
+- safe family timeout은 500게임 중 279-374회로, timeout 악화가 뚜렷하다.
+
+따라서 Run A 2h는 pure self-play만으로 `safe_heuristic` 계열을 넘는다는 가설을 지지하지 못한다.
+
+old/best checkpoint opponent 선정:
+
+- 총 iteration `N=414` 기준 quartile checkpoint: `104`, `207`, `310`, `414`
+- training eval 6개 bot 평균 win rate best checkpoint: `45`
+- best 선정에 사용한 training eval은 100-game 중간 eval이고, 최종 판단은 아래 500-game eval 결과로 분리한다.
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli eval-suite \
+  --checkpoint checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/latest.pt \
+  --games 500 \
+  --max-steps 1000 \
+  --opponent-checkpoints \
+    checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/iteration_00104.pt \
+    checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/iteration_00207.pt \
+    checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/iteration_00310.pt \
+    checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/iteration_00414.pt \
+    checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/iteration_00045.pt \
+  --output docs/lost-cities-pure-rl/eval-a-2h-checkpoints.json
+```
+
+| Opponent checkpoint | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `iteration_00104.pt` | 0.302 | 5.020 | 3 | 188.524 | 1.730 |
+| `iteration_00207.pt` | 0.344 | 10.958 | 186 | 484.632 | 1.629 |
+| `iteration_00310.pt` | 0.096 | -1.160 | 422 | 874.592 | 1.478 |
+| `iteration_00414.pt` | 0.114 | 0.074 | 497 | 995.176 | 1.418 |
+| `iteration_00045.pt` | 0.258 | 9.536 | 197 | 512.180 | 1.428 |
+
+latest-vs-latest self-play checkpoint 평가는 500게임 중 497회가 max-step timeout이다. latest policy가 자기 자신과도 거의 게임을 끝내지 못하므로, Run A 2h는 학습 안정성 기준에서도 실패 신호가 강하다.
