@@ -127,7 +127,7 @@ tail -f checkpoints/lost_cities_deep_cfr_tier3/metrics.jsonl
 uv run python -m coolrl.lost_cities.deep_cfr.cli status \
   --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3
 
-# 학습 곡선 플롯
+# 학습 곡선 플롯(legacy quick plot)
 uv run python -m coolrl.lost_cities.deep_cfr.cli plot \
   --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3
 
@@ -136,6 +136,8 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli eval \
   --checkpoint checkpoints/lost_cities_deep_cfr_tier3/latest.pt \
   --games 500 --opponent safe_heuristic
 ```
+
+새 실험별 분석 plot은 `experiments/lost_cities/<experiment>/analyze.py`에서 생성하는 쪽을 우선한다.
 
 Deep CFR eval opponent는 `random`, `safe_heuristic`, `passive_discard`를 지원한다. `passive_discard`는 expedition을 열지 않는 baseline이라 random win rate만으로 passive collapse를 착각하는 문제를 잡는 데 사용한다.
 

@@ -18,6 +18,7 @@
 - [analyze.py](analyze.py): metrics 분석 스크립트
 - `report.md`: 실행 후 생성할 최종 분석 리포트
 - `report.json`: 실행 후 생성할 구조화된 분석 결과
+- `analysis_metrics.png`: 실행 후 생성할 실험별 분석 plot
 
 ## 실행
 
@@ -32,5 +33,6 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 uv run python experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/analyze.py \
   --run checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e4 \
   --json-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/report.json \
-  --markdown-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/report.md
+  --markdown-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/report.md \
+  --plot-output experiments/lost_cities/deep_cfr_pure_self_play_zero_pit_poc_eps1e4/analysis_metrics.png
 ```

@@ -91,6 +91,43 @@ Naming and storage rules:
 - Prefer recording per-experiment design in `plan.md`, chronological run notes in `progress.md`, and final analysis/interpretation in `report.md` or `report.json` rather than growing `docs/` with one document per experiment.
 - Use `docs/` for current usage guides, domain-level overviews, and archive material.
 
+## Experiment analysis and plotting policy
+
+실험별 분석 코드는 실험 record 안에 둔다. 새 실험은 필요하면 기존 실험의 `analyze.py`를 복사해 다음 위치에서 수정한다.
+
+```text
+experiments/<domain>/<experiment_slug>/analyze.py
+```
+
+실험별 `analyze.py`가 책임지는 내용:
+- 해당 실험의 `metrics.jsonl` schema 해석
+- metric, opponent, panel 선택
+- stdout 요약
+- 선택적 JSON/Markdown 리포트 생성
+- 해당 실험의 plot 생성
+
+권장 CLI 옵션:
+- `--run`
+- `--baseline-run`
+- `--json-output`
+- `--markdown-output`
+- `--plot-output`
+- `--no-plot`
+
+실험별 `analyze.py`는 기본 실행에서 plot을 생성할 수 있다. 빠른 text-only 분석을 위해 `--no-plot`을 제공한다. 기본 plot 파일명은 `analysis_metrics.png`를 사용한다.
+
+`src/coolrl/plotting/`은 표현 primitive만 공유한다:
+- theme
+- font 설정
+- axis styling
+- gradient line/fill
+- smoothing helper
+- title/layout primitive
+
+실험별 metric 이름, opponent 의미, threshold, 해석 규칙은 `src/coolrl/plotting/`으로 올리지 않는다.
+
+`src/coolrl/lost_cities/deep_cfr/visualize.py`는 legacy compatibility 코드로 취급한다. 새 실험별 plot을 위해 이 파일을 확장하지 말고, 해당 실험의 `analyze.py`를 추가하거나 수정한다.
+
 ## Advisory workflow
 
 Lost Cities Deep CFR처럼 실험 해석, 학습 안정성, 알고리즘 설계 판단이 애매한 작업에서는 필요할 때 MCP를 통해 Claude Opus 4.7 xhigh thinking에게 2차 의견을 구할 수 있다.

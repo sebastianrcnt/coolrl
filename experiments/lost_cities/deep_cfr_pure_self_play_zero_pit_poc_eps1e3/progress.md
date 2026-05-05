@@ -8,7 +8,7 @@
 
 ## 산출물
 
-- [training_metrics.png](training_metrics.png)
+- [analysis_metrics.png](analysis_metrics.png)
 - [report.md](report.md)
 - [report.json](report.json)
 

@@ -51,6 +51,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--json-output", type=Path, default=None, help="JSON 리포트 저장 경로")
     parser.add_argument("--markdown-output", type=Path, default=None, help="Markdown 리포트 저장 경로")
+    parser.add_argument(
+        "--plot-output",
+        type=Path,
+        default=None,
+        help="PNG plot 저장 경로. 기본값은 <run>/analysis_metrics.png",
+    )
+    parser.add_argument("--no-plot", action="store_true", help="plot 생성을 건너뜀")
     return parser.parse_args()
 
 
@@ -79,6 +86,18 @@ def read_metrics(run_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
     if not rows:
         raise ValueError(f"유효한 metric row가 없습니다: {metrics_path}")
     return rows, warnings
+
+
+def metric_series(rows: list[dict[str, Any]], key: str) -> tuple[list[int], list[float]]:
+    xs: list[int] = []
+    ys: list[float] = []
+    for index, row in enumerate(rows):
+        value = numeric(row.get(key))
+        if value is None:
+            continue
+        xs.append(int(row.get("iteration", index + 1)))
+        ys.append(value)
+    return xs, ys
 
 
 def has_eval_win_rate(row: dict[str, Any]) -> bool:
@@ -278,6 +297,113 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def plot_run(run_dir: Path, output: Path | None = None) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from coolrl.plotting import (
+        DARK,
+        configure_fonts,
+        gradient_line,
+        moving_average_smooth,
+        panel_title,
+        style_axis,
+    )
+
+    rows, _warnings = read_metrics(run_dir)
+    output_path = output if output is not None else run_dir / "analysis_metrics.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    configure_fonts()
+    theme = DARK
+    latest_eval_row = find_latest_eval_row(rows)
+    opponents = discover_opponents(latest_eval_row)
+    fig, axes = plt.subplots(3, 2, figsize=(15, 13), facecolor=theme.bg)
+    fig.suptitle(
+        f"Lost Cities zero-pit metrics: {run_dir.name}",
+        color=theme.text_primary,
+        fontsize=22,
+        fontweight=900,
+        y=0.985,
+    )
+
+    panels = [
+        (
+            "Training Loss",
+            [("advantage p0", "advantage_loss_p0"), ("advantage p1", "advantage_loss_p1"), ("strategy", "strategy_loss")],
+            False,
+        ),
+        ("Win Rate", [(opponent, metric_key(opponent, "win_rate")) for opponent in opponents], True),
+        ("Avg Diff", [(opponent, metric_key(opponent, "avg_diff")) for opponent in opponents], False),
+        (
+            "Action Rates",
+            [
+                (f"{opponent} play", metric_key(opponent, "play_action_rate"))
+                for opponent in opponents
+            ]
+            + [
+                (f"{opponent} discard", metric_key(opponent, "discard_action_rate"))
+                for opponent in opponents
+            ],
+            True,
+        ),
+        (
+            "Expedition Shape",
+            [
+                (f"{opponent} colors", metric_key(opponent, "avg_opened_colors"))
+                for opponent in opponents
+            ]
+            + [
+                (f"{opponent} cards", metric_key(opponent, "avg_expedition_cards"))
+                for opponent in opponents
+            ],
+            False,
+        ),
+        (
+            "Timeouts / Entropy",
+            [
+                (f"{opponent} timeout", metric_key(opponent, "max_step_timeouts"))
+                for opponent in opponents
+            ]
+            + [
+                (f"{opponent} entropy", metric_key(opponent, "policy_entropy"))
+                for opponent in opponents
+            ],
+            False,
+        ),
+    ]
+    accent_pairs = list(theme.accents.values())
+
+    for axis, (title, specs, percent) in zip(axes.flat, panels, strict=True):
+        axis.set_facecolor(theme.bg)
+        panel_title(axis, theme, title)
+        style_axis(axis, theme, percent=percent)
+        plotted = False
+        for index, (label, key) in enumerate(specs):
+            xs, ys = metric_series(rows, key)
+            if not xs:
+                continue
+            y_values = [value * 100 for value in ys] if percent else ys
+            y_arr = moving_average_smooth(y_values, window=5) if len(y_values) >= 5 else y_values
+            c0, c1 = accent_pairs[index % len(accent_pairs)]
+            gradient_line(axis, xs, y_arr, c0, c1, lw=2.0, alpha=theme.line_alpha)
+            axis.plot([], [], color=c1, label=label)
+            plotted = True
+        if plotted:
+            axis.legend(frameon=False, labelcolor=theme.text_secondary, fontsize=8)
+            axis.autoscale_view()
+        else:
+            axis.text(0.5, 0.5, "No data", ha="center", va="center", color=theme.text_tertiary, transform=axis.transAxes)
+        axis.set_xlabel("iteration", color=theme.text_secondary)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
+    fig.savefig(output_path, dpi=170, facecolor=theme.bg, bbox_inches="tight", pad_inches=0.25)
+    plt.close(fig)
+    return output_path
+
+
 def main() -> int:
     args = parse_args()
     summary, warnings = summarize_run(args.run)
@@ -301,6 +427,9 @@ def main() -> int:
         write_text(args.json_output, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     if args.markdown_output is not None:
         write_text(args.markdown_output, render_markdown(summary, payload))
+    if not args.no_plot:
+        plot_path = plot_run(args.run, output=args.plot_output)
+        print(f"- plot: {plot_path}")
 
     return 0
 
