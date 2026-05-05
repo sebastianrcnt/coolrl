@@ -208,6 +208,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
 safe_action_rollout_g200_s300_e1.pt
 policy_gradient_batch16_g2000.pt
 policy_gradient_batch4_g1000.pt
+policy_gradient_baseline_g1000.pt
 ```
 
 `safe_action_rollout_g200_s300_e1.pt`는 `--improvement-rollout-max-steps 300`으로 label horizon을 늘려 보던 중 사용자가 중단했다. checkpoint는 생성되지 않았고 결과로 쓰지 않는다. 중간 로그상 400 state 기준 `disagreement_rate=0.795`, `avg_candidates=8.6`이었다.
@@ -215,6 +216,8 @@ policy_gradient_batch4_g1000.pt
 `policy_gradient_batch16_g2000.pt`는 batched/normalized policy-gradient 실험으로 잠깐 시작됐지만, “일단 그만” 지시에 따라 중단했다. checkpoint는 생성되지 않았고 결과로 쓰지 않는다.
 
 `policy_gradient_batch4_g1000.pt`도 같은 이유로 중단했다. checkpoint는 생성되지 않았고 결과로 쓰지 않는다.
+
+`policy_gradient_baseline_g1000.pt`도 baseline-decay PG 실험으로 잠깐 시작됐지만 중단했다. checkpoint는 생성되지 않았고 결과로 쓰지 않는다.
 
 ## 다음 우선순위
 

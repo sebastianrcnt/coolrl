@@ -206,7 +206,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli fine-tune-policy \
   --output checkpoints/lost_cities_deep_cfr_safe_dagger_256/policy_gradient_batch.pt \
   --games 4000 --opponent safe_heuristic --max-steps 1000 \
   --learning-rate 1e-5 --reward-scale 60 --kl-coef 0.10 \
-  --batch-games 16 --normalize-advantages
+  --baseline-decay 0.95
 ```
 
 현재 training caveat와 다음 실험 기준은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)를 참고한다.
