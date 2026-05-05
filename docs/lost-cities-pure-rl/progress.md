@@ -361,3 +361,39 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli eval-suite \
 | `iteration_00045.pt` | 0.258 | 9.536 | 197 | 512.180 | 1.428 |
 
 latest-vs-latest self-play checkpoint 평가는 500게임 중 497회가 max-step timeout이다. latest policy가 자기 자신과도 거의 게임을 끝내지 못하므로, Run A 2h는 학습 안정성 기준에서도 실패 신호가 강하다.
+
+### Run B 2h
+
+Run B 2h를 시작했다. 이 run은 safe imitation checkpoint에서 network weights만 초기화하고, 이후 학습은 Run A와 같은 pure self-play 조건으로 진행한다. optimizer, iteration, replay memory, RNG, self-play league snapshot은 복원하지 않는다.
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli train \
+  --config configs/lost_cities_deep_cfr_pure_self_play_b.yaml \
+  --checkpoint-dir checkpoints/lost_cities_deep_cfr_pure_self_play_b_2h_official \
+  --init-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --max-hours 2
+```
+
+- PID: `314558`
+- Console log: `checkpoints/lost_cities_deep_cfr_pure_self_play_b_2h_official/console.log`
+- Training log: `checkpoints/lost_cities_deep_cfr_pure_self_play_b_2h_official/train.log`
+- Metrics: `checkpoints/lost_cities_deep_cfr_pure_self_play_b_2h_official/metrics.jsonl`
+
+시작 확인:
+
+- `initialize_from_checkpoint` 로그에서 network만 초기화하고 optimizer/memory/RNG/league snapshots를 복원하지 않았음을 확인했다.
+- `cutoff_rollouts=0` 유지.
+- iteration 29 기준 `self_play_league_snapshots=20` cap에 도달했다.
+
+Iteration 25 eval:
+
+| Opponent | win_rate | avg_diff | timeouts |
+| --- | ---: | ---: | ---: |
+| `random` | 0.62 | 11.58 | 0 |
+| `passive_discard` | 0.02 | -21.44 | 0 |
+| `safe_heuristic` | 0.02 | -73.93 | 13 |
+| `safe_heuristic_loose` | 0.03 | -82.73 | 13 |
+| `safe_heuristic_strict` | 0.03 | -70.82 | 17 |
+| `noisy_safe` | 0.06 | -67.71 | 7 |
+
+Run B 초반은 safe pretrain 초기화에도 safe family 승률이 낮다. 다만 timeout은 Run A 같은 시간대보다 낮아, game-ending loop는 아직 덜하지만 score diff는 여전히 크게 음수다. 이후 곡선에서 timeout이 다시 증가하는지와 `passive_discard` 실패가 완화되는지를 함께 본다.
