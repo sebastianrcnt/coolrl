@@ -492,3 +492,16 @@ Iteration 185 eval:
 | `noisy_safe` | 0.08 | -62.82 | 24 | 557.80 | 0.696 | 2.08 | 0.020 | 0.980 |
 
 Run B iteration 185는 약 67분 지점이다. Expedition opening 자체는 더 늘었지만, safe family win rate가 0.08-0.10으로 떨어지고 score diff가 Run A 최종 수준에 가까워졌다. Run B의 safe pretrain 효과는 중반 이후 성능 향상으로 유지되지 못하고 있다.
+
+Iteration 200 eval:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy | avg_opened_colors | play_rate | discard_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.32 | -13.07 | 0 | 593.68 | 0.753 | 1.56 | 0.015 | 0.985 |
+| `passive_discard` | 0.00 | 0.00 | 0 | 100.94 | 1.240 | 0.00 | 0.000 | 1.000 |
+| `safe_heuristic` | 0.06 | -76.92 | 79 | 860.90 | 0.508 | 2.00 | 0.012 | 0.988 |
+| `safe_heuristic_loose` | 0.07 | -82.19 | 78 | 851.88 | 0.516 | 2.01 | 0.012 | 0.988 |
+| `safe_heuristic_strict` | 0.06 | -72.83 | 84 | 899.28 | 0.512 | 1.93 | 0.011 | 0.989 |
+| `noisy_safe` | 0.06 | -71.58 | 30 | 582.72 | 0.667 | 2.15 | 0.020 | 0.980 |
+
+Run B iteration 200은 약 73분 지점이다. `random` win rate가 0.32까지 하락했고 safe family도 0.06-0.07로 떨어졌다. 이는 강한 중반 회귀 신호다. safe pretrain은 초반 score diff를 개선했지만, self-play 학습이 진행되면서 general opponent와 safe family 성능이 함께 무너지고 있다.
