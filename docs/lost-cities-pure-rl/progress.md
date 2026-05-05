@@ -427,3 +427,16 @@ Iteration 55 eval:
 | `noisy_safe` | 0.20 | -41.35 | 54 | 778.90 | 0.875 | 0.87 | 0.006 | 0.994 |
 
 Run B iteration 55는 Run A 같은 시간대보다 `random`과 safe family score diff가 좋다. 그러나 safe family timeout이 90/100 전후로 이미 높고, `discard_rate`가 거의 99% 이상이라 Claude가 지적한 discard-loop collapse 신호가 강하게 나타난다. `passive_discard`는 score diff가 거의 0까지 왔지만 여전히 win rate 0이다.
+
+Iteration 70 eval:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy | avg_opened_colors | play_rate | discard_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.80 | 32.88 | 0 | 347.86 | 1.112 | 0.03 | 0.000 | 1.000 |
+| `passive_discard` | 0.00 | 0.00 | 0 | 92.42 | 1.147 | 0.00 | 0.000 | 1.000 |
+| `safe_heuristic` | 0.19 | -37.85 | 99 | 997.62 | 0.656 | 0.28 | 0.002 | 0.998 |
+| `safe_heuristic_loose` | 0.19 | -46.88 | 96 | 975.54 | 0.660 | 0.31 | 0.002 | 0.998 |
+| `safe_heuristic_strict` | 0.22 | -28.28 | 99 | 998.36 | 0.643 | 0.27 | 0.002 | 0.998 |
+| `noisy_safe` | 0.26 | -27.44 | 72 | 901.48 | 0.689 | 0.27 | 0.001 | 0.999 |
+
+Run B iteration 70은 safe family win rate와 score diff가 iteration 55보다 조금 개선됐지만, safe family timeout이 96-99/100까지 올라갔다. `policy_entropy`, `avg_opened_colors`, `play_rate`가 함께 낮아져서, safe pretrain prior가 유지되기보다 discard-loop 방향으로 빠르게 붕괴하는 신호가 강하다.
