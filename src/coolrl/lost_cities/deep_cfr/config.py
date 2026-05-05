@@ -47,6 +47,35 @@ class NetworkConfig:
 
 
 @dataclass(slots=True)
+class SelfPlayLeagueConfig:
+    current_weight: float = 0.5
+    recent_weight: float = 0.3
+    older_weight: float = 0.2
+    recent_window: int = 5
+    max_snapshots: int = 20
+    snapshot_every: int = 1
+
+    def __post_init__(self) -> None:
+        self.current_weight = float(self.current_weight)
+        self.recent_weight = float(self.recent_weight)
+        self.older_weight = float(self.older_weight)
+        weights = (self.current_weight, self.recent_weight, self.older_weight)
+        if any(weight < 0.0 for weight in weights):
+            raise ValueError("traversal.self_play_league weights must be nonnegative")
+        if sum(weights) <= 0.0:
+            raise ValueError("traversal.self_play_league weights must sum to a positive value")
+        self.recent_window = int(self.recent_window)
+        if self.recent_window < 0:
+            raise ValueError("traversal.self_play_league.recent_window must be nonnegative")
+        self.max_snapshots = int(self.max_snapshots)
+        if self.max_snapshots < 0:
+            raise ValueError("traversal.self_play_league.max_snapshots must be nonnegative")
+        self.snapshot_every = int(self.snapshot_every)
+        if self.snapshot_every <= 0:
+            raise ValueError("traversal.self_play_league.snapshot_every must be positive")
+
+
+@dataclass(slots=True)
 class TraversalConfig:
     backend: str = "python"
     traversals_per_player: int = 100
@@ -68,8 +97,11 @@ class TraversalConfig:
     outcome_sampling_epsilon: float = 0.0
     outcome_sampling_value_clip: float | None = None
     outcome_unsampled_regret: str = "negative_node_value"
+    self_play_league: SelfPlayLeagueConfig = field(default_factory=SelfPlayLeagueConfig)
 
     def __post_init__(self) -> None:
+        if isinstance(self.self_play_league, dict):
+            self.self_play_league = SelfPlayLeagueConfig(**self.self_play_league)
         mode = str(self.cutoff_value_mode).strip().lower()
         if mode not in {"score_diff", "random_rollout"}:
             raise ValueError("traversal.cutoff_value_mode must be one of 'score_diff' or 'random_rollout'")
@@ -81,9 +113,10 @@ class TraversalConfig:
             )
         self.cutoff_rollout_policy = policy
         opponent_policy = str(self.opponent_policy).strip().lower()
-        if opponent_policy not in {"network", "safe_heuristic"}:
+        if opponent_policy not in {"network", "safe_heuristic", "self_play_league"}:
             raise ValueError(
-                "traversal.opponent_policy must be one of 'network' or 'safe_heuristic'"
+                "traversal.opponent_policy must be one of "
+                "'network', 'safe_heuristic', or 'self_play_league'"
             )
         self.opponent_policy = opponent_policy
         self.cutoff_rollouts = int(self.cutoff_rollouts)

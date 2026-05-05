@@ -8,6 +8,7 @@ import torch
 
 from ..game import GameState
 from ..bots.heuristic import SafeHeuristicBot
+from .config import SelfPlayLeagueConfig
 from .encoding import encode_information_state, legal_mask_array
 from .memory import AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet, regret_matching
@@ -84,6 +85,8 @@ class DeepCFRTraverser:
         cutoff_rollout_policy: str = "random",
         cutoff_rollout_max_steps: int = 10_000,
         opponent_policy: str = "network",
+        league_advantage_nets: list[list[AdvantageNet]] | None = None,
+        self_play_league: SelfPlayLeagueConfig | None = None,
         outcome_sampling_epsilon: float = 0.0,
         outcome_sampling_value_clip: float | None = None,
         outcome_unsampled_regret: str = "negative_node_value",
@@ -105,6 +108,8 @@ class DeepCFRTraverser:
         self.cutoff_rollout_policy = cutoff_rollout_policy
         self.cutoff_rollout_max_steps = max(1, int(cutoff_rollout_max_steps))
         self.opponent_policy = opponent_policy
+        self.league_advantage_nets = league_advantage_nets or []
+        self.self_play_league = self_play_league or SelfPlayLeagueConfig()
         self.outcome_sampling_epsilon = float(outcome_sampling_epsilon)
         self.outcome_sampling_value_clip = (
             None if outcome_sampling_value_clip is None else max(1.0e-9, float(outcome_sampling_value_clip))
@@ -130,15 +135,23 @@ class DeepCFRTraverser:
         self.timing_stats.traversal_wall_seconds += time.perf_counter() - started
         return value, stats
 
+    def _policy_from_net(
+        self,
+        net: AdvantageNet,
+        state: GameState,
+        player: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        info = encode_information_state(state, player)
+        legal = legal_mask_array(state)
+        with torch.inference_mode():
+            x = torch.as_tensor(info, dtype=torch.float32, device=self.device).unsqueeze(0)
+            advantages = net(x).squeeze(0).detach().cpu().numpy()
+        policy = regret_matching(advantages, legal, self.epsilon)
+        return info, legal, np.asarray(policy, dtype=np.float32)
+
     def _policy(self, state: GameState, player: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if self.timing_stats is None:
-            info = encode_information_state(state, player)
-            legal = legal_mask_array(state)
-            with torch.inference_mode():
-                x = torch.as_tensor(info, dtype=torch.float32, device=self.device).unsqueeze(0)
-                advantages = self.advantage_nets[player](x).squeeze(0).detach().cpu().numpy()
-            policy = regret_matching(advantages, legal, self.epsilon)
-            return info, legal, np.asarray(policy, dtype=np.float32)
+            return self._policy_from_net(self.advantage_nets[player], state, player)
 
         self.timing_stats.policy_calls += 1
         started = time.perf_counter()
@@ -154,6 +167,46 @@ class DeepCFRTraverser:
         policy = regret_matching(advantages, legal, self.epsilon)
         self.timing_stats.regret_matching_seconds += time.perf_counter() - started
         return info, legal, np.asarray(policy, dtype=np.float32)
+
+    def _league_bucket(self) -> str:
+        cfg = self.self_play_league
+        recent_count = min(len(self.league_advantage_nets), cfg.recent_window)
+        older_count = max(0, len(self.league_advantage_nets) - recent_count)
+        weights = np.asarray(
+            [
+                cfg.current_weight,
+                cfg.recent_weight if recent_count > 0 else 0.0,
+                cfg.older_weight if older_count > 0 else 0.0,
+            ],
+            dtype=np.float64,
+        )
+        total = float(weights.sum())
+        if total <= 0.0:
+            return "current"
+        weights /= total
+        return str(self.rng.choice(["current", "recent", "older"], p=weights))
+
+    def _league_advantage_net(self, player: int) -> AdvantageNet:
+        bucket = self._league_bucket()
+        if bucket == "current" or not self.league_advantage_nets:
+            return self.advantage_nets[player]
+        recent_count = min(len(self.league_advantage_nets), self.self_play_league.recent_window)
+        if bucket == "recent" and recent_count > 0:
+            candidates = self.league_advantage_nets[-recent_count:]
+        else:
+            candidates = self.league_advantage_nets[: max(0, len(self.league_advantage_nets) - recent_count)]
+        if not candidates:
+            return self.advantage_nets[player]
+        snapshot = candidates[int(self.rng.integers(0, len(candidates)))]
+        return snapshot[player]
+
+    def _self_play_league_action(self, state: GameState, player: int) -> int | None:
+        net = self._league_advantage_net(player)
+        _, legal, policy = self._policy_from_net(net, state, player)
+        legal_actions = np.flatnonzero(legal)
+        if len(legal_actions) == 0:
+            return None
+        return self._sample_legal_action(policy, legal_actions)
 
     def _record_strategy(
         self,
@@ -282,6 +335,8 @@ class DeepCFRTraverser:
     def _fixed_opponent_action(self, state: GameState) -> int | None:
         if self.opponent_policy == "network":
             return None
+        if self.opponent_policy == "self_play_league":
+            return self._self_play_league_action(state, state.current_player)
         return self._rollout_bot_action(state, self.opponent_policy)
 
     def _rollout_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
@@ -417,6 +472,8 @@ def cfr_traverse(
     cutoff_rollout_policy: str = "random",
     cutoff_rollout_max_steps: int = 10_000,
     opponent_policy: str = "network",
+    league_advantage_nets: list[list[AdvantageNet]] | None = None,
+    self_play_league: SelfPlayLeagueConfig | None = None,
     outcome_sampling_epsilon: float = 0.0,
     outcome_sampling_value_clip: float | None = None,
     outcome_unsampled_regret: str = "negative_node_value",
@@ -439,6 +496,8 @@ def cfr_traverse(
         cutoff_rollout_policy=cutoff_rollout_policy,
         cutoff_rollout_max_steps=cutoff_rollout_max_steps,
         opponent_policy=opponent_policy,
+        league_advantage_nets=league_advantage_nets,
+        self_play_league=self_play_league,
         outcome_sampling_epsilon=outcome_sampling_epsilon,
         outcome_sampling_value_clip=outcome_sampling_value_clip,
         outcome_unsampled_regret=outcome_unsampled_regret,

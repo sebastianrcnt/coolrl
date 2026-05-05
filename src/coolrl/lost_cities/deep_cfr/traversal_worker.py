@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ..game import GameState, LostCitiesConfig
-from .config import NetworkConfig
+from .config import NetworkConfig, SelfPlayLeagueConfig
 from .memory import _Sample, AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet
 from .traversal import DeepCFRTraverser, TraversalStats, TraversalTimingStats
@@ -35,6 +35,8 @@ class TraversalWorkerBatch:
     cutoff_rollout_policy: str
     cutoff_rollout_max_steps: int
     opponent_policy: str
+    league_advantage_net_state_dicts: list[list[dict[str, Any]]]
+    self_play_league: SelfPlayLeagueConfig
     strategy_sample_interval: int
     store_strategy_on_opponent_nodes: bool
     store_strategy_on_traverser_nodes: bool
@@ -97,6 +99,19 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         net.load_state_dict(cpu_state_dict)
         net.eval()
         advantage_nets.append(net)
+    league_advantage_nets: list[list[AdvantageNet]] = []
+    for snapshot_state_dicts in batch.league_advantage_net_state_dicts:
+        snapshot_nets: list[AdvantageNet] = []
+        for state_dict in snapshot_state_dicts:
+            net = AdvantageNet(batch.input_dim, batch.action_size, batch.network_config).to(device)
+            cpu_state_dict = {
+                name: value.detach().cpu() if isinstance(value, torch.Tensor) else value
+                for name, value in state_dict.items()
+            }
+            net.load_state_dict(cpu_state_dict)
+            net.eval()
+            snapshot_nets.append(net)
+        league_advantage_nets.append(snapshot_nets)
 
     memory_capacity = _worker_memory_capacity(batch)
     advantage_memories = [
@@ -122,6 +137,8 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         cutoff_rollout_policy=batch.cutoff_rollout_policy,
         cutoff_rollout_max_steps=batch.cutoff_rollout_max_steps,
         opponent_policy=batch.opponent_policy,
+        league_advantage_nets=league_advantage_nets,
+        self_play_league=batch.self_play_league,
         outcome_sampling_epsilon=batch.outcome_sampling_epsilon,
         outcome_sampling_value_clip=batch.outcome_sampling_value_clip,
         outcome_unsampled_regret=batch.outcome_unsampled_regret,

@@ -76,6 +76,30 @@ def test_train_parser_resume_with_path_preserves_path() -> None:
     assert args.resume == "checkpoints/lost_cities_deep_cfr_tier3/iteration_00005.pt"
 
 
+def test_train_parser_accepts_runtime_overrides() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "train",
+            "--config",
+            "configs/lost_cities_deep_cfr_pure_self_play_a.yaml",
+            "--init-checkpoint",
+            "checkpoints/init.pt",
+            "--max-hours",
+            "2",
+            "--max-iterations",
+            "10",
+            "--checkpoint-dir",
+            "checkpoints/example",
+        ]
+    )
+
+    assert str(args.init_checkpoint) == "checkpoints/init.pt"
+    assert args.max_hours == 2.0
+    assert args.max_iterations == 10
+    assert str(args.checkpoint_dir) == "checkpoints/example"
+
+
 def test_pretrain_heuristic_parser_accepts_training_options() -> None:
     parser = build_parser()
     args = parser.parse_args(
@@ -212,6 +236,37 @@ def test_resolve_resume_without_path_requires_existing_latest(tmp_path: Path) ->
         assert "latest checkpoint does not exist" in str(exc)
     else:
         raise AssertionError("expected FileNotFoundError")
+
+
+def test_trainer_init_checkpoint_loads_weights_without_iteration_or_optimizers(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "optimization": {"learning_rate": 1.0e-3, "weight_decay": 0.0},
+            "checkpoint": {"directory": str(tmp_path / "source")},
+        }
+    )
+    source = DeepCFRTrainer(cfg)
+    for parameter in source.strategy_net.parameters():
+        parameter.data.fill_(0.25)
+    source.iteration = 7
+    source.save_checkpoint(tmp_path / "init.pt")
+
+    target_cfg = config_from_dict(
+        {
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "optimization": {"learning_rate": 2.0e-4, "weight_decay": 0.0},
+            "checkpoint": {"directory": str(tmp_path / "target")},
+        }
+    )
+    target = DeepCFRTrainer(target_cfg, init_checkpoint_path=str(tmp_path / "init.pt"))
+
+    assert target.iteration == 0
+    assert target.strategy_optimizer.param_groups[0]["lr"] == 2.0e-4
+    for parameter in target.strategy_net.parameters():
+        assert torch.all(parameter == torch.full_like(parameter, 0.25))
 
 
 def test_safe_heuristic_pretrain_checkpoint_is_resume_compatible(tmp_path: Path) -> None:
@@ -928,6 +983,8 @@ def test_evaluate_against_bot_reports_passive_no_expedition_diagnostics(tmp_path
     assert result["play_action_rate"] == 0.0
     assert result["discard_action_rate"] == 1.0
     assert result["avg_final_score"] == 0.0
+    assert result["avg_game_length"] > 0.0
+    assert result["policy_entropy"] >= 0.0
 
 
 def test_deep_cfr_eval_cli_accepts_passive_discard_opponent() -> None:
@@ -958,6 +1015,22 @@ def test_deep_cfr_eval_cli_accepts_sampling_and_max_steps_overrides() -> None:
 
     assert args.sample is True
     assert args.max_steps == 123
+
+
+def test_deep_cfr_eval_cli_accepts_checkpoint_opponent() -> None:
+    args = build_parser().parse_args(
+        [
+            "eval",
+            "--checkpoint",
+            "checkpoint.pt",
+            "--opponent-checkpoint",
+            "old.pt",
+            "--opponent-sample",
+        ]
+    )
+
+    assert str(args.opponent_checkpoint) == "old.pt"
+    assert args.opponent_sample is True
 
 
 def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:
@@ -995,5 +1068,49 @@ def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:
     assert progress["eval_random_avg_diff"] == 0.0
     assert progress["eval_random_avg_final_score"] == 0.0
     assert progress["eval_random_avg_opened_colors"] >= 0.0
+    assert progress["eval_random_avg_game_length"] == 1.0
+    assert progress["eval_random_policy_entropy"] >= 0.0
     assert progress["eval_random_play_action_rate"] >= 0.0
     assert progress["eval_random_discard_action_rate"] >= 0.0
+
+
+def test_tiny_self_play_league_training_run_completes(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "max_iterations": 2,
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "traversal": {
+                "traversals_per_player": 2,
+                "max_depth": 3,
+                "opponent_policy": "self_play_league",
+                "store_strategy_on_opponent_nodes": False,
+                "num_workers": 2,
+                "traversal_worker_chunk_size": 1,
+                "self_play_league": {
+                    "current_weight": 0.5,
+                    "recent_weight": 0.3,
+                    "older_weight": 0.2,
+                    "recent_window": 1,
+                    "max_snapshots": 2,
+                },
+            },
+            "optimization": {
+                "advantage_batch_size": 8,
+                "strategy_batch_size": 8,
+                "advantage_updates_per_iteration": 1,
+                "strategy_updates_per_iteration": 1,
+            },
+            "memory": {"advantage_capacity": 100, "strategy_capacity": 100},
+            "evaluation": {"eval_every": 0, "games": 1},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+
+    trainer = DeepCFRTrainer(cfg)
+    trainer.run()
+
+    progress = json.loads((tmp_path / "runtime_progress.json").read_text(encoding="utf-8"))
+    checkpoint = torch.load(tmp_path / "latest.pt", map_location="cpu")
+    assert progress["self_play_league_snapshots"] == 2
+    assert len(checkpoint["self_play_league_snapshots"]) == 2

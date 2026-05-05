@@ -19,7 +19,12 @@ from loguru import logger
 
 from .benchmark import benchmark_traversal_modes
 from .config import RunConfig, config_from_dict, load_config
-from .evaluate import SUPPORTED_OPPONENTS, evaluate_against_bot, make_opponent
+from .evaluate import (
+    SUPPORTED_OPPONENTS,
+    evaluate_against_bot,
+    load_strategy_bot_from_checkpoint,
+    make_opponent,
+)
 from .imitation import pretrain_safe_heuristic_checkpoint
 from .networks import StrategyNet
 from .policy_gradient import fine_tune_policy_gradient_checkpoint
@@ -59,10 +64,18 @@ def _resolve_resume_path(config: RunConfig, resume: str | None) -> str | None:
 
 def train_command(args: argparse.Namespace) -> None:
     config = load_config(args.config)
+    if args.resume and args.init_checkpoint:
+        raise ValueError("--resume and --init-checkpoint cannot be used together")
+    if args.max_hours is not None:
+        config.max_hours = args.max_hours
+    if args.max_iterations is not None:
+        config.max_iterations = args.max_iterations
+    if args.checkpoint_dir is not None:
+        config.checkpoint.directory = str(args.checkpoint_dir)
     resume_path = _resolve_resume_path(config, args.resume)
     log_path = _configure_train_file_logging(config, resume_path=resume_path)
     logger.info("Training log file: {}", log_path)
-    trainer = DeepCFRTrainer(config, resume_path=resume_path)
+    trainer = DeepCFRTrainer(config, resume_path=resume_path, init_checkpoint_path=args.init_checkpoint)
     trainer.run()
 
 
@@ -77,7 +90,17 @@ def eval_command(args: argparse.Namespace) -> None:
     ).to(device)
     strategy_net.load_state_dict(checkpoint["strategy_net"])
     lc_config = config.rules.to_lost_cities_config(seed=config.seed)
-    opponent = make_opponent(args.opponent, seed=config.seed + 99)
+    if args.opponent_checkpoint:
+        opponent, _ = load_strategy_bot_from_checkpoint(
+            args.opponent_checkpoint,
+            device=device,
+            sample=args.opponent_sample,
+            seed=config.seed + 99,
+        )
+        opponent_label = str(args.opponent_checkpoint)
+    else:
+        opponent = make_opponent(args.opponent, seed=config.seed + 99)
+        opponent_label = args.opponent
     result = evaluate_against_bot(
         strategy_net,
         opponent,
@@ -90,8 +113,8 @@ def eval_command(args: argparse.Namespace) -> None:
         sample=args.sample,
     )
     logger.info(
-        "Evaluation vs {}: games={} sample={} max_steps={} win_rate={:.3f} avg_diff={:.2f} avg_final_score={:.2f} avg_opponent_score={:.2f} avg_opened_colors={:.2f} play_action_rate={:.3f} discard_action_rate={:.3f} wins={} losses={} draws={} max_step_timeouts={}",
-        args.opponent,
+        "Evaluation vs {}: games={} sample={} max_steps={} win_rate={:.3f} avg_diff={:.2f} avg_final_score={:.2f} avg_opponent_score={:.2f} avg_opened_colors={:.2f} avg_game_length={:.1f} policy_entropy={:.3f} play_action_rate={:.3f} discard_action_rate={:.3f} wins={} losses={} draws={} max_step_timeouts={}",
+        opponent_label,
         result["games"],
         args.sample,
         args.max_steps if args.max_steps is not None else config.evaluation.max_steps,
@@ -100,6 +123,8 @@ def eval_command(args: argparse.Namespace) -> None:
         result["avg_final_score"],
         result["avg_opponent_score"],
         result["avg_opened_colors"],
+        result["avg_game_length"],
+        result["policy_entropy"],
         result["play_action_rate"],
         result["discard_action_rate"],
         result["wins"],
@@ -268,7 +293,7 @@ def status_command(args: argparse.Namespace) -> None:
     for opponent_name in eval_opponents:
         prefix = f"eval_{opponent_name}"
         logger.info(
-            "Eval {}: win_rate={} avg_diff={} avg_final_score={} avg_opponent_score={} avg_opened_colors={} avg_opponent_opened_colors={} avg_expedition_cards={} avg_play_actions={} avg_discard_actions={} play_action_rate={} discard_action_rate={} max_step_timeouts={}",
+            "Eval {}: win_rate={} avg_diff={} avg_final_score={} avg_opponent_score={} avg_opened_colors={} avg_opponent_opened_colors={} avg_expedition_cards={} avg_play_actions={} avg_discard_actions={} avg_game_length={} policy_entropy={} play_action_rate={} discard_action_rate={} max_step_timeouts={}",
             opponent_name,
             latest.get(f"{prefix}_win_rate", "n/a"),
             latest.get(f"{prefix}_avg_diff", "n/a"),
@@ -279,6 +304,8 @@ def status_command(args: argparse.Namespace) -> None:
             latest.get(f"{prefix}_avg_expedition_cards", "n/a"),
             latest.get(f"{prefix}_avg_play_actions", "n/a"),
             latest.get(f"{prefix}_avg_discard_actions", "n/a"),
+            latest.get(f"{prefix}_avg_game_length", "n/a"),
+            latest.get(f"{prefix}_policy_entropy", "n/a"),
             latest.get(f"{prefix}_play_action_rate", "n/a"),
             latest.get(f"{prefix}_discard_action_rate", "n/a"),
             latest.get(f"{prefix}_max_step_timeouts", "n/a"),
@@ -297,6 +324,15 @@ def build_parser() -> argparse.ArgumentParser:
     train = subparsers.add_parser("train")
     train.add_argument("--config", type=Path, default=Path("configs/lost_cities_deep_cfr_tier3.yaml"))
     train.add_argument("--resume", nargs="?", const=_RESUME_LATEST, default=None)
+    train.add_argument(
+        "--init-checkpoint",
+        type=Path,
+        default=None,
+        help="Initialize network weights from a checkpoint without restoring optimizer state or iteration.",
+    )
+    train.add_argument("--max-hours", type=float, default=None, help="Override config.max_hours for this run.")
+    train.add_argument("--max-iterations", type=int, default=None, help="Override config.max_iterations for this run.")
+    train.add_argument("--checkpoint-dir", type=Path, default=None, help="Override checkpoint.directory for this run.")
     train.set_defaults(func=train_command)
 
     eval_parser = subparsers.add_parser("eval")
@@ -304,6 +340,17 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--config", type=Path, default=None)
     eval_parser.add_argument("--games", type=int, default=100)
     eval_parser.add_argument("--opponent", choices=SUPPORTED_OPPONENTS, default="random")
+    eval_parser.add_argument(
+        "--opponent-checkpoint",
+        type=Path,
+        default=None,
+        help="Evaluate against another StrategyNet checkpoint instead of a named bot.",
+    )
+    eval_parser.add_argument(
+        "--opponent-sample",
+        action="store_true",
+        help="Sample from --opponent-checkpoint policy instead of using argmax.",
+    )
     eval_parser.add_argument("--sample", action="store_true", help="Sample from the strategy policy instead of using argmax.")
     eval_parser.add_argument("--max-steps", type=int, default=None, help="Override evaluation.max_steps from the config/checkpoint.")
     eval_parser.set_defaults(func=eval_command)

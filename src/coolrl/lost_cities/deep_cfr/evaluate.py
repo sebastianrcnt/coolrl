@@ -56,9 +56,11 @@ class StrategyNetBot(LostCitiesBot):
         self.device = torch.device(device)
         self.sample = sample
         self.rng = np.random.default_rng(seed)
+        self.last_policy_entropy: float | None = None
 
     def act(self, obs_or_state: BotInput) -> int:
         if not isinstance(obs_or_state, GameState):
+            self.last_policy_entropy = None
             legal = np.asarray(obs_or_state["legal_mask"], dtype=bool) if isinstance(obs_or_state, dict) else np.asarray(obs_or_state.legal_mask, dtype=bool)
             return first_legal(legal)
         state = obs_or_state
@@ -77,7 +79,11 @@ class StrategyNetBot(LostCitiesBot):
             probs = probs / probs.sum()
             unified = int(self.rng.choice(legal_indices, p=probs))
         else:
+            stable = masked[legal_indices] - np.max(masked[legal_indices])
+            probs = np.exp(stable)
+            probs = probs / probs.sum()
             unified = int(np.argmax(masked))
+        self.last_policy_entropy = float(-(probs * np.log(np.clip(probs, 1.0e-12, 1.0))).sum())
         return state.from_unified_action(unified)
 
 
@@ -184,24 +190,34 @@ def _play_game_for_evaluation(
     seed: int | None = None,
     max_steps: int = 10_000,
     tracked_player: int | None = None,
-) -> tuple[GameState, bool, dict[str, int]]:
+) -> tuple[GameState, bool, dict[str, float | int], int]:
     game_config = replace(config, seed=seed) if seed is not None else config
     state = GameState.new_game(game_config)
     bots = [bot0, bot1]
-    action_counts = {"play_actions": 0, "discard_actions": 0}
-    for _ in range(max_steps):
+    action_counts: dict[str, float | int] = {
+        "play_actions": 0,
+        "discard_actions": 0,
+        "policy_entropy_sum": 0.0,
+        "policy_entropy_actions": 0,
+    }
+    for step in range(max_steps):
         if state.terminal:
-            return state, False, action_counts
+            return state, False, action_counts, step
         acting_player = state.current_player
         phase = state.phase
-        action = bots[state.current_player].act(state)
+        bot = bots[state.current_player]
+        action = bot.act(state)
         if tracked_player is not None and acting_player == tracked_player and phase == "card":
             if is_card_play_action(action):
-                action_counts["play_actions"] += 1
+                action_counts["play_actions"] = int(action_counts["play_actions"]) + 1
             elif is_card_discard_action(action):
-                action_counts["discard_actions"] += 1
+                action_counts["discard_actions"] = int(action_counts["discard_actions"]) + 1
+        if tracked_player is not None and acting_player == tracked_player and isinstance(bot, StrategyNetBot):
+            if bot.last_policy_entropy is not None:
+                action_counts["policy_entropy_sum"] = float(action_counts["policy_entropy_sum"]) + bot.last_policy_entropy
+                action_counts["policy_entropy_actions"] = int(action_counts["policy_entropy_actions"]) + 1
         state.apply_action(action)
-    return state, not state.terminal, action_counts
+    return state, not state.terminal, action_counts, max_steps
 
 
 def evaluate_against_bot(
@@ -232,13 +248,16 @@ def evaluate_against_bot(
     expedition_cards: list[int] = []
     play_actions = 0
     discard_actions = 0
+    game_lengths: list[int] = []
+    policy_entropy_sum = 0.0
+    policy_entropy_actions = 0
     wins = losses = draws = 0
     max_step_timeouts = 0
     for index in range(games):
         net_bot = StrategyNetBot(strategy_net, config, device=device, sample=sample, seed=seed + index)
         game_seed = seed + index
         if index % 2 == 0:
-            final_state, timed_out, action_counts = _play_game_for_evaluation(
+            final_state, timed_out, action_counts, game_length = _play_game_for_evaluation(
                 net_bot,
                 opponent_bot,
                 config,
@@ -248,7 +267,7 @@ def evaluate_against_bot(
             )
             deep_cfr_player = 0
         else:
-            final_state, timed_out, action_counts = _play_game_for_evaluation(
+            final_state, timed_out, action_counts, game_length = _play_game_for_evaluation(
                 opponent_bot,
                 net_bot,
                 config,
@@ -263,8 +282,11 @@ def evaluate_against_bot(
         opened_colors.append(_opened_color_count(final_state, deep_cfr_player))
         opponent_opened_colors.append(_opened_color_count(final_state, opponent_player))
         expedition_cards.append(_expedition_card_count(final_state, deep_cfr_player))
-        play_actions += action_counts["play_actions"]
-        discard_actions += action_counts["discard_actions"]
+        game_lengths.append(game_length)
+        play_actions += int(action_counts["play_actions"])
+        discard_actions += int(action_counts["discard_actions"])
+        policy_entropy_sum += float(action_counts["policy_entropy_sum"])
+        policy_entropy_actions += int(action_counts["policy_entropy_actions"])
         if timed_out:
             max_step_timeouts += 1
             if timeout_mode == "score_diff":
@@ -294,6 +316,8 @@ def evaluate_against_bot(
         "avg_expedition_cards": float(np.mean(expedition_cards)) if expedition_cards else 0.0,
         "avg_discard_actions": float(discard_actions / max(1, games)),
         "avg_play_actions": float(play_actions / max(1, games)),
+        "avg_game_length": float(np.mean(game_lengths)) if game_lengths else 0.0,
+        "policy_entropy": float(policy_entropy_sum / max(1, policy_entropy_actions)),
         "play_action_rate": float(play_actions / max(1, card_actions)),
         "discard_action_rate": float(discard_actions / max(1, card_actions)),
         "wins": wins,
