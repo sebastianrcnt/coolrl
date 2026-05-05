@@ -124,6 +124,9 @@ def pretrain_heuristic_command(args: argparse.Namespace) -> None:
         base_checkpoint=args.base_checkpoint,
         init_checkpoint=args.init_checkpoint,
         policy_sample=args.policy_sample,
+        improvement_rollouts=args.improvement_rollouts,
+        improvement_rollout_max_steps=args.improvement_rollout_max_steps,
+        improvement_max_examples=args.improvement_max_examples,
     )
     logger.info(
         "Safe heuristic pretrain complete: output={} games={} states={} strategy_loss={:.4f} strategy_accuracy={:.4f} advantage_loss=({:.4f},{:.4f})",
@@ -309,11 +312,12 @@ def build_parser() -> argparse.ArgumentParser:
     pretrain.add_argument("--seed", type=int, default=None)
     pretrain.add_argument(
         "--dataset-mode",
-        choices=["safe_self_play", "aggregated", "successful_policy_vs_safe"],
+        choices=["safe_self_play", "aggregated", "successful_policy_vs_safe", "safe_action_rollout"],
         default="safe_self_play",
         help=(
             "Use safe self-play states, aggregate model-induced states from "
-            "--base-checkpoint, or replay successful policy-vs-safe actions."
+            "--base-checkpoint, replay successful policy-vs-safe actions, "
+            "or label actions by short safe-rollout improvement."
         ),
     )
     pretrain.add_argument(
@@ -332,6 +336,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy-sample",
         action="store_true",
         help="Sample the behavior policy when collecting aggregated imitation states.",
+    )
+    pretrain.add_argument(
+        "--improvement-rollouts",
+        type=int,
+        default=1,
+        help="Rollouts per legal action for safe_action_rollout dataset labeling.",
+    )
+    pretrain.add_argument(
+        "--improvement-rollout-max-steps",
+        type=int,
+        default=300,
+        help="Maximum rollout steps after each candidate action for safe_action_rollout labels.",
+    )
+    pretrain.add_argument(
+        "--improvement-max-examples",
+        type=int,
+        default=None,
+        help="Optional cap on safe_action_rollout labeled states.",
     )
     pretrain.set_defaults(func=pretrain_heuristic_command)
 

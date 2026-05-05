@@ -178,6 +178,21 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
   --games 2000 --epochs 2 --batch-size 2048 --max-steps 1000
 ```
 
+더 직접적인 action-level improvement 실험은 `safe_action_rollout` mode를 쓴다. 이 mode는 base policy가 `safe_heuristic` 상대로 지거나 timeout 나는 trajectory를 우선 모으고, 각 상태의 legal action을 적용한 뒤 짧은 policy-vs-safe rollout으로 더 좋은 action을 label로 고른다:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
+  --config configs/lost_cities_deep_cfr_safe_dagger_256.yaml \
+  --output checkpoints/lost_cities_deep_cfr_safe_dagger_256/safe_action_rollout.pt \
+  --dataset-mode safe_action_rollout \
+  --base-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --init-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --games 200 --epochs 2 --batch-size 1024 --max-steps 1000 \
+  --improvement-rollouts 1 \
+  --improvement-rollout-max-steps 300 \
+  --improvement-max-examples 2000
+```
+
 현재 training caveat와 다음 실험 기준은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)를 참고한다.
 
 ## 테스트

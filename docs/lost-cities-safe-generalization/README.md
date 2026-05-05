@@ -45,6 +45,11 @@
   - anchor checkpoint와의 KL penalty, entropy bonus, reward clipping을 지원한다.
   - Deep CFR advantage/reservoir 경로와 독립적으로, safe 상대 outcome 신호를 직접 넣기 위한 다음 실험용이다.
 
+- `pretrain-heuristic --dataset-mode safe_action_rollout`
+  - base policy가 `safe_heuristic`을 상대로 지거나 timeout 나는 trajectory를 우선 수집한다.
+  - 각 hard state에서 legal action을 하나 적용한 뒤 짧은 policy-vs-safe rollout으로 action value를 비교한다.
+  - target은 `SafeHeuristicBot` 행동이 아니라 rollout score가 가장 높은 action이다.
+
 - Eval opponent 확장
   - `safe_heuristic_loose`
   - `safe_heuristic_strict`
@@ -151,10 +156,27 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli fine-tune-policy \
 
 이 run은 완료 후 최소 `random`, `passive_discard`, `safe_heuristic` 500-game eval이 필요하다.
 
+Action-level safe-rollout improvement label 파일럿:
+
+```bash
+uv run python -m coolrl.lost_cities.deep_cfr.cli pretrain-heuristic \
+  --config configs/lost_cities_deep_cfr_safe_dagger_256.yaml \
+  --output checkpoints/lost_cities_deep_cfr_safe_dagger_256/safe_action_rollout.pt \
+  --dataset-mode safe_action_rollout \
+  --base-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --init-checkpoint checkpoints/lost_cities_deep_cfr_safe_adv_imitation/latest.pt \
+  --games 200 --epochs 2 --batch-size 1024 --max-steps 1000 \
+  --improvement-rollouts 1 \
+  --improvement-rollout-max-steps 300 \
+  --improvement-max-examples 2000
+```
+
+이 mode는 전체 episode reward를 한 번에 밀어주는 PG보다 더 직접적인 action-level correction을 기대한다. 단, label 생성 비용이 크므로 처음에는 `--improvement-max-examples`를 작게 두고 500-game eval로 신호만 확인한다.
+
 ## 다음 우선순위
 
 1. 단순 policy-gradient는 우선순위를 낮춘다. `policy_gradient_safe_e1000.pt`가 safe win rate `0.280`에 그쳐 기준 checkpoint보다 낫지 않았다.
-2. 다음 실험은 action-level safe-rollout improvement label이다. 각 상태에서 legal action 몇 개를 적용한 뒤 safe-vs-safe 또는 policy-vs-safe rollout을 짧게 돌려, `SafeHeuristicBot` 행동이 아니라 “safe 상대로 기대 score_diff가 더 좋은 행동”을 target으로 만든다.
+2. 다음 실험은 action-level safe-rollout improvement label이다. `safe_action_rollout` mode로 각 상태에서 legal action 몇 개를 적용한 뒤 policy-vs-safe rollout을 짧게 돌려, `SafeHeuristicBot` 행동이 아니라 “safe 상대로 기대 score_diff가 더 좋은 행동”을 target으로 만든다.
 3. rollout label은 모든 상태에 쓰지 말고, safe 상대 timeout/루프가 자주 생기는 card phase와 draw phase를 분리해 수집한다. 특히 draw-discard loop를 끊는 draw action label을 별도로 추적한다.
 4. label 생성 비용이 크면 `safe_adv_imitation/latest.pt`가 실제로 safe에게 지는 trajectory에서만 hard state를 뽑아 action improvement를 계산한다.
 5. 새 checkpoint는 먼저 `random >= 0.90`, `passive >= 0.45`, `safe >= 0.35`를 500-game eval에서 확인한다. `safe >= 0.40`까지 오르면 variant-safe 3종도 평가한다.

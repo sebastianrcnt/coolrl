@@ -102,6 +102,12 @@ def test_pretrain_heuristic_parser_accepts_training_options() -> None:
             "--init-checkpoint",
             "checkpoints/example/init.pt",
             "--policy-sample",
+            "--improvement-rollouts",
+            "2",
+            "--improvement-rollout-max-steps",
+            "50",
+            "--improvement-max-examples",
+            "100",
         ]
     )
 
@@ -116,6 +122,9 @@ def test_pretrain_heuristic_parser_accepts_training_options() -> None:
     assert str(args.base_checkpoint) == "checkpoints/example/base.pt"
     assert str(args.init_checkpoint) == "checkpoints/example/init.pt"
     assert args.policy_sample is True
+    assert args.improvement_rollouts == 2
+    assert args.improvement_rollout_max_steps == 50
+    assert args.improvement_max_examples == 100
 
 
 def test_fine_tune_policy_parser_accepts_training_options() -> None:
@@ -300,6 +309,51 @@ def test_successful_policy_vs_safe_pretrain_checkpoint_uses_winning_policy_actio
     assert result.states > 0
     checkpoint = torch.load(output_path, map_location="cpu")
     assert checkpoint["metrics"]["pretrain_dataset_mode"] == "successful_policy_vs_safe"
+
+
+def test_safe_action_rollout_pretrain_checkpoint_uses_rollout_improvement_labels(tmp_path: Path) -> None:
+    cfg = config_from_dict(
+        {
+            "device": "cpu",
+            "network": {"hidden_size": 16, "num_layers": 1},
+            "optimization": {"learning_rate": 1.0e-3, "weight_decay": 0.0},
+            "checkpoint": {"directory": str(tmp_path)},
+        }
+    )
+    base_path = tmp_path / "base.pt"
+    output_path = tmp_path / "safe_action_rollout.pt"
+
+    pretrain_safe_heuristic_checkpoint(
+        cfg,
+        output_path=base_path,
+        games=1,
+        epochs=1,
+        batch_size=16,
+        max_steps=80,
+        seed=123,
+    )
+    result = pretrain_safe_heuristic_checkpoint(
+        cfg,
+        output_path=output_path,
+        games=1,
+        epochs=1,
+        batch_size=16,
+        max_steps=40,
+        seed=456,
+        dataset_mode="safe_action_rollout",
+        base_checkpoint=base_path,
+        init_checkpoint=base_path,
+        improvement_rollouts=1,
+        improvement_rollout_max_steps=20,
+        improvement_max_examples=4,
+    )
+
+    assert result.dataset_mode == "safe_action_rollout"
+    assert result.states > 0
+    checkpoint = torch.load(output_path, map_location="cpu")
+    assert checkpoint["metrics"]["pretrain_dataset_mode"] == "safe_action_rollout"
+    assert checkpoint["metrics"]["pretrain_improvement_rollouts"] == 1
+    assert checkpoint["metrics"]["pretrain_improvement_max_examples"] == 4
 
 
 def test_tiny_training_run_completes_with_parallel_traversal(tmp_path: Path) -> None:

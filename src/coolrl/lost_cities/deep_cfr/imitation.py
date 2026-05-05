@@ -315,6 +315,221 @@ def _collect_successful_policy_vs_safe_dataset(
     )
 
 
+def _policy_bot_from_template(
+    template: StrategyNetBot,
+    *,
+    device: torch.device,
+    sample: bool,
+    seed: int,
+) -> StrategyNetBot:
+    return StrategyNetBot(
+        template.strategy_net,
+        template.config,
+        device=device,
+        sample=sample,
+        seed=seed,
+    )
+
+
+def _rollout_policy_vs_safe_value(
+    state: GameState,
+    *,
+    policy_player: int,
+    policy_template: StrategyNetBot,
+    device: torch.device,
+    policy_sample: bool,
+    seed: int,
+    max_steps: int,
+) -> float:
+    rollout_state = state.clone()
+    policy_bot = _policy_bot_from_template(
+        policy_template,
+        device=device,
+        sample=policy_sample,
+        seed=seed,
+    )
+    safe_bot = SafeHeuristicBot()
+    bots: list[LostCitiesBot] = (
+        [policy_bot, safe_bot] if policy_player == 0 else [safe_bot, policy_bot]
+    )
+    for _ in range(max_steps):
+        if rollout_state.terminal:
+            break
+        rollout_state.apply_action(bots[rollout_state.current_player].act(rollout_state))
+    return float(rollout_state.score_diff(policy_player))
+
+
+def _safe_action_rollout_target(
+    state: GameState,
+    *,
+    policy_player: int,
+    policy_template: StrategyNetBot,
+    device: torch.device,
+    policy_sample: bool,
+    rollouts: int,
+    rollout_max_steps: int,
+    seed: int,
+) -> int:
+    legal_actions = np.flatnonzero(state.unified_legal_mask())
+    if len(legal_actions) == 0:
+        raise RuntimeError("cannot label terminal/no-legal state")
+    best_action = int(legal_actions[0])
+    best_value = -float("inf")
+    for action_index, action in enumerate(legal_actions):
+        values: list[float] = []
+        for rollout_index in range(rollouts):
+            child = state.clone()
+            child.apply_unified_action(int(action))
+            values.append(
+                _rollout_policy_vs_safe_value(
+                    child,
+                    policy_player=policy_player,
+                    policy_template=policy_template,
+                    device=device,
+                    policy_sample=policy_sample,
+                    seed=seed + action_index * 10_000 + rollout_index,
+                    max_steps=rollout_max_steps,
+                )
+            )
+        value = float(np.mean(values))
+        if value > best_value:
+            best_value = value
+            best_action = int(action)
+    return state.from_unified_action(best_action)
+
+
+def _collect_safe_action_rollout_dataset(
+    config: RunConfig,
+    *,
+    games: int,
+    max_steps: int,
+    seed: int,
+    base_checkpoint: Path,
+    device: torch.device,
+    policy_sample: bool,
+    rollouts: int,
+    rollout_max_steps: int,
+    max_examples: int | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if rollouts <= 0:
+        raise ValueError("improvement_rollouts must be positive")
+    if rollout_max_steps <= 0:
+        raise ValueError("improvement_rollout_max_steps must be positive")
+    lc_config = config.rules.to_lost_cities_config(seed=config.seed)
+    policy_template = _load_policy_behavior_bot(
+        base_checkpoint,
+        config,
+        device=device,
+        sample=policy_sample,
+        seed=seed,
+    )
+    infos: list[np.ndarray] = []
+    legal_masks: list[np.ndarray] = []
+    target_actions: list[int] = []
+    players: list[int] = []
+    hard_trajectories = 0
+    fallback_trajectories: list[list[tuple[GameState, int]]] = []
+    max_examples = games * 20 if max_examples is None else max_examples
+
+    for game_index in range(games):
+        state = GameState.new_game(lc_config, seed=seed + game_index)
+        policy_player = game_index % 2
+        policy_bot = _policy_bot_from_template(
+            policy_template,
+            device=device,
+            sample=policy_sample,
+            seed=seed + game_index,
+        )
+        safe_bot = SafeHeuristicBot()
+        bots: list[LostCitiesBot] = (
+            [policy_bot, safe_bot] if policy_player == 0 else [safe_bot, policy_bot]
+        )
+        trajectory: list[tuple[GameState, int]] = []
+        timed_out = True
+        for _ in range(max_steps):
+            if state.terminal:
+                timed_out = False
+                break
+            player = state.current_player
+            if player == policy_player:
+                trajectory.append((state.clone(), player))
+            state.apply_action(bots[player].act(state))
+        if len(fallback_trajectories) < 4 and trajectory:
+            fallback_trajectories.append(trajectory)
+        diff = state.score_diff(policy_player)
+        if diff > 0 and not timed_out:
+            continue
+        hard_trajectories += 1
+        for example_state, player in trajectory:
+            action = _safe_action_rollout_target(
+                example_state,
+                policy_player=policy_player,
+                policy_template=policy_template,
+                device=device,
+                policy_sample=policy_sample,
+                rollouts=rollouts,
+                rollout_max_steps=rollout_max_steps,
+                seed=seed + game_index * 1_000_000 + len(target_actions),
+            )
+            _append_example(
+                example_state,
+                player,
+                action,
+                infos=infos,
+                legal_masks=legal_masks,
+                target_actions=target_actions,
+                players=players,
+            )
+            if len(target_actions) >= max_examples:
+                break
+        if len(target_actions) >= max_examples:
+            break
+
+    if not infos:
+        logger.info("No hard safe-action rollout states found; falling back to early trajectories")
+        for trajectory in fallback_trajectories:
+            for example_state, player in trajectory:
+                action = _safe_action_rollout_target(
+                    example_state,
+                    policy_player=player,
+                    policy_template=policy_template,
+                    device=device,
+                    policy_sample=policy_sample,
+                    rollouts=rollouts,
+                    rollout_max_steps=rollout_max_steps,
+                    seed=seed + len(target_actions),
+                )
+                _append_example(
+                    example_state,
+                    player,
+                    action,
+                    infos=infos,
+                    legal_masks=legal_masks,
+                    target_actions=target_actions,
+                    players=players,
+                )
+                if len(target_actions) >= max_examples:
+                    break
+            if len(target_actions) >= max_examples:
+                break
+    if not infos:
+        raise RuntimeError("safe action rollout collection produced no states")
+    logger.info(
+        "Collected safe-action rollout examples: games={} hard_trajectories={} states={} rollouts={} rollout_max_steps={}",
+        games,
+        hard_trajectories,
+        len(target_actions),
+        rollouts,
+        rollout_max_steps,
+    )
+    return (
+        np.stack(infos).astype(np.float32),
+        np.stack(legal_masks).astype(bool),
+        np.asarray(target_actions, dtype=np.int64),
+        np.asarray(players, dtype=np.int64),
+    )
+
+
 def _advantage_targets(
     legal_masks: torch.Tensor,
     target_actions: torch.Tensor,
@@ -340,6 +555,9 @@ def pretrain_safe_heuristic_checkpoint(
     base_checkpoint: Path | None = None,
     init_checkpoint: Path | None = None,
     policy_sample: bool = False,
+    improvement_rollouts: int = 1,
+    improvement_rollout_max_steps: int = 300,
+    improvement_max_examples: int | None = None,
 ) -> HeuristicPretrainResult:
     if games <= 0:
         raise ValueError("games must be positive")
@@ -388,10 +606,25 @@ def pretrain_safe_heuristic_checkpoint(
             device=device,
             policy_sample=policy_sample,
         )
+    elif dataset_mode == "safe_action_rollout":
+        if base_checkpoint is None:
+            raise ValueError("base_checkpoint is required when dataset_mode='safe_action_rollout'")
+        info_np, legal_np, actions_np, players_np = _collect_safe_action_rollout_dataset(
+            config,
+            games=games,
+            max_steps=max_steps,
+            seed=pretrain_seed,
+            base_checkpoint=base_checkpoint,
+            device=device,
+            policy_sample=policy_sample,
+            rollouts=improvement_rollouts,
+            rollout_max_steps=improvement_rollout_max_steps,
+            max_examples=improvement_max_examples,
+        )
     else:
         raise ValueError(
             "dataset_mode must be one of 'safe_self_play', 'aggregated', "
-            "or 'successful_policy_vs_safe'"
+            "'successful_policy_vs_safe', or 'safe_action_rollout'"
         )
     logger.info(
         "Collected safe heuristic imitation dataset: mode={} games={} states={} input_dim={} actions={}",
@@ -540,6 +773,9 @@ def pretrain_safe_heuristic_checkpoint(
                 "pretrain_base_checkpoint": str(base_checkpoint) if base_checkpoint is not None else None,
                 "pretrain_init_checkpoint": str(init_checkpoint) if init_checkpoint is not None else None,
                 "pretrain_policy_sample": bool(policy_sample),
+                "pretrain_improvement_rollouts": int(improvement_rollouts),
+                "pretrain_improvement_rollout_max_steps": int(improvement_rollout_max_steps),
+                "pretrain_improvement_max_examples": improvement_max_examples,
                 "pretrain_games": games,
                 "pretrain_states": int(len(actions_np)),
                 "pretrain_strategy_loss": last_strategy_loss,
