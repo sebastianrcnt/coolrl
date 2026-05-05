@@ -414,3 +414,16 @@ Run A 최종 결과와 Run B iteration 25 결과를 바탕으로 Claude Opus 4.7
 - Run B는 계획대로 pure self-play 조건을 깨지 않고 끝까지 실행한다.
 - Run B 중간 문서화에서는 win rate만 보지 않고 timeout, `avg_game_length`, policy entropy, opening/play/discard 계열 지표도 같이 비교한다.
 - Run B 종료 후에는 Run A와 같은 bot suite, quartile/best checkpoint suite, 그리고 가능하면 Run A latest와 Run B latest cross match를 평가 전용으로 추가한다.
+
+Iteration 55 eval:
+
+| Opponent | win_rate | avg_diff | timeouts | avg_game_length | policy_entropy | avg_opened_colors | play_rate | discard_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `random` | 0.89 | 44.45 | 0 | 254.76 | 1.315 | 0.16 | 0.004 | 0.996 |
+| `passive_discard` | 0.00 | -0.11 | 0 | 91.92 | 1.248 | 0.01 | 0.000 | 1.000 |
+| `safe_heuristic` | 0.18 | -43.94 | 95 | 969.94 | 0.787 | 0.89 | 0.006 | 0.994 |
+| `safe_heuristic_loose` | 0.20 | -49.36 | 94 | 957.46 | 0.800 | 0.94 | 0.006 | 0.994 |
+| `safe_heuristic_strict` | 0.16 | -39.67 | 90 | 931.64 | 0.766 | 0.86 | 0.006 | 0.994 |
+| `noisy_safe` | 0.20 | -41.35 | 54 | 778.90 | 0.875 | 0.87 | 0.006 | 0.994 |
+
+Run B iteration 55는 Run A 같은 시간대보다 `random`과 safe family score diff가 좋다. 그러나 safe family timeout이 90/100 전후로 이미 높고, `discard_rate`가 거의 99% 이상이라 Claude가 지적한 discard-loop collapse 신호가 강하게 나타난다. `passive_discard`는 score diff가 거의 0까지 왔지만 여전히 win rate 0이다.
