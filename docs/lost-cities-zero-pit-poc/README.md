@@ -79,6 +79,7 @@ win rate보다 먼저 행동 분포를 본다.
 
 - `play_action_rate`가 기존 Run A보다 뚜렷하게 높다.
 - `avg_opened_colors`가 0 근처에 고착되지 않는다.
+- `draw_deck_rate`가 올라가고 `draw_pile_rate`가 과도하게 높지 않다.
 - `safe_heuristic` 계열 timeout이 줄어든다.
 - `passive_discard` 상대 `avg_diff`가 0 근처 또는 양수로 이동한다.
 - `random` 성능이 완전히 무너지지 않는다.
@@ -86,6 +87,7 @@ win rate보다 먼저 행동 분포를 본다.
 나쁜 신호:
 
 - `discard_action_rate`가 여전히 0.98 이상에 붙는다.
+- `draw_pile_rate`가 높고 `draw_deck_rate`가 낮아 deck 진행을 계속 피한다.
 - `play_action_rate`가 오르더라도 `avg_diff`가 더 나빠진다.
 - safe 계열 timeout이 줄지 않는다.
 - `random` win rate가 빠르게 붕괴한다.

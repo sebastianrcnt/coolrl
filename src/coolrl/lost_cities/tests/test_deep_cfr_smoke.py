@@ -982,6 +982,10 @@ def test_evaluate_against_bot_reports_passive_no_expedition_diagnostics(tmp_path
     assert result["avg_opened_colors"] == 0.0
     assert result["play_action_rate"] == 0.0
     assert result["discard_action_rate"] == 1.0
+    assert result["avg_draw_deck_actions"] >= 0.0
+    assert result["avg_draw_pile_actions"] >= 0.0
+    assert 0.0 <= result["draw_deck_rate"] <= 1.0
+    assert 0.0 <= result["draw_pile_rate"] <= 1.0
     assert result["avg_final_score"] == 0.0
     assert result["avg_game_length"] > 0.0
     assert result["policy_entropy"] >= 0.0
@@ -1105,6 +1109,10 @@ def test_trainer_evaluation_timeout_does_not_crash_run(tmp_path: Path) -> None:
     assert progress["eval_random_policy_entropy"] >= 0.0
     assert progress["eval_random_play_action_rate"] >= 0.0
     assert progress["eval_random_discard_action_rate"] >= 0.0
+    assert progress["eval_random_avg_draw_deck_actions"] >= 0.0
+    assert progress["eval_random_avg_draw_pile_actions"] >= 0.0
+    assert progress["eval_random_draw_deck_rate"] >= 0.0
+    assert progress["eval_random_draw_pile_rate"] >= 0.0
 
 
 def test_tiny_self_play_league_training_run_completes(tmp_path: Path) -> None:

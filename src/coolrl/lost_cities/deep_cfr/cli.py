@@ -114,7 +114,7 @@ def eval_command(args: argparse.Namespace) -> None:
         sample=args.sample,
     )
     logger.info(
-        "Evaluation vs {}: games={} sample={} max_steps={} win_rate={:.3f} avg_diff={:.2f} avg_final_score={:.2f} avg_opponent_score={:.2f} avg_opened_colors={:.2f} avg_game_length={:.1f} policy_entropy={:.3f} play_action_rate={:.3f} discard_action_rate={:.3f} wins={} losses={} draws={} max_step_timeouts={}",
+        "Evaluation vs {}: games={} sample={} max_steps={} win_rate={:.3f} avg_diff={:.2f} avg_final_score={:.2f} avg_opponent_score={:.2f} avg_opened_colors={:.2f} avg_game_length={:.1f} policy_entropy={:.3f} play_action_rate={:.3f} discard_action_rate={:.3f} draw_deck_rate={:.3f} draw_pile_rate={:.3f} wins={} losses={} draws={} max_step_timeouts={}",
         opponent_label,
         result["games"],
         args.sample,
@@ -128,6 +128,8 @@ def eval_command(args: argparse.Namespace) -> None:
         result["policy_entropy"],
         result["play_action_rate"],
         result["discard_action_rate"],
+        result["draw_deck_rate"],
+        result["draw_pile_rate"],
         result["wins"],
         result["losses"],
         result["draws"],
@@ -396,7 +398,7 @@ def status_command(args: argparse.Namespace) -> None:
     for opponent_name in eval_opponents:
         prefix = f"eval_{opponent_name}"
         logger.info(
-            "Eval {}: win_rate={} avg_diff={} avg_final_score={} avg_opponent_score={} avg_opened_colors={} avg_opponent_opened_colors={} avg_expedition_cards={} avg_play_actions={} avg_discard_actions={} avg_game_length={} policy_entropy={} play_action_rate={} discard_action_rate={} max_step_timeouts={}",
+            "Eval {}: win_rate={} avg_diff={} avg_final_score={} avg_opponent_score={} avg_opened_colors={} avg_opponent_opened_colors={} avg_expedition_cards={} avg_play_actions={} avg_discard_actions={} avg_draw_deck_actions={} avg_draw_pile_actions={} avg_game_length={} policy_entropy={} play_action_rate={} discard_action_rate={} draw_deck_rate={} draw_pile_rate={} max_step_timeouts={}",
             opponent_name,
             latest.get(f"{prefix}_win_rate", "n/a"),
             latest.get(f"{prefix}_avg_diff", "n/a"),
@@ -407,10 +409,14 @@ def status_command(args: argparse.Namespace) -> None:
             latest.get(f"{prefix}_avg_expedition_cards", "n/a"),
             latest.get(f"{prefix}_avg_play_actions", "n/a"),
             latest.get(f"{prefix}_avg_discard_actions", "n/a"),
+            latest.get(f"{prefix}_avg_draw_deck_actions", "n/a"),
+            latest.get(f"{prefix}_avg_draw_pile_actions", "n/a"),
             latest.get(f"{prefix}_avg_game_length", "n/a"),
             latest.get(f"{prefix}_policy_entropy", "n/a"),
             latest.get(f"{prefix}_play_action_rate", "n/a"),
             latest.get(f"{prefix}_discard_action_rate", "n/a"),
+            latest.get(f"{prefix}_draw_deck_rate", "n/a"),
+            latest.get(f"{prefix}_draw_pile_rate", "n/a"),
             latest.get(f"{prefix}_max_step_timeouts", "n/a"),
         )
 

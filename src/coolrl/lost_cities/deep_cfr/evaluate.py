@@ -182,6 +182,10 @@ def is_card_discard_action(action_id: int) -> bool:
     return not is_card_play_action(action_id)
 
 
+def is_draw_deck_action(action_id: int) -> bool:
+    return action_id == 0
+
+
 def _play_game_for_evaluation(
     bot0: LostCitiesBot,
     bot1: LostCitiesBot,
@@ -197,6 +201,8 @@ def _play_game_for_evaluation(
     action_counts: dict[str, float | int] = {
         "play_actions": 0,
         "discard_actions": 0,
+        "draw_deck_actions": 0,
+        "draw_pile_actions": 0,
         "policy_entropy_sum": 0.0,
         "policy_entropy_actions": 0,
     }
@@ -212,6 +218,11 @@ def _play_game_for_evaluation(
                 action_counts["play_actions"] = int(action_counts["play_actions"]) + 1
             elif is_card_discard_action(action):
                 action_counts["discard_actions"] = int(action_counts["discard_actions"]) + 1
+        if tracked_player is not None and acting_player == tracked_player and phase == "draw":
+            if is_draw_deck_action(action):
+                action_counts["draw_deck_actions"] = int(action_counts["draw_deck_actions"]) + 1
+            else:
+                action_counts["draw_pile_actions"] = int(action_counts["draw_pile_actions"]) + 1
         if tracked_player is not None and acting_player == tracked_player and isinstance(bot, StrategyNetBot):
             if bot.last_policy_entropy is not None:
                 action_counts["policy_entropy_sum"] = float(action_counts["policy_entropy_sum"]) + bot.last_policy_entropy
@@ -248,6 +259,8 @@ def evaluate_against_bot(
     expedition_cards: list[int] = []
     play_actions = 0
     discard_actions = 0
+    draw_deck_actions = 0
+    draw_pile_actions = 0
     game_lengths: list[int] = []
     policy_entropy_sum = 0.0
     policy_entropy_actions = 0
@@ -285,6 +298,8 @@ def evaluate_against_bot(
         game_lengths.append(game_length)
         play_actions += int(action_counts["play_actions"])
         discard_actions += int(action_counts["discard_actions"])
+        draw_deck_actions += int(action_counts["draw_deck_actions"])
+        draw_pile_actions += int(action_counts["draw_pile_actions"])
         policy_entropy_sum += float(action_counts["policy_entropy_sum"])
         policy_entropy_actions += int(action_counts["policy_entropy_actions"])
         if timed_out:
@@ -305,6 +320,7 @@ def evaluate_against_bot(
         else:
             draws += 1
     card_actions = play_actions + discard_actions
+    draw_actions = draw_deck_actions + draw_pile_actions
     return {
         "games": int(games),
         "win_rate": float(wins / max(1, games)),
@@ -316,10 +332,14 @@ def evaluate_against_bot(
         "avg_expedition_cards": float(np.mean(expedition_cards)) if expedition_cards else 0.0,
         "avg_discard_actions": float(discard_actions / max(1, games)),
         "avg_play_actions": float(play_actions / max(1, games)),
+        "avg_draw_deck_actions": float(draw_deck_actions / max(1, games)),
+        "avg_draw_pile_actions": float(draw_pile_actions / max(1, games)),
         "avg_game_length": float(np.mean(game_lengths)) if game_lengths else 0.0,
         "policy_entropy": float(policy_entropy_sum / max(1, policy_entropy_actions)),
         "play_action_rate": float(play_actions / max(1, card_actions)),
         "discard_action_rate": float(discard_actions / max(1, card_actions)),
+        "draw_deck_rate": float(draw_deck_actions / max(1, draw_actions)),
+        "draw_pile_rate": float(draw_pile_actions / max(1, draw_actions)),
         "wins": wins,
         "losses": losses,
         "draws": draws,
