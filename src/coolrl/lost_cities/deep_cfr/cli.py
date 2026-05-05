@@ -11,16 +11,20 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+import shutil
+import time
 
 import torch
 from loguru import logger
 
 from .benchmark import benchmark_traversal_modes
-from .config import config_from_dict, load_config
+from .config import RunConfig, config_from_dict, load_config
 from .evaluate import evaluate_against_bot, make_opponent
 from .networks import StrategyNet
 from .trainer import DeepCFRTrainer, _torch_device
 from .visualize import load_metrics, load_runtime_progress, plot_metrics, summarize_metrics
+
+_RESUME_LATEST = "__latest__"
 
 
 def _configure_logging() -> None:
@@ -29,9 +33,34 @@ def _configure_logging() -> None:
     logger.add(lambda message: print(message, end=""), level="INFO")
 
 
+def _configure_train_file_logging(config: RunConfig, *, resume_path: str | None) -> Path:
+    checkpoint_dir = config.checkpoint_dir
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    log_path = checkpoint_dir / "train.log"
+    if resume_path is None and log_path.exists():
+        archive = log_path.with_name(f"train.{time.strftime('%Y%m%d-%H%M%S')}.log")
+        shutil.move(log_path, archive)
+    logger.add(log_path, level="INFO", encoding="utf-8")
+    return log_path
+
+
+def _resolve_resume_path(config: RunConfig, resume: str | None) -> str | None:
+    if resume != _RESUME_LATEST:
+        return resume
+    latest_path = config.checkpoint_dir / "latest.pt"
+    if not latest_path.exists():
+        raise FileNotFoundError(
+            f"--resume was used without a path, but latest checkpoint does not exist: {latest_path}"
+        )
+    return str(latest_path)
+
+
 def train_command(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    trainer = DeepCFRTrainer(config, resume_path=args.resume)
+    resume_path = _resolve_resume_path(config, args.resume)
+    log_path = _configure_train_file_logging(config, resume_path=resume_path)
+    logger.info("Training log file: {}", log_path)
+    trainer = DeepCFRTrainer(config, resume_path=resume_path)
     trainer.run()
 
 
@@ -196,7 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     train = subparsers.add_parser("train")
     train.add_argument("--config", type=Path, default=Path("configs/lost_cities_deep_cfr_tier3.yaml"))
-    train.add_argument("--resume", type=str, default=None)
+    train.add_argument("--resume", nargs="?", const=_RESUME_LATEST, default=None)
     train.set_defaults(func=train_command)
 
     eval_parser = subparsers.add_parser("eval")

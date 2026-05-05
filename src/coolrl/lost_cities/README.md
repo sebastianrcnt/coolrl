@@ -78,30 +78,29 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli train \
 ```bash
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
   --config configs/lost_cities_deep_cfr_tier3.yaml \
-  --resume checkpoints/lost_cities_deep_cfr_tier3/latest.pt
+  --resume
 ```
 
 - `--config`는 처음 돌릴 때와 같은 YAML을 그대로 지정한다.
-- `--resume`에는 보통 `latest.pt`를 준다. `checkpoint.save_latest_only=false`면 `iteration_XXXXX.pt` 스냅샷도 같이 저장되므로 그중 하나를 골라도 된다.
+- `--resume`에 경로를 생략하면 config의 `checkpoint.directory/latest.pt`를 사용한다.
+- 특정 checkpoint에서 이어가려면 `--resume checkpoints/lost_cities_deep_cfr_tier3/iteration_00050.pt`처럼 경로를 명시한다.
 - **복원되는 것**: advantage / strategy 네트워크 weight, 옵티마이저 state, `iteration` 카운터.
 - **복원되지 않는 것**: reservoir 메모리(샘플 버퍼)와 RNG 상태. traversal 샘플은 처음부터 다시 쌓인다 (`trainer.py`의 `load_checkpoint` 경고 참고).
 
 ### 진행 상태 / 시각화 / 평가
 
-긴 학습은 로그를 파일로 남겨두면 진행 상황과 실패 원인을 나중에 확인하기 쉽다:
+`train`은 콘솔 출력과 같은 로그를 checkpoint 디렉터리의 `train.log`에도 남긴다. `--resume` 없이 새 run을 시작할 때 기존 `train.log`가 있으면 timestamp suffix로 archive된다:
 
 ```bash
-mkdir -p logs
 uv run python -m coolrl.lost_cities.deep_cfr.cli train \
-  --config configs/lost_cities_deep_cfr_tier3.yaml \
-  2>&1 | tee logs/lost-cities-tier3.log
+  --config configs/lost_cities_deep_cfr_tier3.yaml
 ```
 
 실행 중에는 다음 명령으로 모니터링한다:
 
 ```bash
 # 실시간 로그
-tail -f logs/lost-cities-tier3.log
+tail -f checkpoints/lost_cities_deep_cfr_tier3/train.log
 
 # 최근 완료 iteration 요약
 watch -n 10 'uv run python -m coolrl.lost_cities.deep_cfr.cli status --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3'

@@ -19,7 +19,7 @@ from coolrl.lost_cities.deep_cfr.evaluate import (
     make_opponent,
 )
 from coolrl.lost_cities.deep_cfr.memory import _Sample
-from coolrl.lost_cities.deep_cfr.cli import build_parser
+from coolrl.lost_cities.deep_cfr.cli import _RESUME_LATEST, _resolve_resume_path, build_parser
 from coolrl.lost_cities.deep_cfr.trainer import DeepCFRTrainer
 from coolrl.lost_cities.deep_cfr.traversal import TraversalStats
 from coolrl.lost_cities.deep_cfr.traversal_worker import TraversalWorkerBatchResult
@@ -51,6 +51,49 @@ def test_tiny_training_run_completes(tmp_path: Path) -> None:
     assert checkpoint_path.exists()
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     assert checkpoint["resume_semantics"] == "networks_optimizers_iteration_only"
+
+
+def test_train_parser_resume_without_value_uses_latest_sentinel() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["train", "--config", "configs/lost_cities_deep_cfr_tier3.yaml", "--resume"])
+
+    assert args.resume == _RESUME_LATEST
+
+
+def test_train_parser_resume_with_path_preserves_path() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "train",
+            "--config",
+            "configs/lost_cities_deep_cfr_tier3.yaml",
+            "--resume",
+            "checkpoints/lost_cities_deep_cfr_tier3/iteration_00005.pt",
+        ]
+    )
+
+    assert args.resume == "checkpoints/lost_cities_deep_cfr_tier3/iteration_00005.pt"
+
+
+def test_resolve_resume_without_path_uses_config_latest(tmp_path: Path) -> None:
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_dir.mkdir()
+    latest = checkpoint_dir / "latest.pt"
+    latest.write_bytes(b"placeholder")
+    cfg = config_from_dict({"checkpoint": {"directory": str(checkpoint_dir)}})
+
+    assert _resolve_resume_path(cfg, _RESUME_LATEST) == str(latest)
+
+
+def test_resolve_resume_without_path_requires_existing_latest(tmp_path: Path) -> None:
+    cfg = config_from_dict({"checkpoint": {"directory": str(tmp_path)}})
+
+    try:
+        _resolve_resume_path(cfg, _RESUME_LATEST)
+    except FileNotFoundError as exc:
+        assert "latest checkpoint does not exist" in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
 
 
 def test_tiny_training_run_completes_with_parallel_traversal(tmp_path: Path) -> None:

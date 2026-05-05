@@ -27,8 +27,9 @@ traversal:
   strategy_sample_interval: 1
   store_strategy_on_opponent_nodes: true
   store_strategy_on_traverser_nodes: true
-  # Outcome sampling follows one sampled action at every player node to terminal.
-  max_depth: null
+  # Keep traversal depth bounded: full terminal rollouts can exceed Python's
+  # recursion limit before the node budget is reached.
+  max_depth: 16
   max_nodes_per_traversal: 10000
   progress_every_traversals: 10
   num_workers: 0
