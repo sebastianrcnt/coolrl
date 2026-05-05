@@ -14,6 +14,25 @@ Exceptions:
 - Do not translate quoted external errors, log messages, dependency names, or upstream API names.
 - Preserve the language of existing English documentation unless the task explicitly asks to translate it.
 
+## Commit message policy
+
+Commit messages should use the following Korean structure by default:
+
+```text
+<한 줄 요약>
+
+맥락:
+- 왜 바꾸는지, 어떤 실험 해석이나 운영 판단이 있는지
+
+변경:
+- 실제 수정 내용
+
+확인:
+- 실행한 테스트, 확인한 metrics, 링크, checkpoint 상태
+```
+
+Keep the content compact when the change is small, but preserve the three-section shape for commits that include experiment settings, results, algorithm decisions, evaluation criteria, checkpoint/data retention policy, or documentation archive decisions. This makes later `git show` history useful for reconstructing research decisions.
+
 ## Advisory workflow
 
 Lost Cities Deep CFR처럼 실험 해석, 학습 안정성, 알고리즘 설계 판단이 애매한 작업에서는 필요할 때 MCP를 통해 Claude Opus 4.7 xhigh thinking에게 2차 의견을 구할 수 있다.
