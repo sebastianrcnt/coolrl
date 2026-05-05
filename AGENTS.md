@@ -16,7 +16,7 @@ Exceptions:
 
 ## Commit message policy
 
-Commit messages should use the following Korean structure by default:
+Commit messages must be written in Korean. Use this structure by default:
 
 ```text
 <한 줄 요약>
@@ -31,7 +31,14 @@ Commit messages should use the following Korean structure by default:
 - 실행한 테스트, 확인한 metrics, 링크, checkpoint 상태
 ```
 
-Keep the content compact when the change is small, but preserve the three-section shape for commits that include experiment settings, results, algorithm decisions, evaluation criteria, checkpoint/data retention policy, or documentation archive decisions. This makes later `git show` history useful for reconstructing research decisions.
+Keep small commits compact, but do not leave the body empty for commits that affect experiment settings, results, algorithm decisions, evaluation criteria, checkpoint/data retention policy, or documentation archive decisions.
+
+For those research/operation commits, write enough concrete detail that `git show` alone can recover the decision:
+- `맥락`: 관찰한 문제, 변경을 유도한 실험 결과, 실패 모드, 운영 제약을 적는다.
+- `변경`: 바꾼 config/path/code/doc 동작과 중요한 이름, 값, 경로를 적는다.
+- `확인`: 실행한 명령, 확인한 metric, checkpoint/link 상태, 또는 검증하지 못한 이유를 적는다.
+
+Avoid generic filler such as "문서 수정" or "테스트 확인" when a concrete path, metric, or command is available.
 
 ## Advisory workflow
 
