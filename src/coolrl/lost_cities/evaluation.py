@@ -92,6 +92,14 @@ def _expedition_card_count(state: GameState, player: int) -> int:
     return sum(len(expedition) for expedition in state.expeditions[player])
 
 
+def _opened_expedition_scores(state: GameState, player: int) -> list[float]:
+    return [
+        float(state.expedition_score(player, color))
+        for color, expedition in enumerate(state.expeditions[player])
+        if expedition
+    ]
+
+
 def _opening_play_summary(
     state: GameState,
     player: int,
@@ -111,6 +119,7 @@ def _opening_play_summary(
     margin = float(summary["recoverable_margin_no_bonus"])
     has_bonus_path = bool(summary["has_bonus_path"])
     return {
+        "color": int(card.color),
         "recoverable_score_no_bonus": recoverable_score,
         "recoverable_margin_no_bonus": margin,
         "has_bonus_path": has_bonus_path,
@@ -146,7 +155,13 @@ def play_game_for_evaluation(
         "opening_recoverable_score_sum": 0.0,
         "opening_margin_sum": 0.0,
         "opening_recoverable_scores": [],
+        "bad_open_colors": set(),
+        "my_discarded_cards": 0,
+        "opponent_discarded_cards": 0,
+        "my_took_opponent_discards": 0,
+        "opponent_took_my_discards": 0,
     }
+    discard_owner_stacks: list[list[int]] = [[] for _ in range(config.n_colors)]
     for step in range(max_steps):
         if state.terminal:
             return state, False, action_counts, step
@@ -154,6 +169,33 @@ def play_game_for_evaluation(
         phase = state.phase
         bot = bots[state.current_player]
         action = bot.act(state)
+        if tracked_player is not None and phase == "card" and is_card_discard_action(action):
+            slot = action // 2
+            hand = state.hands[acting_player]
+            if 0 <= slot < len(hand):
+                card = hand[slot]
+                discard_owner_stacks[card.color].append(acting_player)
+                if acting_player == tracked_player:
+                    action_counts["my_discarded_cards"] = int(action_counts["my_discarded_cards"]) + 1
+                else:
+                    action_counts["opponent_discarded_cards"] = (
+                        int(action_counts["opponent_discarded_cards"]) + 1
+                    )
+        if tracked_player is not None and phase == "draw" and not is_draw_deck_action(action):
+            color = action - 1
+            if 0 <= color < len(discard_owner_stacks):
+                top_owner = discard_owner_stacks[color][-1] if discard_owner_stacks[color] else None
+                if top_owner is not None and top_owner != acting_player:
+                    if acting_player == tracked_player:
+                        action_counts["my_took_opponent_discards"] = (
+                            int(action_counts["my_took_opponent_discards"]) + 1
+                        )
+                    elif top_owner == tracked_player:
+                        action_counts["opponent_took_my_discards"] = (
+                            int(action_counts["opponent_took_my_discards"]) + 1
+                        )
+                if discard_owner_stacks[color]:
+                    discard_owner_stacks[color].pop()
         if tracked_player is not None and acting_player == tracked_player and phase == "card":
             if is_card_play_action(action):
                 action_counts["play_actions"] = int(action_counts["play_actions"]) + 1
@@ -162,6 +204,9 @@ def play_game_for_evaluation(
                     action_counts["opening_play_actions"] = int(action_counts["opening_play_actions"]) + 1
                     if opening["is_bad_open"]:
                         action_counts["bad_open_actions"] = int(action_counts["bad_open_actions"]) + 1
+                        colors = action_counts["bad_open_colors"]
+                        if isinstance(colors, set):
+                            colors.add(int(opening["color"]))
                     if opening["is_weak_open"]:
                         action_counts["weak_open_actions"] = int(action_counts["weak_open_actions"]) + 1
                     if opening["is_good_open"]:
@@ -228,6 +273,16 @@ def evaluate_agent_against_bot(
     opening_recoverable_score_sum = 0.0
     opening_margin_sum = 0.0
     opening_recoverable_scores: list[float] = []
+    expedition_final_scores: list[float] = []
+    bad_open_final_scores: list[float] = []
+    positive_expeditions_per_game: list[int] = []
+    negative_expeditions_per_game: list[int] = []
+    five_color_diffs: list[int] = []
+    five_color_expedition_scores: list[float] = []
+    my_discarded_cards = 0
+    opponent_discarded_cards = 0
+    my_took_opponent_discards = 0
+    opponent_took_my_discards = 0
     wins = losses = draws = 0
     max_step_timeouts = 0
     for index in range(games):
@@ -256,9 +311,19 @@ def evaluate_agent_against_bot(
         opponent_player = 1 - agent_player
         final_scores.append(final_state.total_score(agent_player))
         opponent_scores.append(final_state.total_score(opponent_player))
-        opened_colors.append(_opened_color_count(final_state, agent_player))
+        opened_color_count = _opened_color_count(final_state, agent_player)
+        opened_colors.append(opened_color_count)
         opponent_opened_colors.append(_opened_color_count(final_state, opponent_player))
         expedition_cards.append(_expedition_card_count(final_state, agent_player))
+        game_expedition_scores = _opened_expedition_scores(final_state, agent_player)
+        expedition_final_scores.extend(game_expedition_scores)
+        positive_expeditions_per_game.append(sum(1 for score in game_expedition_scores if score >= 0.0))
+        negative_expeditions_per_game.append(sum(1 for score in game_expedition_scores if score < 0.0))
+        bad_open_colors = action_counts.get("bad_open_colors")
+        if isinstance(bad_open_colors, set):
+            for color in bad_open_colors:
+                if 0 <= color < config.n_colors and final_state.expeditions[agent_player][color]:
+                    bad_open_final_scores.append(float(final_state.expedition_score(agent_player, color)))
         game_lengths.append(game_length)
         play_actions += int(action_counts["play_actions"])
         discard_actions += int(action_counts["discard_actions"])
@@ -275,6 +340,10 @@ def evaluate_agent_against_bot(
         scores = action_counts["opening_recoverable_scores"]
         if isinstance(scores, list):
             opening_recoverable_scores.extend(float(score) for score in scores)
+        my_discarded_cards += int(action_counts["my_discarded_cards"])
+        opponent_discarded_cards += int(action_counts["opponent_discarded_cards"])
+        my_took_opponent_discards += int(action_counts["my_took_opponent_discards"])
+        opponent_took_my_discards += int(action_counts["opponent_took_my_discards"])
         if timed_out:
             max_step_timeouts += 1
             if timeout_mode == "score_diff":
@@ -292,8 +361,16 @@ def evaluate_agent_against_bot(
             losses += 1
         else:
             draws += 1
+        if opened_color_count == config.n_colors:
+            five_color_diffs.append(diff)
+            five_color_expedition_scores.extend(game_expedition_scores)
     card_actions = play_actions + discard_actions
     draw_actions = draw_deck_actions + draw_pile_actions
+    bad_or_weak_open_actions = bad_open_actions + weak_open_actions
+    positive_expedition_scores = [score for score in expedition_final_scores if score >= 0.0]
+    negative_expedition_scores = [score for score in expedition_final_scores if score < 0.0]
+    bad_open_final_positive_scores = [score for score in bad_open_final_scores if score >= 0.0]
+    five_color_positive_scores = [score for score in five_color_expedition_scores if score >= 0.0]
     return {
         "games": int(games),
         "win_rate": float(wins / max(1, games)),
@@ -314,6 +391,27 @@ def evaluate_agent_against_bot(
             for count in range(config.n_colors + 1)
         },
         "avg_expedition_cards": float(np.mean(expedition_cards)) if expedition_cards else 0.0,
+        "positive_expedition_rate": float(
+            len(positive_expedition_scores) / max(1, len(expedition_final_scores))
+        ),
+        "negative_expedition_rate": float(
+            len(negative_expedition_scores) / max(1, len(expedition_final_scores))
+        ),
+        "avg_positive_expeditions": float(np.mean(positive_expeditions_per_game))
+        if positive_expeditions_per_game
+        else 0.0,
+        "avg_negative_expeditions": float(np.mean(negative_expeditions_per_game))
+        if negative_expeditions_per_game
+        else 0.0,
+        "final_expedition_score_mean": float(np.mean(expedition_final_scores))
+        if expedition_final_scores
+        else 0.0,
+        "final_expedition_score_p25": float(np.percentile(expedition_final_scores, 25))
+        if expedition_final_scores
+        else 0.0,
+        "final_expedition_score_median": float(np.percentile(expedition_final_scores, 50))
+        if expedition_final_scores
+        else 0.0,
         "avg_discard_actions": float(discard_actions / max(1, games)),
         "avg_play_actions": float(play_actions / max(1, games)),
         "avg_draw_deck_actions": float(draw_deck_actions / max(1, games)),
@@ -326,7 +424,16 @@ def evaluate_agent_against_bot(
         "good_open_actions": good_open_actions,
         "bad_open_rate": float(bad_open_actions / max(1, opening_play_actions)),
         "weak_open_rate": float(weak_open_actions / max(1, opening_play_actions)),
+        "bad_or_weak_open_rate": float(bad_or_weak_open_actions / max(1, opening_play_actions)),
+        "bad_open_per_game": float(bad_open_actions / max(1, games)),
+        "bad_or_weak_open_per_game": float(bad_or_weak_open_actions / max(1, games)),
         "good_open_rate": float(good_open_actions / max(1, opening_play_actions)),
+        "bad_open_final_positive_rate": float(
+            len(bad_open_final_positive_scores) / max(1, len(bad_open_final_scores))
+        ),
+        "bad_open_final_score_mean": float(np.mean(bad_open_final_scores))
+        if bad_open_final_scores
+        else 0.0,
         "opening_recoverable_score_mean": float(
             opening_recoverable_score_sum / max(1, opening_play_actions)
         ),
@@ -348,6 +455,20 @@ def evaluate_agent_against_bot(
         "discard_action_rate": float(discard_actions / max(1, card_actions)),
         "draw_deck_rate": float(draw_deck_actions / max(1, draw_actions)),
         "draw_pile_rate": float(draw_pile_actions / max(1, draw_actions)),
+        "my_took_opponent_discard_rate": float(
+            my_took_opponent_discards / max(1, opponent_discarded_cards)
+        ),
+        "opponent_took_my_discard_rate": float(
+            opponent_took_my_discards / max(1, my_discarded_cards)
+        ),
+        "net_discard_take_rate": float(
+            (my_took_opponent_discards / max(1, opponent_discarded_cards))
+            - (opponent_took_my_discards / max(1, my_discarded_cards))
+        ),
+        "five_color_positive_expedition_rate": float(
+            len(five_color_positive_scores) / max(1, len(five_color_expedition_scores))
+        ),
+        "five_color_avg_diff": float(np.mean(five_color_diffs)) if five_color_diffs else 0.0,
         "wins": wins,
         "losses": losses,
         "draws": draws,
