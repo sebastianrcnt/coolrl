@@ -91,6 +91,16 @@ Naming and storage rules:
 - Prefer recording per-experiment design in `plan.md`, chronological run notes in `progress.md`, and final analysis/interpretation in `report.md` or `report.json` rather than growing `docs/` with one document per experiment.
 - Use `docs/` for current usage guides, domain-level overviews, and archive material.
 
+## Experiment runtime policy
+
+긴 학습 실험은 가능하면 `tmux` session에서 실행한다.
+
+- 1-5분 smoke run은 foreground에서 실행해 즉시 실패를 확인한다.
+- 30분 이상 걸리는 학습 run은 `tmux new-session -d -s <experiment_slug> ...` 형태를 권장한다.
+- 실험 시작 시 사용자에게 `tail -f checkpoints/<experiment_name>/train.log` 명령을 함께 제공한다.
+- crash 후에도 tmux session이 살아있을 수 있으므로, 상태 확인 시 train process와 tmux session을 구분한다.
+- 종료된 실험의 tmux session은 결과 확인 후 정리한다.
+
 ## Experiment analysis and plotting policy
 
 실험별 분석 코드는 실험 record 안에 둔다. 새 실험은 필요하면 기존 실험의 `analyze.py`를 복사해 다음 위치에서 수정한다.

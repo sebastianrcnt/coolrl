@@ -83,6 +83,18 @@ def _configure_worker_torch_threads() -> None:
     _TORCH_THREADS_CONFIGURED = True
 
 
+def _worker_state_dict_to_tensors(state_dict: dict[str, Any]) -> dict[str, Any]:
+    tensors: dict[str, Any] = {}
+    for name, value in state_dict.items():
+        if isinstance(value, np.ndarray):
+            tensors[name] = torch.as_tensor(value).clone()
+        elif isinstance(value, torch.Tensor):
+            tensors[name] = value.detach().cpu()
+        else:
+            tensors[name] = value
+    return tensors
+
+
 def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerBatchResult:
     _configure_worker_torch_threads()
 
@@ -95,11 +107,7 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
     advantage_nets: list[AdvantageNet] = []
     for state_dict in batch.advantage_net_state_dicts:
         net = AdvantageNet(batch.input_dim, batch.action_size, batch.network_config).to(device)
-        cpu_state_dict = {
-            name: value.detach().cpu() if isinstance(value, torch.Tensor) else value
-            for name, value in state_dict.items()
-        }
-        net.load_state_dict(cpu_state_dict)
+        net.load_state_dict(_worker_state_dict_to_tensors(state_dict))
         net.eval()
         advantage_nets.append(net)
     league_advantage_nets: list[list[AdvantageNet]] = []
@@ -107,11 +115,7 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         snapshot_nets: list[AdvantageNet] = []
         for state_dict in snapshot_state_dicts:
             net = AdvantageNet(batch.input_dim, batch.action_size, batch.network_config).to(device)
-            cpu_state_dict = {
-                name: value.detach().cpu() if isinstance(value, torch.Tensor) else value
-                for name, value in state_dict.items()
-            }
-            net.load_state_dict(cpu_state_dict)
+            net.load_state_dict(_worker_state_dict_to_tensors(state_dict))
             net.eval()
             snapshot_nets.append(net)
         league_advantage_nets.append(snapshot_nets)

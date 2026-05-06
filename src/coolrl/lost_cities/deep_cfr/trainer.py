@@ -439,6 +439,26 @@ class DeepCFRTrainer:
             for snapshot in self.self_play_league_snapshots
         ]
 
+    def _worker_state_dict_payloads(
+        self,
+        state_dicts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                name: value.detach().cpu().numpy().copy()
+                if isinstance(value, torch.Tensor)
+                else copy.deepcopy(value)
+                for name, value in state_dict.items()
+            }
+            for state_dict in state_dicts
+        ]
+
+    def _worker_league_state_dict_payloads(self) -> list[list[dict[str, Any]]]:
+        return [
+            self._worker_state_dict_payloads(snapshot)
+            for snapshot in self.self_play_league_snapshots
+        ]
+
     def _materialize_league_advantage_nets(self, device: torch.device) -> list[list[AdvantageNet]]:
         league_nets: list[list[AdvantageNet]] = []
         for snapshot in self.self_play_league_snapshots:
@@ -474,7 +494,7 @@ class DeepCFRTrainer:
     ) -> list[TraversalWorkerBatch]:
         batches: list[TraversalWorkerBatch] = []
         batch_index = 0
-        league_advantage_net_state_dicts = self._frozen_self_play_league_state_dicts()
+        league_advantage_net_state_dicts = self._worker_league_state_dict_payloads()
         for player in (0, 1):
             seeds = [
                 self._traversal_seed(iteration, player, index)
@@ -551,7 +571,9 @@ class DeepCFRTrainer:
         return total_stats, traversals
 
     def _run_traversals_parallel(self, iteration: int) -> tuple[TraversalStats, int, TraversalTimingStats | None]:
-        advantage_net_state_dicts = self._frozen_advantage_state_dicts()
+        advantage_net_state_dicts = self._worker_state_dict_payloads(
+            self._frozen_advantage_state_dicts()
+        )
         batches = self._build_traversal_worker_batches(iteration, advantage_net_state_dicts)
         if not batches:
             return TraversalStats(), 0, TraversalTimingStats() if self.profile_hotspots else None
