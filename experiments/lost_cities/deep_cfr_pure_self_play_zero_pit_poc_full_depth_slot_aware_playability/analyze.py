@@ -34,6 +34,9 @@ TARGET_METRICS = (
     "good_open_actions",
     "bad_open_rate",
     "weak_open_rate",
+    "bad_or_weak_open_rate",
+    "bad_open_per_game",
+    "bad_or_weak_open_per_game",
     "good_open_rate",
     "opening_recoverable_score_mean",
     "opening_recoverable_score_p25",
@@ -60,6 +63,9 @@ METRIC_LABELS = {
     "good_open_actions": "good open 수",
     "bad_open_rate": "bad open 비율",
     "weak_open_rate": "weak open 비율",
+    "bad_or_weak_open_rate": "bad+weak open 비율",
+    "bad_open_per_game": "게임당 bad open",
+    "bad_or_weak_open_per_game": "게임당 bad+weak open",
     "good_open_rate": "good open 비율",
     "opening_recoverable_score_mean": "opening 회수 점수 평균",
     "opening_recoverable_score_p25": "opening 회수 점수 p25",
@@ -80,6 +86,9 @@ HEATMAP_METRICS = (
     "avg_opened_colors",
     "opened_colors_count_5",
     "bad_open_rate",
+    "bad_or_weak_open_rate",
+    "bad_open_per_game",
+    "bad_or_weak_open_per_game",
     "opening_recoverable_score_mean",
     "max_step_timeouts",
 )
@@ -154,6 +163,55 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def infer_eval_games(row: dict[str, Any], prefix: str) -> float:
+    games = finite_number(row.get(f"{prefix}_games"))
+    if games is not None and games > 0:
+        return games
+
+    opened_count_total = 0.0
+    found_count = False
+    for count in range(32):
+        value = finite_number(row.get(f"{prefix}_opened_colors_count_{count}"))
+        if value is None:
+            if count > 0:
+                break
+            continue
+        opened_count_total += value
+        found_count = True
+    return opened_count_total if found_count and opened_count_total > 0 else 1.0
+
+
+def enrich_open_quality_metrics(row: dict[str, Any]) -> None:
+    prefixes = [
+        key[: -len("_bad_open_actions")]
+        for key in row
+        if key.startswith("eval_") and key.endswith("_bad_open_actions")
+    ]
+    for prefix in prefixes:
+        bad = finite_number(row.get(f"{prefix}_bad_open_actions")) or 0.0
+        weak = finite_number(row.get(f"{prefix}_weak_open_actions")) or 0.0
+        opening = finite_number(row.get(f"{prefix}_opening_play_actions")) or 0.0
+        games = infer_eval_games(row, prefix)
+        bad_or_weak = bad + weak
+        row.setdefault(
+            f"{prefix}_bad_or_weak_open_rate",
+            bad_or_weak / max(1.0, opening),
+        )
+        row.setdefault(f"{prefix}_bad_open_per_game", bad / max(1.0, games))
+        row.setdefault(
+            f"{prefix}_bad_or_weak_open_per_game",
+            bad_or_weak / max(1.0, games),
+        )
+
+
 def read_metrics(run_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
     metrics_path = run_dir / "metrics.jsonl"
     if not metrics_path.exists():
@@ -174,6 +232,7 @@ def read_metrics(run_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
             if not isinstance(row, dict):
                 warnings.append(f"{metrics_path}:{line_number}: object가 아닌 row를 건너뜀")
                 continue
+            enrich_open_quality_metrics(row)
             rows.append(row)
 
     if not rows:
@@ -383,7 +442,9 @@ def render_compact_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, f
     safe_opened = average_metric(opponents, SAFE_OPPONENTS, "avg_opened_colors")
     safe_five_color = average_metric(opponents, SAFE_OPPONENTS, "opened_colors_count_5")
     safe_bad_open = average_metric(opponents, SAFE_OPPONENTS, "bad_open_rate")
+    safe_bad_or_weak_open = average_metric(opponents, SAFE_OPPONENTS, "bad_or_weak_open_rate")
     safe_good_open = average_metric(opponents, SAFE_OPPONENTS, "good_open_rate")
+    safe_bad_open_per_game = average_metric(opponents, SAFE_OPPONENTS, "bad_open_per_game")
     safe_opening_p25 = average_metric(opponents, SAFE_OPPONENTS, "opening_recoverable_score_p25")
     safe_opening_actions = average_metric(opponents, SAFE_OPPONENTS, "opening_play_actions")
     return "\n".join(
@@ -400,7 +461,9 @@ def render_compact_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, f
             f"5-color count {format_value(safe_five_color)}/100, "
             f"opening actions {format_value(safe_opening_actions)}",
             f"- safe opening quality: bad {format_rate(safe_bad_open)}, "
+            f"bad+weak {format_rate(safe_bad_or_weak_open)}, "
             f"good {format_rate(safe_good_open)}, "
+            f"bad/game {format_value(safe_bad_open_per_game)}, "
             f"recoverable p25 {format_value(safe_opening_p25)}",
             f"- random avg_diff: {format_value(opponents.get('random', {}).get('avg_diff'))}",
             f"- top endpoint buckets: {render_bucket_summary(summary['endpoint_depth_buckets_top'])}",
@@ -741,10 +804,34 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
             True,
         ),
         (
+            "Weak Open Rate",
+            [(opponent, metric_key(opponent, "weak_open_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Bad or Weak Open Rate",
+            [(opponent, metric_key(opponent, "bad_or_weak_open_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
             "Good Open Rate",
             [(opponent, metric_key(opponent, "good_open_rate")) for opponent in opponents],
             "rate (%)",
             True,
+        ),
+        (
+            "Bad Open per Game",
+            [(opponent, metric_key(opponent, "bad_open_per_game")) for opponent in opponents],
+            "opens / game",
+            False,
+        ),
+        (
+            "Bad or Weak Open per Game",
+            [(opponent, metric_key(opponent, "bad_or_weak_open_per_game")) for opponent in opponents],
+            "opens / game",
+            False,
         ),
         (
             "Opening Play Actions",

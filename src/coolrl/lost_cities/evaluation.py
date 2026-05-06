@@ -294,6 +294,7 @@ def evaluate_agent_against_bot(
             draws += 1
     card_actions = play_actions + discard_actions
     draw_actions = draw_deck_actions + draw_pile_actions
+    bad_or_weak_open_actions = bad_open_actions + weak_open_actions
     return {
         "games": int(games),
         "win_rate": float(wins / max(1, games)),
@@ -326,6 +327,9 @@ def evaluate_agent_against_bot(
         "good_open_actions": good_open_actions,
         "bad_open_rate": float(bad_open_actions / max(1, opening_play_actions)),
         "weak_open_rate": float(weak_open_actions / max(1, opening_play_actions)),
+        "bad_or_weak_open_rate": float(bad_or_weak_open_actions / max(1, opening_play_actions)),
+        "bad_open_per_game": float(bad_open_actions / max(1, games)),
+        "bad_or_weak_open_per_game": float(bad_or_weak_open_actions / max(1, games)),
         "good_open_rate": float(good_open_actions / max(1, opening_play_actions)),
         "opening_recoverable_score_mean": float(
             opening_recoverable_score_sum / max(1, opening_play_actions)
