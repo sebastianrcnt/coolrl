@@ -2,7 +2,7 @@ name: Deploy omok-web to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [stable]
     paths:
       - src/coolrl/omok/web/**
       - .github/workflows/deploy.yml

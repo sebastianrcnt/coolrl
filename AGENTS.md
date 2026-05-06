@@ -42,10 +42,11 @@ Avoid generic filler such as "문서 수정" or "테스트 확인" when a concre
 
 ## Branch workflow policy
 
-`main`은 배포와 무거운 CI 기준 브랜치로 취급한다. 일상적인 연구 작업과 실험 기록은 `main`에 직접 커밋하지 않는다.
+`stable`은 배포와 무거운 CI 기준 브랜치로 취급한다. 일상적인 개발 작업과 연구 기록은 `stable`에 직접 커밋하지 않는다.
 
 기본 브랜치 역할:
-- `main`: 배포 가능 상태, 무거운 CI/릴리스 기준
+- `stable`: 배포 가능 상태, GitHub Pages/릴리스 기준
+- `main`: 일반 개발 통합 브랜치
 - `research`: 연구 작업 통합 브랜치
 - `research/experiment/<experiment_slug>`: 개별 실험 작업 브랜치
 
@@ -59,7 +60,8 @@ Avoid generic filler such as "문서 수정" or "테스트 확인" when a concre
 - 실험 구현, config, progress, report, plot 변경은 해당 실험 브랜치에 커밋한다.
 - 실험 종료 후 해당 브랜치를 `research`로 머지한다.
 - 실험 커밋은 커밋 메시지 자체가 중요한 연구 기록이므로 기본적으로 squash하지 않는다.
-- `main`으로의 머지는 배포/CI 비용과 안정성을 고려해 명시적으로 요청되었을 때만 수행한다.
+- `research`의 안정화된 변경만 선별해 `main`으로 올린다.
+- `stable`로의 머지는 배포/CI 비용과 안정성을 고려해 명시적으로 요청되었을 때만 수행한다.
 - 현재 브랜치가 불명확하면 작업 전 `git status --short --branch`로 확인한다.
 
 ## Experiment record policy
