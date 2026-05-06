@@ -667,17 +667,6 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
 
     latest_eval_row = find_latest_eval_row(rows)
     opponents = discover_opponents(latest_eval_row)
-    sns.set_theme(style="darkgrid", context="notebook")
-    fig, axes = plt.subplots(5, 3, figsize=(21, 20), sharex=False, sharey=False)
-    fig.suptitle(
-        f"Lost Cities zero-pit metrics: {run_dir.name}",
-        fontsize=18,
-        fontweight="bold",
-        y=0.985,
-    )
-    if smooth_window > 1:
-        fig.text(0.01, 0.985, f"smooth window: {smooth_window}", fontsize=9, va="top")
-
     panels = [
         (
             "Advantage Loss",
@@ -734,6 +723,60 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
             False,
         ),
         (
+            "5-Color Open Count",
+            [(opponent, metric_key(opponent, "opened_colors_count_5")) for opponent in opponents],
+            "games / eval",
+            False,
+        ),
+        (
+            "Opened Colors Std",
+            [(opponent, metric_key(opponent, "opened_colors_std")) for opponent in opponents],
+            "std",
+            False,
+        ),
+        (
+            "Bad Open Rate",
+            [(opponent, metric_key(opponent, "bad_open_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Good Open Rate",
+            [(opponent, metric_key(opponent, "good_open_rate")) for opponent in opponents],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Opening Play Actions",
+            [(opponent, metric_key(opponent, "opening_play_actions")) for opponent in opponents],
+            "actions / eval",
+            False,
+        ),
+        (
+            "Opening Recoverable Score p25",
+            [
+                (opponent, metric_key(opponent, "opening_recoverable_score_p25"))
+                for opponent in opponents
+            ],
+            "score",
+            False,
+        ),
+        (
+            "Opening Recoverable Score Mean",
+            [
+                (opponent, metric_key(opponent, "opening_recoverable_score_mean"))
+                for opponent in opponents
+            ],
+            "score",
+            False,
+        ),
+        (
+            "Score per Opened Color",
+            [(opponent, metric_key(opponent, "avg_score_per_opened_color")) for opponent in opponents],
+            "score / color",
+            False,
+        ),
+        (
             "Expedition Cards",
             [(opponent, metric_key(opponent, "avg_expedition_cards")) for opponent in opponents],
             "cards",
@@ -773,6 +816,26 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
         ),
     ]
 
+    column_count = 3
+    panel_count = len(panels) + 1
+    row_count = math.ceil(panel_count / column_count)
+    sns.set_theme(style="darkgrid", context="notebook")
+    fig, axes = plt.subplots(
+        row_count,
+        column_count,
+        figsize=(21, 4.0 * row_count),
+        sharex=False,
+        sharey=False,
+    )
+    fig.suptitle(
+        f"Lost Cities zero-pit metrics: {run_dir.name}",
+        fontsize=18,
+        fontweight="bold",
+        y=0.985,
+    )
+    if smooth_window > 1:
+        fig.text(0.01, 0.985, f"smooth window: {smooth_window}", fontsize=9, va="top")
+
     flat_axes = list(axes.flat)
     for axis, (title, specs, ylabel, percent) in zip(flat_axes[: len(panels)], panels, strict=True):
         draw_panel(
@@ -786,6 +849,8 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
             smooth_window=smooth_window,
         )
     draw_latest_endpoint_bucket_panel(sns, flat_axes[len(panels)], rows)
+    for axis in flat_axes[len(panels) + 1 :]:
+        axis.set_axis_off()
 
     fig.tight_layout(rect=(0, 0, 1, 0.965), w_pad=5.0, h_pad=2.0)
     fig.savefig(output_path, dpi=150, bbox_inches="tight", pad_inches=0.25)
