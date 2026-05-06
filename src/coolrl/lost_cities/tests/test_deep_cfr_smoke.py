@@ -989,6 +989,19 @@ def test_evaluate_against_bot_reports_passive_no_expedition_diagnostics(tmp_path
     assert result["avg_final_score"] == 0.0
     assert result["avg_game_length"] > 0.0
     assert result["policy_entropy"] >= 0.0
+    assert result["positive_expedition_rate"] == 0.0
+    assert result["negative_expedition_rate"] == 0.0
+    assert result["avg_positive_expeditions"] == 0.0
+    assert result["avg_negative_expeditions"] == 0.0
+    assert result["final_expedition_score_mean"] == 0.0
+    assert result["final_expedition_score_p25"] == 0.0
+    assert result["final_expedition_score_median"] == 0.0
+    assert result["bad_open_final_positive_rate"] == 0.0
+    assert result["bad_open_final_score_mean"] == 0.0
+    assert result["my_took_opponent_discard_rate"] >= 0.0
+    assert result["opponent_took_my_discard_rate"] >= 0.0
+    assert result["five_color_positive_expedition_rate"] == 0.0
+    assert result["five_color_avg_diff"] == 0.0
 
 
 def test_deep_cfr_eval_cli_accepts_passive_discard_opponent() -> None:

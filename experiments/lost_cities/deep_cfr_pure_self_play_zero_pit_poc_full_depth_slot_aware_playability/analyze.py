@@ -17,6 +17,7 @@ DEFAULT_PLOT_OUTPUT = EXPERIMENT_DIR / "analysis_metrics.png"
 DEFAULT_HEATMAP_OUTPUT = EXPERIMENT_DIR / "analysis_latest_heatmap.png"
 DEFAULT_DELTA_HEATMAP_OUTPUT = EXPERIMENT_DIR / "analysis_delta_heatmap.png"
 DEFAULT_SUMMARY_OUTPUT = EXPERIMENT_DIR / "analysis_summary.png"
+DEFAULT_EXPEDITION_DIAGNOSTIC_PLOT_OUTPUT = EXPERIMENT_DIR / "analysis_expedition_scores.png"
 
 TARGET_METRICS = (
     "win_rate",
@@ -42,6 +43,20 @@ TARGET_METRICS = (
     "opening_recoverable_score_p25",
     "opening_margin_mean",
     "avg_score_per_opened_color",
+    "positive_expedition_rate",
+    "negative_expedition_rate",
+    "avg_positive_expeditions",
+    "avg_negative_expeditions",
+    "final_expedition_score_mean",
+    "final_expedition_score_p25",
+    "final_expedition_score_median",
+    "bad_open_final_positive_rate",
+    "bad_open_final_score_mean",
+    "my_took_opponent_discard_rate",
+    "opponent_took_my_discard_rate",
+    "net_discard_take_rate",
+    "five_color_positive_expedition_rate",
+    "five_color_avg_diff",
     "avg_expedition_cards",
     "max_step_timeouts",
     "policy_entropy",
@@ -71,6 +86,20 @@ METRIC_LABELS = {
     "opening_recoverable_score_p25": "opening 회수 점수 p25",
     "opening_margin_mean": "opening margin 평균",
     "avg_score_per_opened_color": "개방 색당 평균 점수",
+    "positive_expedition_rate": "양수 expedition 비율",
+    "negative_expedition_rate": "음수 expedition 비율",
+    "avg_positive_expeditions": "게임당 양수 expedition",
+    "avg_negative_expeditions": "게임당 음수 expedition",
+    "final_expedition_score_mean": "expedition 최종 점수 평균",
+    "final_expedition_score_p25": "expedition 최종 점수 p25",
+    "final_expedition_score_median": "expedition 최종 점수 중앙값",
+    "bad_open_final_positive_rate": "bad open 최종 양수 비율",
+    "bad_open_final_score_mean": "bad open 최종 점수 평균",
+    "my_took_opponent_discard_rate": "상대 discard 회수율",
+    "opponent_took_my_discard_rate": "내 discard 피회수율",
+    "net_discard_take_rate": "net discard 회수율",
+    "five_color_positive_expedition_rate": "5색 양수 expedition 비율",
+    "five_color_avg_diff": "5색 평균 점수차",
     "avg_expedition_cards": "평균 원정 카드",
     "max_step_timeouts": "max step timeout",
     "policy_entropy": "policy entropy",
@@ -90,6 +119,13 @@ HEATMAP_METRICS = (
     "bad_open_per_game",
     "bad_or_weak_open_per_game",
     "opening_recoverable_score_mean",
+    "positive_expedition_rate",
+    "final_expedition_score_median",
+    "bad_open_final_positive_rate",
+    "my_took_opponent_discard_rate",
+    "opponent_took_my_discard_rate",
+    "five_color_positive_expedition_rate",
+    "five_color_avg_diff",
     "max_step_timeouts",
 )
 
@@ -155,6 +191,18 @@ def parse_args() -> argparse.Namespace:
         help="plot에만 적용할 이동 평균 window. 1이면 raw metrics를 그대로 그림",
     )
     parser.add_argument("--no-plot", action="store_true", help="plot 생성을 건너뜀")
+    parser.add_argument(
+        "--expedition-diagnostic-json",
+        type=Path,
+        default=None,
+        help="expedition_score_diagnostic/diagnose.py가 생성한 JSON 또는 JSONL 경로",
+    )
+    parser.add_argument(
+        "--expedition-plot-output",
+        type=Path,
+        default=DEFAULT_EXPEDITION_DIAGNOSTIC_PLOT_OUTPUT,
+        help=f"opened expedition score diagnostic plot 경로. 기본값은 {DEFAULT_EXPEDITION_DIAGNOSTIC_PLOT_OUTPUT}",
+    )
     parser.add_argument(
         "--compact",
         action="store_true",
@@ -277,6 +325,8 @@ def discover_opponents(eval_row: dict[str, Any] | None) -> list[str]:
         if not key.startswith("eval_"):
             continue
         body = key[len("eval_") :]
+        if "_opponent_opened_colors" in body:
+            continue
         for suffix in suffixes:
             if body.endswith(suffix):
                 opponent = body[: -len(suffix)]
@@ -447,6 +497,12 @@ def render_compact_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, f
     safe_bad_open_per_game = average_metric(opponents, SAFE_OPPONENTS, "bad_open_per_game")
     safe_opening_p25 = average_metric(opponents, SAFE_OPPONENTS, "opening_recoverable_score_p25")
     safe_opening_actions = average_metric(opponents, SAFE_OPPONENTS, "opening_play_actions")
+    safe_positive_expedition_rate = average_metric(opponents, SAFE_OPPONENTS, "positive_expedition_rate")
+    safe_final_expedition_median = average_metric(opponents, SAFE_OPPONENTS, "final_expedition_score_median")
+    safe_bad_open_final_positive = average_metric(opponents, SAFE_OPPONENTS, "bad_open_final_positive_rate")
+    safe_my_take = average_metric(opponents, SAFE_OPPONENTS, "my_took_opponent_discard_rate")
+    safe_opponent_take = average_metric(opponents, SAFE_OPPONENTS, "opponent_took_my_discard_rate")
+    safe_five_color_positive = average_metric(opponents, SAFE_OPPONENTS, "five_color_positive_expedition_rate")
     return "\n".join(
         [
             "Lost Cities slot_aware_playability compact",
@@ -465,6 +521,12 @@ def render_compact_stdout(summary: dict[str, Any], deltas: dict[str, dict[str, f
             f"good {format_rate(safe_good_open)}, "
             f"bad/game {format_value(safe_bad_open_per_game)}, "
             f"recoverable p25 {format_value(safe_opening_p25)}",
+            f"- safe expedition outcomes: positive {format_rate(safe_positive_expedition_rate)}, "
+            f"median {format_value(safe_final_expedition_median)}, "
+            f"bad-open final positive {format_rate(safe_bad_open_final_positive)}",
+            f"- safe discard interaction: my take {format_rate(safe_my_take)}, "
+            f"opponent take {format_rate(safe_opponent_take)}, "
+            f"five-color positive {format_rate(safe_five_color_positive)}",
             f"- random avg_diff: {format_value(opponents.get('random', {}).get('avg_diff'))}",
             f"- top endpoint buckets: {render_bucket_summary(summary['endpoint_depth_buckets_top'])}",
         ]
@@ -861,6 +923,77 @@ def plot_run(run_dir: Path, output: Path | None = None, *, smooth_window: int = 
             "Score per Opened Color",
             [(opponent, metric_key(opponent, "avg_score_per_opened_color")) for opponent in opponents],
             "score / color",
+            False,
+        ),
+        (
+            "Expedition Final Quality",
+            [(opponent, metric_key(opponent, "positive_expedition_rate")) for opponent in opponents],
+            "positive rate (%)",
+            True,
+        ),
+        (
+            "Negative Expedition Rate",
+            [(opponent, metric_key(opponent, "negative_expedition_rate")) for opponent in opponents],
+            "negative rate (%)",
+            True,
+        ),
+        (
+            "Expedition Final Score",
+            [
+                (f"{opponent} mean", metric_key(opponent, "final_expedition_score_mean"))
+                for opponent in opponents
+            ]
+            + [
+                (f"{opponent} median", metric_key(opponent, "final_expedition_score_median"))
+                for opponent in opponents
+            ],
+            "score",
+            False,
+        ),
+        (
+            "Bad Open Recovery",
+            [
+                (opponent, metric_key(opponent, "bad_open_final_positive_rate"))
+                for opponent in opponents
+            ],
+            "positive rate (%)",
+            True,
+        ),
+        (
+            "Bad Open Final Score",
+            [
+                (opponent, metric_key(opponent, "bad_open_final_score_mean"))
+                for opponent in opponents
+            ],
+            "score",
+            False,
+        ),
+        (
+            "Discard Interaction",
+            [
+                (f"{opponent} my take", metric_key(opponent, "my_took_opponent_discard_rate"))
+                for opponent in opponents
+            ]
+            + [
+                (f"{opponent} opp take", metric_key(opponent, "opponent_took_my_discard_rate"))
+                for opponent in opponents
+            ],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Five-Color Quality",
+            [
+                (opponent, metric_key(opponent, "five_color_positive_expedition_rate"))
+                for opponent in opponents
+            ],
+            "positive rate (%)",
+            True,
+        ),
+        (
+            "Five-Color Avg Diff",
+            [(opponent, metric_key(opponent, "five_color_avg_diff")) for opponent in opponents],
+            "score diff",
             False,
         ),
         (
@@ -1282,6 +1415,212 @@ def plot_summary(
     return output
 
 
+def read_expedition_diagnostic(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(f"expedition diagnostic 파일을 찾을 수 없습니다: {path}")
+
+    rows: list[dict[str, Any]] = []
+    if path.suffix == ".jsonl":
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, raw_line in enumerate(handle, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"{path}:{line_number}: JSONL 파싱 실패 ({exc.msg})") from exc
+                if isinstance(payload, dict):
+                    rows.append(payload)
+        return rows
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
+        return [row for row in payload["rows"] if isinstance(row, dict)]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    raise ValueError(f"지원하지 않는 expedition diagnostic JSON 구조입니다: {path}")
+
+
+def expedition_plot_records(
+    rows: list[dict[str, Any]],
+    metric_names: list[str],
+    *,
+    percent: bool = False,
+) -> dict[str, list[Any]]:
+    records: dict[str, list[Any]] = {
+        "iteration": [],
+        "value": [],
+        "opponent": [],
+        "metric": [],
+    }
+    for row in rows:
+        iteration = numeric(row.get("checkpoint_iteration"))
+        opponent = row.get("opponent")
+        if iteration is None or not isinstance(opponent, str):
+            continue
+        for metric_name in metric_names:
+            value = numeric(row.get(metric_name))
+            if value is None:
+                continue
+            records["iteration"].append(int(iteration))
+            records["value"].append(value * 100 if percent else value)
+            records["opponent"].append(opponent)
+            records["metric"].append(metric_name)
+    return records
+
+
+def draw_expedition_axis(
+    sns: Any,
+    axis: Any,
+    rows: list[dict[str, Any]],
+    title: str,
+    metrics: list[str],
+    *,
+    ylabel: str,
+    percent: bool = False,
+) -> None:
+    axis.set_title(title, fontsize=11, fontweight="bold")
+    axis.set_xlabel("checkpoint iteration")
+    axis.set_ylabel(ylabel)
+    records = expedition_plot_records(rows, metrics, percent=percent)
+    if not records["iteration"]:
+        axis.text(0.5, 0.5, "No data", ha="center", va="center", transform=axis.transAxes)
+        return
+    sns.lineplot(
+        data=records,
+        x="iteration",
+        y="value",
+        hue="opponent",
+        style="metric",
+        markers=True,
+        dashes=False,
+        linewidth=1.5,
+        markersize=5,
+        errorbar=None,
+        ax=axis,
+    )
+    axis.grid(True, alpha=0.35)
+    legend = axis.legend(
+        title=None,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        borderaxespad=0,
+        frameon=False,
+        fontsize=8,
+    )
+    if legend is not None:
+        for line in legend.get_lines():
+            line.set_linewidth(1.8)
+
+
+def plot_expedition_diagnostic(diagnostic_path: Path, output: Path) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    rows = read_expedition_diagnostic(diagnostic_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    sns.set_theme(style="darkgrid", context="notebook")
+
+    panels = [
+        (
+            "Expedition Outcomes per Game",
+            [
+                "per_game_positive_expeditions",
+                "per_game_negative_expeditions",
+                "per_game_bonus_expeditions",
+            ],
+            "expeditions / game",
+            False,
+        ),
+        (
+            "Expedition Outcome Rates",
+            [
+                "positive_expedition_rate",
+                "negative_expedition_rate",
+                "bonus_expedition_rate",
+            ],
+            "rate (%)",
+            True,
+        ),
+        (
+            "Score Distribution",
+            [
+                "final_expedition_score_p25",
+                "final_expedition_score_median",
+                "final_expedition_score_p75",
+                "final_expedition_score_p90",
+            ],
+            "final score",
+            False,
+        ),
+        (
+            "Positive / Negative Expedition Score Mean",
+            [
+                "positive_expedition_score_mean",
+                "negative_expedition_score_mean",
+            ],
+            "final score",
+            False,
+        ),
+        (
+            "Open Calibration",
+            [
+                "first_open_recoverable_score_mean_for_positive_final",
+                "first_open_recoverable_score_mean_for_negative_final",
+            ],
+            "first-open recoverable score",
+            False,
+        ),
+        (
+            "Failed Recovery per Game",
+            [
+                "per_game_opened_but_negative_expeditions",
+                "per_game_below_minus_20_expeditions",
+            ],
+            "expeditions / game",
+            False,
+        ),
+    ]
+
+    column_count = 2
+    row_count = math.ceil(len(panels) / column_count)
+    fig, axes = plt.subplots(
+        row_count,
+        column_count,
+        figsize=(20, 4.5 * row_count),
+        sharex=False,
+        sharey=False,
+    )
+    fig.suptitle(
+        f"Opened Expedition Score Diagnostic: {diagnostic_path.name}",
+        fontsize=18,
+        fontweight="bold",
+        y=0.985,
+    )
+    flat_axes = list(axes.flat)
+    for axis, (title, metrics, ylabel, percent) in zip(flat_axes, panels, strict=True):
+        draw_expedition_axis(
+            sns,
+            axis,
+            rows,
+            title,
+            metrics,
+            ylabel=ylabel,
+            percent=percent,
+        )
+    for axis in flat_axes[len(panels) :]:
+        axis.set_axis_off()
+
+    fig.tight_layout(rect=(0, 0, 1, 0.955), w_pad=5.0, h_pad=2.0)
+    fig.savefig(output, dpi=150, bbox_inches="tight", pad_inches=0.25)
+    plt.close(fig)
+    return output
+
+
 def main() -> int:
     args = parse_args()
     summary, warnings = summarize_run(args.run)
@@ -1321,6 +1660,12 @@ def main() -> int:
             print(f"- delta heatmap: {delta_heatmap_path}")
         summary_path = plot_summary(summary, deltas, args.summary_output)
         print(f"- summary: {summary_path}")
+        if args.expedition_diagnostic_json is not None:
+            expedition_plot_path = plot_expedition_diagnostic(
+                args.expedition_diagnostic_json,
+                args.expedition_plot_output,
+            )
+            print(f"- expedition score diagnostic plot: {expedition_plot_path}")
 
     return 0
 

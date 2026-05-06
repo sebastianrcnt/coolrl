@@ -52,3 +52,27 @@
   - iteration 200: bad_open_rate 0.80 이하 또는 opened colors 4.85 이하이면 강한 신호
   - bad_open_rate 0.80-0.85면 부분 성공 진행 중으로 보고 iteration 300까지 계속 관찰
   - bad_open_rate 0.85 초과와 opened colors 4.95+가 유지되면 selectivity는 실패 쪽이지만, score 우위가 유지되면 iteration 300까지는 확인할 가치가 있다.
+
+### 종료 판정
+
+- 본 run은 2026-05-06 18:22 KST에 수동 종료했다.
+  - 마지막 완료 iteration: 387
+  - 마지막 저장 checkpoint: `iteration_00380.pt` / `latest.pt`
+  - 마지막 eval iteration: 385
+  - 총 경과: 약 1시간 38분
+- traversal health는 끝까지 정상이다.
+  - node cutoff 0%, terminal 100%
+  - 최신 traversal avg endpoint depth 265.7, max depth 360
+- 최종 score는 `derived_playability` 대비 약간 우위지만 `full_depth` 대비 확실한 개선은 아니다.
+  - safe_heuristic avg_diff: -48.02
+  - safe_heuristic_loose avg_diff: -52.46
+  - safe_heuristic_strict avg_diff: -40.14
+  - random avg_diff: +48.38
+- selectivity emergence는 실패로 판정한다.
+  - iter 280-385 구간에서 safe 상대 opened colors는 대부분 4.8-5.0에 머물렀다.
+  - 5-color count는 대부분 90+/100이고, bad_open_rate도 90%대에서 plateau였다.
+  - 별도 offline expedition score diagnostic에서도 safe 계열 opened expedition의 positive rate는 약 19-22%, median final expedition score는 -6~-7 수준이었다.
+- 결론:
+  - slot-level feature는 초기 score/recovery/general play 효율을 개선했지만, entry-threshold selectivity를 self-play 평형 안에서 끌어내지는 못했다.
+  - 색별 summary만 부족하다는 `derived_playability`의 결론은 강화됐지만, slot-local alignment만으로도 충분하지 않다는 negative result가 추가됐다.
+  - 다음 실험은 새 정식 eval metric이 수집되는 fresh run에서 판단해야 한다. 현재 run은 hot reload 대상이 아니므로 새 metric은 자동 수집되지 않았다.
