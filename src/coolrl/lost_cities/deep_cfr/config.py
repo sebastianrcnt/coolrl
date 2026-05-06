@@ -47,6 +47,11 @@ class NetworkConfig:
 
 
 @dataclass(slots=True)
+class EncodingConfig:
+    derived_playability: bool = False
+
+
+@dataclass(slots=True)
 class SelfPlayLeagueConfig:
     current_weight: float = 0.5
     recent_weight: float = 0.3
@@ -253,6 +258,7 @@ class RunConfig:
     device: str = "auto"
     use_amp: bool = False
     rules: RulesConfig = field(default_factory=RulesConfig)
+    encoding: EncodingConfig = field(default_factory=EncodingConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     traversal: TraversalConfig = field(default_factory=TraversalConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
@@ -289,6 +295,7 @@ def _to_dataclass(cfg: dict[str, Any]) -> RunConfig:
         device=str(cfg.get("device", "auto")),
         use_amp=bool(cfg.get("use_amp", False)),
         rules=RulesConfig(**cfg.get("rules", {})),
+        encoding=EncodingConfig(**cfg.get("encoding", {})),
         network=NetworkConfig(**cfg.get("network", {})),
         traversal=TraversalConfig(**cfg.get("traversal", {})),
         optimization=OptimizationConfig(**cfg.get("optimization", {})),

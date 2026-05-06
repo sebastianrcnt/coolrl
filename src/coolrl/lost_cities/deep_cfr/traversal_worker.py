@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ..game import GameState, LostCitiesConfig
-from .config import NetworkConfig, SelfPlayLeagueConfig
+from .config import EncodingConfig, NetworkConfig, SelfPlayLeagueConfig
 from .memory import _Sample, AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet
 from .traversal import DeepCFRTraverser, TraversalStats, TraversalTimingStats
@@ -37,6 +37,7 @@ class TraversalWorkerBatch:
     opponent_policy: str
     league_advantage_net_state_dicts: list[list[dict[str, Any]]]
     self_play_league: SelfPlayLeagueConfig
+    encoding: EncodingConfig
     strategy_sample_interval: int
     store_strategy_on_opponent_nodes: bool
     store_strategy_on_traverser_nodes: bool
@@ -141,6 +142,7 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         opponent_policy=batch.opponent_policy,
         league_advantage_nets=league_advantage_nets,
         self_play_league=batch.self_play_league,
+        encoding=batch.encoding,
         outcome_sampling_epsilon=batch.outcome_sampling_epsilon,
         outcome_sampling_value_clip=batch.outcome_sampling_value_clip,
         outcome_unsampled_regret=batch.outcome_unsampled_regret,

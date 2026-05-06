@@ -65,7 +65,7 @@ class DeepCFRTrainer:
         self.device = _torch_device(config.device)
         set_seed(config.seed)
         self.lc_config = config.rules.to_lost_cities_config(seed=config.seed)
-        self.input_dim = infer_input_dim(self.lc_config)
+        self.input_dim = infer_input_dim(self.lc_config, config.encoding)
         self.action_size = self.lc_config.action_size
         self.advantage_nets = [
             AdvantageNet(self.input_dim, self.action_size, config.network).to(self.device),
@@ -185,6 +185,7 @@ class DeepCFRTrainer:
                     device=self.device,
                     max_steps=self.config.evaluation.max_steps,
                     on_max_steps=self.config.evaluation.on_max_steps,
+                    encoding=self.config.encoding,
                 )
                 eval_metrics[f"eval_{opponent_name}_win_rate"] = result["win_rate"]
                 eval_metrics[f"eval_{opponent_name}_avg_diff"] = result["avg_diff"]
@@ -219,6 +220,27 @@ class DeepCFRTrainer:
                 eval_metrics[f"eval_{opponent_name}_avg_draw_pile_actions"] = result["avg_draw_pile_actions"]
                 eval_metrics[f"eval_{opponent_name}_avg_game_length"] = result["avg_game_length"]
                 eval_metrics[f"eval_{opponent_name}_policy_entropy"] = result["policy_entropy"]
+                eval_metrics[f"eval_{opponent_name}_opening_play_actions"] = result[
+                    "opening_play_actions"
+                ]
+                eval_metrics[f"eval_{opponent_name}_bad_open_actions"] = result["bad_open_actions"]
+                eval_metrics[f"eval_{opponent_name}_weak_open_actions"] = result["weak_open_actions"]
+                eval_metrics[f"eval_{opponent_name}_good_open_actions"] = result["good_open_actions"]
+                eval_metrics[f"eval_{opponent_name}_bad_open_rate"] = result["bad_open_rate"]
+                eval_metrics[f"eval_{opponent_name}_weak_open_rate"] = result["weak_open_rate"]
+                eval_metrics[f"eval_{opponent_name}_good_open_rate"] = result["good_open_rate"]
+                eval_metrics[f"eval_{opponent_name}_opening_recoverable_score_mean"] = result[
+                    "opening_recoverable_score_mean"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opening_recoverable_score_p25"] = result[
+                    "opening_recoverable_score_p25"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opening_margin_mean"] = result[
+                    "opening_margin_mean"
+                ]
+                eval_metrics[f"eval_{opponent_name}_avg_score_per_opened_color"] = result[
+                    "avg_score_per_opened_color"
+                ]
                 eval_metrics[f"eval_{opponent_name}_play_action_rate"] = result["play_action_rate"]
                 eval_metrics[f"eval_{opponent_name}_discard_action_rate"] = result["discard_action_rate"]
                 eval_metrics[f"eval_{opponent_name}_draw_deck_rate"] = result["draw_deck_rate"]
@@ -360,6 +382,7 @@ class DeepCFRTrainer:
             opponent_policy=self.config.traversal.opponent_policy,
             league_advantage_nets=self._materialize_league_advantage_nets(self.device),
             self_play_league=self.config.traversal.self_play_league,
+            encoding=self.config.encoding,
             outcome_sampling_epsilon=self.config.traversal.outcome_sampling_epsilon,
             outcome_sampling_value_clip=self.config.traversal.outcome_sampling_value_clip,
             outcome_unsampled_regret=self.config.traversal.outcome_unsampled_regret,
@@ -479,6 +502,7 @@ class DeepCFRTrainer:
                         opponent_policy=self.config.traversal.opponent_policy,
                         league_advantage_net_state_dicts=league_advantage_net_state_dicts,
                         self_play_league=self.config.traversal.self_play_league,
+                        encoding=self.config.encoding,
                         strategy_sample_interval=self.config.traversal.strategy_sample_interval,
                         store_strategy_on_opponent_nodes=self.config.traversal.store_strategy_on_opponent_nodes,
                         store_strategy_on_traverser_nodes=self.config.traversal.store_strategy_on_traverser_nodes,

@@ -18,7 +18,7 @@ from ..evaluation import (
 )
 from ..game import GameState, LostCitiesConfig
 from ..interfaces import BotInput, LostCitiesBot
-from .config import config_from_dict
+from .config import EncodingConfig, config_from_dict
 from .encoding import encode_information_state, legal_mask_array
 from .networks import StrategyNet
 
@@ -59,12 +59,14 @@ class StrategyNetBot(LostCitiesBot):
         config: LostCitiesConfig,
         *,
         device: torch.device | str = "cpu",
+        encoding: EncodingConfig | None = None,
         sample: bool = False,
         seed: int | None = None,
     ) -> None:
         self.strategy_net = strategy_net
         self.config = config
         self.device = torch.device(device)
+        self.encoding = encoding or EncodingConfig()
         self.sample = sample
         self.rng = np.random.default_rng(seed)
         self.last_policy_entropy: float | None = None
@@ -78,7 +80,7 @@ class StrategyNetBot(LostCitiesBot):
                 legal = np.asarray(obs_or_state.legal_mask, dtype=bool)
             return first_legal(legal)
         state = obs_or_state
-        info = encode_information_state(state, state.current_player)
+        info = encode_information_state(state, state.current_player, self.encoding)
         legal = legal_mask_array(state)
         legal_indices = np.flatnonzero(legal)
         if len(legal_indices) == 0:
@@ -121,6 +123,7 @@ def load_strategy_bot_from_checkpoint(
             strategy_net,
             lc_config,
             device=resolved_device,
+            encoding=config.encoding,
             sample=sample,
             seed=seed,
         ),
@@ -139,11 +142,19 @@ def evaluate_against_bot(
     max_steps: int = 10_000,
     on_max_steps: str = "score_diff",
     sample: bool = False,
+    encoding: EncodingConfig | None = None,
 ) -> dict[str, float | int]:
     strategy_net.eval()
 
     def make_strategy_bot(index: int) -> StrategyNetBot:
-        return StrategyNetBot(strategy_net, config, device=device, sample=sample, seed=seed + index)
+        return StrategyNetBot(
+            strategy_net,
+            config,
+            device=device,
+            encoding=encoding,
+            sample=sample,
+            seed=seed + index,
+        )
 
     return evaluate_agent_against_bot(
         make_strategy_bot,

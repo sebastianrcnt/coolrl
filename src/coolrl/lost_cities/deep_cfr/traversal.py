@@ -8,7 +8,7 @@ import torch
 
 from ..game import GameState
 from ..bots.heuristic import SafeHeuristicBot
-from .config import SelfPlayLeagueConfig
+from .config import EncodingConfig, SelfPlayLeagueConfig
 from .encoding import encode_information_state, legal_mask_array
 from .memory import AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet, regret_matching
@@ -143,6 +143,7 @@ class DeepCFRTraverser:
         opponent_policy: str = "network",
         league_advantage_nets: list[list[AdvantageNet]] | None = None,
         self_play_league: SelfPlayLeagueConfig | None = None,
+        encoding: EncodingConfig | None = None,
         outcome_sampling_epsilon: float = 0.0,
         outcome_sampling_value_clip: float | None = None,
         outcome_unsampled_regret: str = "negative_node_value",
@@ -168,6 +169,7 @@ class DeepCFRTraverser:
         self.opponent_policy = opponent_policy
         self.league_advantage_nets = league_advantage_nets or []
         self.self_play_league = self_play_league or SelfPlayLeagueConfig()
+        self.encoding = encoding or EncodingConfig()
         self.outcome_sampling_epsilon = float(outcome_sampling_epsilon)
         self.outcome_sampling_value_clip = (
             None if outcome_sampling_value_clip is None else max(1.0e-9, float(outcome_sampling_value_clip))
@@ -231,7 +233,7 @@ class DeepCFRTraverser:
         state: GameState,
         player: int,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        info = encode_information_state(state, player)
+        info = encode_information_state(state, player, self.encoding)
         legal = legal_mask_array(state)
         with torch.inference_mode():
             x = torch.as_tensor(info, dtype=torch.float32, device=self.device).unsqueeze(0)
@@ -245,7 +247,7 @@ class DeepCFRTraverser:
 
         self.timing_stats.policy_calls += 1
         started = time.perf_counter()
-        info = encode_information_state(state, player)
+        info = encode_information_state(state, player, self.encoding)
         self.timing_stats.encode_information_state_seconds += time.perf_counter() - started
         legal = legal_mask_array(state)
         started = time.perf_counter()

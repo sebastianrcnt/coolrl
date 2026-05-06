@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 import numpy as np
 
 from .bots.heuristic import SafeHeuristicBot, SafeHeuristicParams
 from .bots.passive import PassiveDiscardBot
 from .bots.random import RandomBot
+from .deep_cfr.encoding import color_playability_summary
 from .game import GameState, LostCitiesConfig
 from .interfaces import BotInput, LostCitiesBot
 
@@ -90,6 +92,34 @@ def _expedition_card_count(state: GameState, player: int) -> int:
     return sum(len(expedition) for expedition in state.expeditions[player])
 
 
+def _opening_play_summary(
+    state: GameState,
+    player: int,
+    action: int,
+) -> dict[str, float | bool] | None:
+    if state.phase != "card" or not is_card_play_action(action):
+        return None
+    slot = action // 2
+    hand = state.hands[player]
+    if slot < 0 or slot >= len(hand):
+        return None
+    card = hand[slot]
+    if len(state.expeditions[player][card.color]) > 0:
+        return None
+    summary = color_playability_summary(state, player, card.color)
+    recoverable_score = float(summary["recoverable_score_no_bonus"])
+    margin = float(summary["recoverable_margin_no_bonus"])
+    has_bonus_path = bool(summary["has_bonus_path"])
+    return {
+        "recoverable_score_no_bonus": recoverable_score,
+        "recoverable_margin_no_bonus": margin,
+        "has_bonus_path": has_bonus_path,
+        "is_bad_open": recoverable_score < 0.0 and not has_bonus_path,
+        "is_weak_open": recoverable_score < 0.0 and has_bonus_path,
+        "is_good_open": recoverable_score >= 0.0,
+    }
+
+
 def play_game_for_evaluation(
     bot0: LostCitiesBot,
     bot1: LostCitiesBot,
@@ -98,17 +128,24 @@ def play_game_for_evaluation(
     seed: int | None = None,
     max_steps: int = 10_000,
     tracked_player: int | None = None,
-) -> tuple[GameState, bool, dict[str, float | int], int]:
+) -> tuple[GameState, bool, dict[str, Any], int]:
     game_config = replace(config, seed=seed) if seed is not None else config
     state = GameState.new_game(game_config)
     bots = [bot0, bot1]
-    action_counts: dict[str, float | int] = {
+    action_counts: dict[str, Any] = {
         "play_actions": 0,
         "discard_actions": 0,
         "draw_deck_actions": 0,
         "draw_pile_actions": 0,
         "policy_entropy_sum": 0.0,
         "policy_entropy_actions": 0,
+        "opening_play_actions": 0,
+        "bad_open_actions": 0,
+        "weak_open_actions": 0,
+        "good_open_actions": 0,
+        "opening_recoverable_score_sum": 0.0,
+        "opening_margin_sum": 0.0,
+        "opening_recoverable_scores": [],
     }
     for step in range(max_steps):
         if state.terminal:
@@ -120,6 +157,24 @@ def play_game_for_evaluation(
         if tracked_player is not None and acting_player == tracked_player and phase == "card":
             if is_card_play_action(action):
                 action_counts["play_actions"] = int(action_counts["play_actions"]) + 1
+                opening = _opening_play_summary(state, acting_player, action)
+                if opening is not None:
+                    action_counts["opening_play_actions"] = int(action_counts["opening_play_actions"]) + 1
+                    if opening["is_bad_open"]:
+                        action_counts["bad_open_actions"] = int(action_counts["bad_open_actions"]) + 1
+                    if opening["is_weak_open"]:
+                        action_counts["weak_open_actions"] = int(action_counts["weak_open_actions"]) + 1
+                    if opening["is_good_open"]:
+                        action_counts["good_open_actions"] = int(action_counts["good_open_actions"]) + 1
+                    action_counts["opening_recoverable_score_sum"] = float(
+                        action_counts["opening_recoverable_score_sum"]
+                    ) + float(opening["recoverable_score_no_bonus"])
+                    action_counts["opening_margin_sum"] = float(action_counts["opening_margin_sum"]) + float(
+                        opening["recoverable_margin_no_bonus"]
+                    )
+                    scores = action_counts["opening_recoverable_scores"]
+                    if isinstance(scores, list):
+                        scores.append(float(opening["recoverable_score_no_bonus"]))
             elif is_card_discard_action(action):
                 action_counts["discard_actions"] = int(action_counts["discard_actions"]) + 1
         if tracked_player is not None and acting_player == tracked_player and phase == "draw":
@@ -166,6 +221,13 @@ def evaluate_agent_against_bot(
     game_lengths: list[int] = []
     policy_entropy_sum = 0.0
     policy_entropy_actions = 0
+    opening_play_actions = 0
+    bad_open_actions = 0
+    weak_open_actions = 0
+    good_open_actions = 0
+    opening_recoverable_score_sum = 0.0
+    opening_margin_sum = 0.0
+    opening_recoverable_scores: list[float] = []
     wins = losses = draws = 0
     max_step_timeouts = 0
     for index in range(games):
@@ -204,6 +266,15 @@ def evaluate_agent_against_bot(
         draw_pile_actions += int(action_counts["draw_pile_actions"])
         policy_entropy_sum += float(action_counts["policy_entropy_sum"])
         policy_entropy_actions += int(action_counts["policy_entropy_actions"])
+        opening_play_actions += int(action_counts["opening_play_actions"])
+        bad_open_actions += int(action_counts["bad_open_actions"])
+        weak_open_actions += int(action_counts["weak_open_actions"])
+        good_open_actions += int(action_counts["good_open_actions"])
+        opening_recoverable_score_sum += float(action_counts["opening_recoverable_score_sum"])
+        opening_margin_sum += float(action_counts["opening_margin_sum"])
+        scores = action_counts["opening_recoverable_scores"]
+        if isinstance(scores, list):
+            opening_recoverable_scores.extend(float(score) for score in scores)
         if timed_out:
             max_step_timeouts += 1
             if timeout_mode == "score_diff":
@@ -249,6 +320,30 @@ def evaluate_agent_against_bot(
         "avg_draw_pile_actions": float(draw_pile_actions / max(1, games)),
         "avg_game_length": float(np.mean(game_lengths)) if game_lengths else 0.0,
         "policy_entropy": float(policy_entropy_sum / max(1, policy_entropy_actions)),
+        "opening_play_actions": opening_play_actions,
+        "bad_open_actions": bad_open_actions,
+        "weak_open_actions": weak_open_actions,
+        "good_open_actions": good_open_actions,
+        "bad_open_rate": float(bad_open_actions / max(1, opening_play_actions)),
+        "weak_open_rate": float(weak_open_actions / max(1, opening_play_actions)),
+        "good_open_rate": float(good_open_actions / max(1, opening_play_actions)),
+        "opening_recoverable_score_mean": float(
+            opening_recoverable_score_sum / max(1, opening_play_actions)
+        ),
+        "opening_recoverable_score_p25": float(np.percentile(opening_recoverable_scores, 25))
+        if opening_recoverable_scores
+        else 0.0,
+        "opening_margin_mean": float(opening_margin_sum / max(1, opening_play_actions)),
+        "avg_score_per_opened_color": float(
+            np.mean(
+                [
+                    score / max(1, opened)
+                    for score, opened in zip(final_scores, opened_colors, strict=True)
+                ]
+            )
+        )
+        if final_scores
+        else 0.0,
         "play_action_rate": float(play_actions / max(1, card_actions)),
         "discard_action_rate": float(discard_actions / max(1, card_actions)),
         "draw_deck_rate": float(draw_deck_actions / max(1, draw_actions)),
