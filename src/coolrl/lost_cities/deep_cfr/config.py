@@ -49,6 +49,7 @@ class NetworkConfig:
 @dataclass(slots=True)
 class EncodingConfig:
     derived_playability: bool = False
+    slot_aware_playability: bool = False
 
 
 @dataclass(slots=True)

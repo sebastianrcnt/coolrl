@@ -10,6 +10,7 @@ from .config import EncodingConfig
 
 DERIVED_PLAYABILITY_PER_COLOR = 19
 DERIVED_PLAYABILITY_COMMON = 3
+SLOT_AWARE_PLAYABILITY_PER_SLOT = 12
 
 
 @lru_cache(maxsize=None)
@@ -22,6 +23,7 @@ def _encoding_layout(
     expedition_penalty: int,
     bonus_threshold: int,
     derived_playability: bool,
+    slot_aware_playability: bool,
 ) -> dict[str, int | float | bool]:
     card_type_size = n_colors * (n_ranks + 1)
     card_slot_size = card_type_size + 1
@@ -48,6 +50,7 @@ def _encoding_layout(
         if derived_playability
         else 0
     )
+    slot_aware_total = hand_size * SLOT_AWARE_PLAYABILITY_PER_SLOT if slot_aware_playability else 0
     return {
         "n_colors": n_colors,
         "n_ranks": n_ranks,
@@ -59,8 +62,10 @@ def _encoding_layout(
         "card_slot_size": card_slot_size,
         "base_total": base_total,
         "derived_playability": derived_playability,
+        "slot_aware_playability": slot_aware_playability,
         "derived_total": derived_total,
-        "total": base_total + derived_total,
+        "slot_aware_total": slot_aware_total,
+        "total": base_total + derived_total + slot_aware_total,
         "denom_handshake": float(max(1, n_handshakes)),
         "len_denom": float(max(1, n_handshakes + n_ranks)),
         "rank_denom": float(max(1, n_ranks)),
@@ -88,6 +93,7 @@ def _layout_for(
         config.expedition_penalty,
         config.bonus_threshold,
         bool(encoding.derived_playability),
+        bool(encoding.slot_aware_playability),
     )
 
 
@@ -235,6 +241,70 @@ def _append_derived_playability_features(
     return idx
 
 
+def _slot_playability_values(
+    state: GameState,
+    player: int,
+    card: Card,
+    layout: dict[str, int | float | bool],
+) -> tuple[float, ...]:
+    min_rank = int(layout["min_rank"])
+    color = card.color
+    summary = color_playability_summary(state, player, color)
+    last_numeric_rank = int(summary["last_numeric_rank"])
+    has_numeric_started = last_numeric_rank > 0
+    legal_play = state.can_play_card(player, card)
+    is_numeric = card.rank > 0
+    is_wager = card.rank == 0
+
+    # Opening selectivity is about starting or confirming a color commitment.
+    would_start_color_commitment = legal_play and not has_numeric_started
+    is_numeric_open = would_start_color_commitment and is_numeric
+    is_wager_first_open = would_start_color_commitment and is_wager and bool(summary["is_unopened"])
+    is_playable_to_existing = legal_play and has_numeric_started
+    is_dead_numeric = is_numeric and not legal_play and card.rank <= last_numeric_rank
+    is_wager_before_numeric = is_wager and legal_play and not has_numeric_started
+    recoverable_score = float(summary["recoverable_score_no_bonus"])
+    margin = float(summary["recoverable_margin_no_bonus"])
+    is_bad_open_candidate = would_start_color_commitment and recoverable_score < 0.0
+    open_risk_score = min(0.0, recoverable_score) if would_start_color_commitment else 0.0
+    is_safe_continuation = (not would_start_color_commitment) and is_playable_to_existing
+
+    return (
+        recoverable_score / float(layout["max_score_estimate"]),
+        margin / float(layout["max_numeric_sum"]),
+        float(would_start_color_commitment),
+        float(is_numeric_open),
+        float(is_wager_first_open),
+        float(is_playable_to_existing),
+        float(is_dead_numeric),
+        float(is_wager_before_numeric),
+        float(summary["has_bonus_path"]),
+        float(is_bad_open_candidate),
+        open_risk_score / float(layout["max_score_estimate"]),
+        float(is_safe_continuation),
+    )
+
+
+def _append_slot_aware_playability_features(
+    out: np.ndarray,
+    idx: int,
+    state: GameState,
+    player: int,
+    layout: dict[str, int | float | bool],
+) -> int:
+    for card in state.hand_slots(player):
+        if card is None:
+            idx += SLOT_AWARE_PLAYABILITY_PER_SLOT
+            continue
+        values = _slot_playability_values(state, player, card, layout)
+        if len(values) != SLOT_AWARE_PLAYABILITY_PER_SLOT:
+            raise AssertionError(f"slot-aware playability feature count mismatch: {len(values)}")
+        for value in values:
+            out[idx] = value
+            idx += 1
+    return idx
+
+
 def encode_information_state(
     state: GameState,
     player: int,
@@ -322,6 +392,8 @@ def encode_information_state(
 
     if layout["derived_playability"]:
         idx = _append_derived_playability_features(out, idx, state, player, layout)
+    if layout["slot_aware_playability"]:
+        idx = _append_slot_aware_playability_features(out, idx, state, player, layout)
 
     if idx != len(out):
         raise AssertionError(f"encoding dim mismatch: {idx} vs {len(out)}")
