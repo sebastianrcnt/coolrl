@@ -47,3 +47,43 @@
 
 - `uv run pytest src/coolrl/lost_cities/tests/test_deep_cfr_traversal.py src/coolrl/lost_cities/tests/test_deep_cfr_smoke.py src/coolrl/lost_cities/tests/test_deep_cfr_encoding.py -q`
 - 결과: 58 passed
+
+### 본 run 종료
+
+- 시작: 2026-05-06 05:50:44 KST
+- 종료: 2026-05-06 09:51:00 KST
+- train exit status: 0
+- analyze exit status: 0
+- 최신 row iteration: 1219
+- 최신 eval iteration: 1215
+- report/plot 생성 완료
+
+Traversal health:
+
+- `node_limit_cutoff_traversal_rate`: 0.0%
+- `terminal_traversal_rate`: 100.0%
+- 최신 `league_anchor_traversal_rate`: 16.4%
+- 최근 50 iteration 평균 `league_anchor_traversal_rate`: 15.7%
+- avg endpoint depth: 258.6
+- max depth reached: 404
+
+최신 eval 핵심 관측:
+
+- safe avg_diff: -56.96
+- safe opened colors mean/std/count_5: 4.81 / 0.46 / 84
+- safe_loose avg_diff: -60.55
+- safe_loose opened colors mean/std/count_5: 4.86 / 0.40 / 88
+- safe_strict avg_diff: -53.83
+- safe_strict opened colors mean/std/count_5: 4.83 / 0.45 / 86
+- safe 계열 평균 avg_diff: -57.11
+- safe 계열 평균 opened colors: 4.83
+- random avg_diff: +48.31
+
+판정:
+
+- anchor sampling과 metric 기록은 정상 동작했다.
+- `safe_heuristic` anchor weight 0.15는 opening selectivity를 유도하지 못했다.
+- 정책은 여전히 safe 계열 상대에게 평균 4.8색 이상을 열고, 5색 opening도 높은 빈도로 유지했다.
+- safe 계열 점수는 `full_depth` baseline보다 약 18점 나빠졌다.
+- random avg_diff는 +48.31로 후퇴하지 않았다. 따라서 이번 실패는 safe heuristic 분포에 과적합되어 random이 무너진 현상이 아니다.
+- 현재 결론은 anchor pressure 0.15가 over-opening self-play 평형을 깨기에는 부족했거나, 단순 deterministic safe anchor 주입만으로는 selectivity 신호가 충분히 강하지 않았다는 것이다.

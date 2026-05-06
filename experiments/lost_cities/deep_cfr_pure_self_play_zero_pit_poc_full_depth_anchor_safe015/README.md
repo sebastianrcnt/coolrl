@@ -4,7 +4,7 @@
 
 ## 상태
 
-smoke 통과. 4시간 run을 시작한다.
+완료. `safe_heuristic` anchor 0.15는 opening selectivity를 유도하지 못한 것으로 판정한다.
 
 ## 목적
 
@@ -20,20 +20,38 @@ smoke 통과. 4시간 run을 시작한다.
 - checkpoint: `checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_full_depth`
 - reference: iter 320 기준 safe avg_diff 약 -39.3, random avg_diff 약 +40.9, safe opened colors 약 4.94-4.96
 
+## 결과 요약
+
+- run: `checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_full_depth_anchor_safe015`
+- 최신 iteration: 1219
+- 최신 eval iteration: 1215
+- anchor traversal rate: 최근 50 iteration 평균 15.7%, 최신 16.4%
+- node limit cutoff traversal rate: 0.0%
+- terminal traversal rate: 100.0%
+- safe 계열 평균 avg_diff: -57.11
+- safe 계열 평균 opened colors: 4.83
+- safe 계열 5색 opening 빈도: 약 86%
+- random avg_diff: +48.31
+
+결론:
+
+- anchor mechanism은 정상 작동했다.
+- 하지만 selectivity는 emerge하지 않았다. 정책은 여전히 safe 계열 상대에게 4.8색 이상을 열고, 5색 opening도 높은 빈도로 유지했다.
+- safe 계열 점수는 `full_depth` baseline보다 약 18점 나빠졌다.
+- random 성능은 후퇴하지 않았으므로, 실패 원인은 safe 분포 overfitting이 아니라 anchor pressure가 over-opening 평형을 깨지 못한 것이다.
+
 ## 파일
 
 - [config.yaml](config.yaml): 실행 config
 - [plan.md](plan.md): 실험 설계와 판정 기준
 - [progress.md](progress.md): 실행 진행 기록
 - [analyze.py](analyze.py): metrics 분석 스크립트
-
-실험 종료 후 추가될 파일:
-
-- `report.md`, `report.json`
-- `analysis_metrics.png`
-- `analysis_latest_heatmap.png`
-- `analysis_delta_heatmap.png`
-- `analysis_summary.png`
+- [report.md](report.md): 최종 분석 리포트
+- [report.json](report.json): 최종 분석 JSON
+- `analysis_metrics.png`: metric plot
+- `analysis_latest_heatmap.png`: 최신 eval heatmap
+- `analysis_delta_heatmap.png`: baseline delta heatmap
+- `analysis_summary.png`: compact summary plot
 
 ## 실행
 
