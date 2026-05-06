@@ -228,6 +228,15 @@ class DeepCFRTrainer:
                 eval_metrics[f"eval_{opponent_name}_good_open_actions"] = result["good_open_actions"]
                 eval_metrics[f"eval_{opponent_name}_bad_open_rate"] = result["bad_open_rate"]
                 eval_metrics[f"eval_{opponent_name}_weak_open_rate"] = result["weak_open_rate"]
+                eval_metrics[f"eval_{opponent_name}_bad_or_weak_open_rate"] = result[
+                    "bad_or_weak_open_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_bad_open_per_game"] = result[
+                    "bad_open_per_game"
+                ]
+                eval_metrics[f"eval_{opponent_name}_bad_or_weak_open_per_game"] = result[
+                    "bad_or_weak_open_per_game"
+                ]
                 eval_metrics[f"eval_{opponent_name}_good_open_rate"] = result["good_open_rate"]
                 eval_metrics[f"eval_{opponent_name}_opening_recoverable_score_mean"] = result[
                     "opening_recoverable_score_mean"
@@ -240,6 +249,48 @@ class DeepCFRTrainer:
                 ]
                 eval_metrics[f"eval_{opponent_name}_avg_score_per_opened_color"] = result[
                     "avg_score_per_opened_color"
+                ]
+                eval_metrics[f"eval_{opponent_name}_positive_expedition_rate"] = result[
+                    "positive_expedition_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_negative_expedition_rate"] = result[
+                    "negative_expedition_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_avg_positive_expeditions"] = result[
+                    "avg_positive_expeditions"
+                ]
+                eval_metrics[f"eval_{opponent_name}_avg_negative_expeditions"] = result[
+                    "avg_negative_expeditions"
+                ]
+                eval_metrics[f"eval_{opponent_name}_final_expedition_score_mean"] = result[
+                    "final_expedition_score_mean"
+                ]
+                eval_metrics[f"eval_{opponent_name}_final_expedition_score_p25"] = result[
+                    "final_expedition_score_p25"
+                ]
+                eval_metrics[f"eval_{opponent_name}_final_expedition_score_median"] = result[
+                    "final_expedition_score_median"
+                ]
+                eval_metrics[f"eval_{opponent_name}_bad_open_final_positive_rate"] = result[
+                    "bad_open_final_positive_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_bad_open_final_score_mean"] = result[
+                    "bad_open_final_score_mean"
+                ]
+                eval_metrics[f"eval_{opponent_name}_my_took_opponent_discard_rate"] = result[
+                    "my_took_opponent_discard_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opponent_took_my_discard_rate"] = result[
+                    "opponent_took_my_discard_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_net_discard_take_rate"] = result[
+                    "net_discard_take_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_five_color_positive_expedition_rate"] = result[
+                    "five_color_positive_expedition_rate"
+                ]
+                eval_metrics[f"eval_{opponent_name}_five_color_avg_diff"] = result[
+                    "five_color_avg_diff"
                 ]
                 eval_metrics[f"eval_{opponent_name}_play_action_rate"] = result["play_action_rate"]
                 eval_metrics[f"eval_{opponent_name}_discard_action_rate"] = result["discard_action_rate"]
