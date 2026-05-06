@@ -48,12 +48,12 @@ Avoid generic filler such as "문서 수정" or "테스트 확인" when a concre
 - `stable`: 배포 가능 상태, GitHub Pages/릴리스 기준
 - `main`: 일반 개발 통합 브랜치
 - `research`: 연구 작업 통합 브랜치
-- `research/experiment/<experiment_slug>`: 개별 실험 작업 브랜치
+- `experiment/<experiment_slug>`: 개별 실험 작업 브랜치
 
 브랜치 이름 규칙:
-- 실험 브랜치는 `research/experiment/<experiment_slug>` 형식을 사용한다.
+- 실험 브랜치는 `experiment/<experiment_slug>` 형식을 사용한다.
 - `<experiment_slug>`는 experiment directory slug와 맞춰 snake_case로 쓴다.
-- 예: `research/experiment/slot_aware_playability`
+- 예: `experiment/slot_aware_playability`
 
 운영 규칙:
 - 새 실험은 `research`에서 분기한다.
