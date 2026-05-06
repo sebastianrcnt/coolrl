@@ -2,7 +2,7 @@
 
 이 문서는 Omok training을 어느 backend와 config로 돌릴지 고르는 데 필요한 현재 기준의 요약입니다.
 
-과거 CUDA tuning log와 benchmark 세부 기록은 [`../omok_cuda_tuning.md`](../omok_cuda_tuning.md)에 남겨두었습니다. 이 문서는 먼저 실사용 결정을 돕는 것을 목표로 합니다.
+과거 CUDA tuning log와 benchmark 세부 기록은 [`../archive/omok/cuda-tuning.md`](../archive/omok/cuda-tuning.md)에 남겨두었습니다. 이 문서는 먼저 실사용 결정을 돕는 것을 목표로 합니다.
 
 ## 한 줄 선택지
 
@@ -131,5 +131,5 @@ uv run --extra omok python scripts/bench_omok_evaluator.py \
 
 ## 더 깊은 기록
 
-- CUDA tuning, historical benchmark, TensorRT knobs: [`../omok_cuda_tuning.md`](../omok_cuda_tuning.md)
-- 15x15 MCTS memory incident: [`../omok-mcts-memory.md`](../omok-mcts-memory.md)
+- CUDA tuning, historical benchmark, TensorRT knobs: [`../archive/omok/cuda-tuning.md`](../archive/omok/cuda-tuning.md)
+- 15x15 MCTS memory incident: [`../archive/omok/mcts-memory-incident.md`](../archive/omok/mcts-memory-incident.md)

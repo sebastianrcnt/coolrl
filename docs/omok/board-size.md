@@ -71,6 +71,6 @@ GUI와 Web GUI 모두 ONNX policy output 길이가 선택한 board 크기와 맞
 
 ## 더 깊은 설계 설명
 
-Dynamic board-size migration의 세부 구현 배경은 [`../omok-dynamic-board-size.md`](../omok-dynamic-board-size.md)를 참고하세요.
+Dynamic board-size migration의 세부 구현 배경은 [`../archive/omok/dynamic-board-size.md`](../archive/omok/dynamic-board-size.md)를 참고하세요.
 
-15x15에서 MCTS memory behavior가 왜 중요했는지는 [`../omok-mcts-memory.md`](../omok-mcts-memory.md)에 정리되어 있습니다.
+15x15에서 MCTS memory behavior가 왜 중요했는지는 [`../archive/omok/mcts-memory-incident.md`](../archive/omok/mcts-memory-incident.md)에 정리되어 있습니다.

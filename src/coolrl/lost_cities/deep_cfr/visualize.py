@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,12 @@ def _eval_series_specs_for_suffixes(
 
 
 def plot_metrics(checkpoint_dir: str | Path, output: str | Path | None = None) -> Path:
+    warnings.warn(
+        "coolrl.lost_cities.deep_cfr.visualize.plot_metrics() is legacy compatibility code. "
+        "새 실험별 plot은 experiments/<domain>/<experiment>/analyze.py에서 생성하세요.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     import matplotlib
 
     matplotlib.use("Agg")

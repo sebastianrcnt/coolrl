@@ -1,6 +1,6 @@
 # Lost Cities Deep CFR Worker Benchmark Notes
 
-> 역사적 참고: 이 문서는 삭제된 `random_rollout` cutoff 실험 config를 기준으로 한 CPU traversal multiprocessing benchmark 기록입니다. 현재 실행 가능한 기본 학습 config와 명령은 [`src/coolrl/lost_cities/README.md`](../src/coolrl/lost_cities/README.md)를 먼저 보세요.
+> 역사적 참고: 이 문서는 삭제된 `random_rollout` cutoff 실험 config를 기준으로 한 CPU traversal multiprocessing benchmark 기록입니다. 현재 실행 가능한 기본 학습 config와 명령은 [`src/coolrl/lost_cities/README.md`](../../../src/coolrl/lost_cities/README.md)를 먼저 보세요.
 
 ## Purpose
 

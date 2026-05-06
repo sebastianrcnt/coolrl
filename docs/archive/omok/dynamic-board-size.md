@@ -31,7 +31,7 @@ C 및 Rust wrappers는 다음을 검증합니다:
 - 재사용된 roots가 들어오는 상태 board 크기와 일치함;
 - evaluator priors가 `[batch, board_size * board_size]` 형태를 가짐.
 
-9x9에서 더 큰 boards로 확장할 때 native MCTS node lifetime과 조밀한 child storage가 특별한 주의가 필요한 이유를 드러낸 15x15 메모리 사건은 `docs/omok-mcts-memory.md`를 참조하세요.
+9x9에서 더 큰 boards로 확장할 때 native MCTS node lifetime과 조밀한 child storage가 특별한 주의가 필요한 이유를 드러낸 15x15 메모리 사건은 [`mcts-memory-incident.md`](mcts-memory-incident.md)를 참조하세요.
 
 ## Configs
 

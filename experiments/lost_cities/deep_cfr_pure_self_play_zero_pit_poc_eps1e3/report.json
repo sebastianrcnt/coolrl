@@ -1,0 +1,228 @@
+{
+  "run": {
+    "path": "checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3",
+    "metrics_path": "checkpoints/lost_cities_deep_cfr_pure_self_play_zero_pit_poc_eps1e3/metrics.jsonl",
+    "row_count": 211
+  },
+  "latest_iteration": 211,
+  "latest_eval_iteration": 210,
+  "opponents": {
+    "noisy_safe": {
+      "win_rate": 0.08,
+      "avg_diff": -65.44,
+      "play_action_rate": 0.09554831704668838,
+      "discard_action_rate": 0.9044516829533116,
+      "draw_deck_rate": 0.5242128121606949,
+      "draw_pile_rate": 0.4757871878393051,
+      "avg_opened_colors": 2.72,
+      "avg_expedition_cards": 4.4,
+      "max_step_timeouts": 0,
+      "policy_entropy": 1.5624204883233046
+    },
+    "passive_discard": {
+      "win_rate": 0.02,
+      "avg_diff": -13.44,
+      "play_action_rate": 0.0776271186440678,
+      "discard_action_rate": 0.9223728813559322,
+      "draw_deck_rate": 0.48983050847457626,
+      "draw_pile_rate": 0.5101694915254237,
+      "avg_opened_colors": 1.15,
+      "avg_expedition_cards": 2.29,
+      "max_step_timeouts": 0,
+      "policy_entropy": 1.7730046603134122
+    },
+    "random": {
+      "win_rate": 0.73,
+      "avg_diff": 22.69,
+      "play_action_rate": 0.04762751021858894,
+      "discard_action_rate": 0.9523724897814111,
+      "draw_deck_rate": 0.4593922161009419,
+      "draw_pile_rate": 0.5406077838990581,
+      "avg_opened_colors": 1.65,
+      "avg_expedition_cards": 2.68,
+      "max_step_timeouts": 0,
+      "policy_entropy": 1.7879093890985358
+    },
+    "safe_heuristic": {
+      "win_rate": 0.0,
+      "avg_diff": -79.72,
+      "play_action_rate": 0.06689834926151172,
+      "discard_action_rate": 0.9331016507384883,
+      "draw_deck_rate": 0.34766869388937155,
+      "draw_pile_rate": 0.6523313061106284,
+      "avg_opened_colors": 2.87,
+      "avg_expedition_cards": 4.62,
+      "max_step_timeouts": 12,
+      "policy_entropy": 1.5914214193244995
+    },
+    "safe_heuristic_loose": {
+      "win_rate": 0.0,
+      "avg_diff": -87.04,
+      "play_action_rate": 0.09133024487094639,
+      "discard_action_rate": 0.9086697551290536,
+      "draw_deck_rate": 0.3866644606221046,
+      "draw_pile_rate": 0.6133355393778954,
+      "avg_opened_colors": 3.21,
+      "avg_expedition_cards": 5.52,
+      "max_step_timeouts": 7,
+      "policy_entropy": 1.5266659575309376
+    },
+    "safe_heuristic_strict": {
+      "win_rate": 0.01,
+      "avg_diff": -72.62,
+      "play_action_rate": 0.0556436690457309,
+      "discard_action_rate": 0.9443563309542691,
+      "draw_deck_rate": 0.3222310335712398,
+      "draw_pile_rate": 0.6777689664287603,
+      "avg_opened_colors": 2.72,
+      "avg_expedition_cards": 4.21,
+      "max_step_timeouts": 13,
+      "policy_entropy": 1.6321090716678202
+    }
+  },
+  "baseline": {
+    "run": {
+      "path": "checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official",
+      "metrics_path": "checkpoints/lost_cities_deep_cfr_pure_self_play_a_2h_official/metrics.jsonl",
+      "row_count": 414
+    },
+    "latest_iteration": 414,
+    "latest_eval_iteration": 410,
+    "opponents": {
+      "noisy_safe": {
+        "win_rate": 0.1,
+        "avg_diff": -63.32,
+        "play_action_rate": 0.017075517075517077,
+        "discard_action_rate": 0.982924482924483,
+        "draw_deck_rate": null,
+        "draw_pile_rate": null,
+        "avg_opened_colors": 1.74,
+        "avg_expedition_cards": 2.84,
+        "max_step_timeouts": 37,
+        "policy_entropy": 1.6626779621749996
+      },
+      "passive_discard": {
+        "win_rate": 0.0,
+        "avg_diff": -5.64,
+        "play_action_rate": 0.014625228519195612,
+        "discard_action_rate": 0.9853747714808044,
+        "draw_deck_rate": null,
+        "draw_pile_rate": null,
+        "avg_opened_colors": 0.39,
+        "avg_expedition_cards": 0.56,
+        "max_step_timeouts": 0,
+        "policy_entropy": 1.7267013936573297
+      },
+      "random": {
+        "win_rate": 0.7,
+        "avg_diff": 21.93,
+        "play_action_rate": 0.025591882750845545,
+        "discard_action_rate": 0.9744081172491544,
+        "draw_deck_rate": null,
+        "draw_pile_rate": null,
+        "avg_opened_colors": 1.31,
+        "avg_expedition_cards": 2.27,
+        "max_step_timeouts": 0,
+        "policy_entropy": 1.8213516755615442
+      },
+      "safe_heuristic": {
+        "win_rate": 0.13,
+        "avg_diff": -77.46,
+        "play_action_rate": 0.018441971383147855,
+        "discard_action_rate": 0.9815580286168522,
+        "draw_deck_rate": null,
+        "draw_pile_rate": null,
+        "avg_opened_colors": 2.2,
+        "avg_expedition_cards": 3.48,
+        "max_step_timeouts": 69,
+        "policy_entropy": 1.5774081225108676
+      },
+      "safe_heuristic_loose": {
+        "win_rate": 0.14,
+        "avg_diff": -88.96,
+        "play_action_rate": 0.02434599403054954,
+        "discard_action_rate": 0.9756540059694505,
+        "draw_deck_rate": null,
+        "draw_pile_rate": null,
+        "avg_opened_colors": 2.51,
+        "avg_expedition_cards": 4.16,
+        "max_step_timeouts": 60,
+        "policy_entropy": 1.5764834690436937
+      },
+      "safe_heuristic_strict": {
+        "win_rate": 0.11,
+        "avg_diff": -71.35,
+        "play_action_rate": 0.014662314838061763,
+        "discard_action_rate": 0.9853376851619382,
+        "draw_deck_rate": null,
+        "draw_pile_rate": null,
+        "avg_opened_colors": 1.89,
+        "avg_expedition_cards": 2.92,
+        "max_step_timeouts": 73,
+        "policy_entropy": 1.5861652914119573
+      }
+    }
+  },
+  "deltas": {
+    "noisy_safe": {
+      "win_rate": -0.020000000000000004,
+      "avg_diff": -2.1199999999999974,
+      "play_action_rate": 0.0784727999711713,
+      "discard_action_rate": -0.0784727999711714,
+      "avg_opened_colors": 0.9800000000000002,
+      "avg_expedition_cards": 1.5600000000000005,
+      "max_step_timeouts": -37.0,
+      "policy_entropy": -0.10025747385169503
+    },
+    "passive_discard": {
+      "win_rate": 0.02,
+      "avg_diff": -7.8,
+      "play_action_rate": 0.06300189012487219,
+      "discard_action_rate": -0.06300189012487223,
+      "avg_opened_colors": 0.7599999999999999,
+      "avg_expedition_cards": 1.73,
+      "max_step_timeouts": 0.0,
+      "policy_entropy": 0.04630326665608253
+    },
+    "random": {
+      "win_rate": 0.030000000000000027,
+      "avg_diff": 0.7600000000000016,
+      "play_action_rate": 0.022035627467743398,
+      "discard_action_rate": -0.022035627467743346,
+      "avg_opened_colors": 0.33999999999999986,
+      "avg_expedition_cards": 0.41000000000000014,
+      "max_step_timeouts": 0.0,
+      "policy_entropy": -0.0334422864630084
+    },
+    "safe_heuristic": {
+      "win_rate": -0.13,
+      "avg_diff": -2.260000000000005,
+      "play_action_rate": 0.04845637787836387,
+      "discard_action_rate": -0.04845637787836388,
+      "avg_opened_colors": 0.6699999999999999,
+      "avg_expedition_cards": 1.1400000000000001,
+      "max_step_timeouts": -57.0,
+      "policy_entropy": 0.014013296813631948
+    },
+    "safe_heuristic_loose": {
+      "win_rate": -0.14,
+      "avg_diff": 1.9199999999999875,
+      "play_action_rate": 0.06698425084039684,
+      "discard_action_rate": -0.06698425084039694,
+      "avg_opened_colors": 0.7000000000000002,
+      "avg_expedition_cards": 1.3599999999999994,
+      "max_step_timeouts": -53.0,
+      "policy_entropy": -0.04981751151275615
+    },
+    "safe_heuristic_strict": {
+      "win_rate": -0.1,
+      "avg_diff": -1.2700000000000102,
+      "play_action_rate": 0.040981354207669136,
+      "discard_action_rate": -0.04098135420766913,
+      "avg_opened_colors": 0.8300000000000003,
+      "avg_expedition_cards": 1.29,
+      "max_step_timeouts": -60.0,
+      "policy_entropy": 0.045943780255862876
+    }
+  }
+}

@@ -71,7 +71,7 @@ CLI 진입점은 `python -m coolrl.lost_cities.deep_cfr.cli` 다.
 | `lost_cities_deep_cfr_safe_dagger_256.yaml` | 기존 256x3 pretrain checkpoint를 초기화점으로 쓰는 aggregated imitation / DAGGER-style 후속 pretrain config |
 | `lost_cities_deep_cfr_safe_dagger_512.yaml` | aggregated imitation / DAGGER-style 후속 pretrain용 512x4 config. `random`, `safe_heuristic`, variant-safe, `passive_discard` 평가를 함께 본다 |
 
-과거 실험용 `overnight`, `small_run`, `diagnostic_depth16_nodes20k`, `cutoff_random_rollout` config는 결과가 문서화된 뒤 제거했다. 관련 기록은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)와 [`docs/lost-cities-deep-cfr-worker-benchmark-notes.md`](../../../docs/lost-cities-deep-cfr-worker-benchmark-notes.md)를 참고한다.
+과거 실험용 `overnight`, `small_run`, `diagnostic_depth16_nodes20k`, `cutoff_random_rollout` config는 결과가 문서화된 뒤 제거했다. 관련 기록은 archive 문서 [`training-notes.md`](../../../docs/archive/lost-cities-deep-cfr/training-notes.md)와 [`worker-benchmark-notes.md`](../../../docs/archive/lost-cities-deep-cfr/worker-benchmark-notes.md)를 참고한다.
 
 ### 학습 시작
 
@@ -127,7 +127,7 @@ tail -f checkpoints/lost_cities_deep_cfr_tier3/metrics.jsonl
 uv run python -m coolrl.lost_cities.deep_cfr.cli status \
   --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3
 
-# 학습 곡선 플롯
+# 학습 곡선 플롯(legacy quick plot)
 uv run python -m coolrl.lost_cities.deep_cfr.cli plot \
   --checkpoint-dir checkpoints/lost_cities_deep_cfr_tier3
 
@@ -136,6 +136,8 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli eval \
   --checkpoint checkpoints/lost_cities_deep_cfr_tier3/latest.pt \
   --games 500 --opponent safe_heuristic
 ```
+
+새 실험별 분석 plot은 `experiments/lost_cities/<experiment>/analyze.py`에서 생성하는 쪽을 우선한다.
 
 Deep CFR eval opponent는 `random`, `safe_heuristic`, `passive_discard`를 지원한다. `passive_discard`는 expedition을 열지 않는 baseline이라 random win rate만으로 passive collapse를 착각하는 문제를 잡는 데 사용한다.
 
@@ -209,7 +211,7 @@ uv run python -m coolrl.lost_cities.deep_cfr.cli fine-tune-policy \
   --baseline-decay 0.95
 ```
 
-현재 training caveat와 다음 실험 기준은 루트 문서 [`docs/lost-cities-deep-cfr-training-notes.md`](../../../docs/lost-cities-deep-cfr-training-notes.md)를 참고한다.
+현재 training caveat와 다음 실험 기준은 archive 문서 [`training-notes.md`](../../../docs/archive/lost-cities-deep-cfr/training-notes.md)를 참고한다.
 
 ## 테스트
 

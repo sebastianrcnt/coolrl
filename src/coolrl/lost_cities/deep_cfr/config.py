@@ -47,6 +47,47 @@ class NetworkConfig:
 
 
 @dataclass(slots=True)
+class EncodingConfig:
+    derived_playability: bool = False
+    slot_aware_playability: bool = False
+
+
+@dataclass(slots=True)
+class SelfPlayLeagueConfig:
+    current_weight: float = 0.5
+    recent_weight: float = 0.3
+    older_weight: float = 0.2
+    anchor_weight: float = 0.0
+    anchor_policy: str = "safe_heuristic"
+    recent_window: int = 5
+    max_snapshots: int = 20
+    snapshot_every: int = 1
+
+    def __post_init__(self) -> None:
+        self.current_weight = float(self.current_weight)
+        self.recent_weight = float(self.recent_weight)
+        self.older_weight = float(self.older_weight)
+        self.anchor_weight = float(self.anchor_weight)
+        weights = (self.current_weight, self.recent_weight, self.older_weight, self.anchor_weight)
+        if any(weight < 0.0 for weight in weights):
+            raise ValueError("traversal.self_play_league weights must be nonnegative")
+        if sum(weights) <= 0.0:
+            raise ValueError("traversal.self_play_league weights must sum to a positive value")
+        self.anchor_policy = str(self.anchor_policy).strip().lower()
+        if self.anchor_policy not in {"safe_heuristic"}:
+            raise ValueError("traversal.self_play_league.anchor_policy must be 'safe_heuristic'")
+        self.recent_window = int(self.recent_window)
+        if self.recent_window < 0:
+            raise ValueError("traversal.self_play_league.recent_window must be nonnegative")
+        self.max_snapshots = int(self.max_snapshots)
+        if self.max_snapshots < 0:
+            raise ValueError("traversal.self_play_league.max_snapshots must be nonnegative")
+        self.snapshot_every = int(self.snapshot_every)
+        if self.snapshot_every <= 0:
+            raise ValueError("traversal.self_play_league.snapshot_every must be positive")
+
+
+@dataclass(slots=True)
 class TraversalConfig:
     backend: str = "python"
     traversals_per_player: int = 100
@@ -68,8 +109,13 @@ class TraversalConfig:
     outcome_sampling_epsilon: float = 0.0
     outcome_sampling_value_clip: float | None = None
     outcome_unsampled_regret: str = "negative_node_value"
+    endpoint_depth_bucket_width: int = 100
+    endpoint_depth_bucket_max: int = 1000
+    self_play_league: SelfPlayLeagueConfig = field(default_factory=SelfPlayLeagueConfig)
 
     def __post_init__(self) -> None:
+        if isinstance(self.self_play_league, dict):
+            self.self_play_league = SelfPlayLeagueConfig(**self.self_play_league)
         mode = str(self.cutoff_value_mode).strip().lower()
         if mode not in {"score_diff", "random_rollout"}:
             raise ValueError("traversal.cutoff_value_mode must be one of 'score_diff' or 'random_rollout'")
@@ -81,9 +127,10 @@ class TraversalConfig:
             )
         self.cutoff_rollout_policy = policy
         opponent_policy = str(self.opponent_policy).strip().lower()
-        if opponent_policy not in {"network", "safe_heuristic"}:
+        if opponent_policy not in {"network", "safe_heuristic", "self_play_league"}:
             raise ValueError(
-                "traversal.opponent_policy must be one of 'network' or 'safe_heuristic'"
+                "traversal.opponent_policy must be one of "
+                "'network', 'safe_heuristic', or 'self_play_league'"
             )
         self.opponent_policy = opponent_policy
         self.cutoff_rollouts = int(self.cutoff_rollouts)
@@ -106,6 +153,12 @@ class TraversalConfig:
                 "'negative_node_value' or 'zero'"
             )
         self.outcome_unsampled_regret = unsampled_regret
+        self.endpoint_depth_bucket_width = int(self.endpoint_depth_bucket_width)
+        if self.endpoint_depth_bucket_width <= 0:
+            raise ValueError("traversal.endpoint_depth_bucket_width must be positive")
+        self.endpoint_depth_bucket_max = int(self.endpoint_depth_bucket_max)
+        if self.endpoint_depth_bucket_max <= 0:
+            raise ValueError("traversal.endpoint_depth_bucket_max must be positive")
 
     def _cpu_worker_guess(self) -> int:
         logical = max(1, os.cpu_count() or 1)
@@ -206,6 +259,7 @@ class RunConfig:
     device: str = "auto"
     use_amp: bool = False
     rules: RulesConfig = field(default_factory=RulesConfig)
+    encoding: EncodingConfig = field(default_factory=EncodingConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     traversal: TraversalConfig = field(default_factory=TraversalConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
@@ -242,6 +296,7 @@ def _to_dataclass(cfg: dict[str, Any]) -> RunConfig:
         device=str(cfg.get("device", "auto")),
         use_amp=bool(cfg.get("use_amp", False)),
         rules=RulesConfig(**cfg.get("rules", {})),
+        encoding=EncodingConfig(**cfg.get("encoding", {})),
         network=NetworkConfig(**cfg.get("network", {})),
         traversal=TraversalConfig(**cfg.get("traversal", {})),
         optimization=OptimizationConfig(**cfg.get("optimization", {})),

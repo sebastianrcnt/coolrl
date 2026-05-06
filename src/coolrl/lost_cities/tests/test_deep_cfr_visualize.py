@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from coolrl.lost_cities.deep_cfr.visualize import (
     load_metrics,
     load_runtime_progress,
@@ -128,7 +130,8 @@ def test_plot_metrics_writes_png(tmp_path: Path) -> None:
     )
     (tmp_path / "runtime_progress.json").write_text(json.dumps({"iteration": 2}), encoding="utf-8")
 
-    output_path = plot_metrics(tmp_path)
+    with pytest.warns(DeprecationWarning, match="legacy compatibility"):
+        output_path = plot_metrics(tmp_path)
 
     assert load_runtime_progress(tmp_path) == {"iteration": 2}
     assert output_path.exists()

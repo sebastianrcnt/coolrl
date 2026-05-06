@@ -21,7 +21,7 @@ from .encoding import infer_input_dim
 from .evaluate import evaluate_against_bot, make_opponent
 from .memory import AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet, StrategyNet
-from .traversal import DeepCFRTraverser, TraversalStats, TraversalTimingStats
+from .traversal import DeepCFRTraverser, TraversalStats, TraversalTimingStats, endpoint_depth_bucket_keys
 from .traversal_worker import (
     TraversalWorkerBatch,
     TraversalWorkerBatchResult,
@@ -51,14 +51,21 @@ def set_seed(seed: int) -> None:
 
 
 class DeepCFRTrainer:
-    def __init__(self, config: RunConfig, resume_path: str | None = None) -> None:
+    def __init__(
+        self,
+        config: RunConfig,
+        resume_path: str | None = None,
+        init_checkpoint_path: str | Path | None = None,
+    ) -> None:
+        if resume_path and init_checkpoint_path:
+            raise ValueError("resume_path and init_checkpoint_path cannot both be set")
         if config.traversal.backend != "python":
             raise ValueError("Lost Cities Deep CFR MVP only supports traversal.backend=python")
         self.config = config
         self.device = _torch_device(config.device)
         set_seed(config.seed)
         self.lc_config = config.rules.to_lost_cities_config(seed=config.seed)
-        self.input_dim = infer_input_dim(self.lc_config)
+        self.input_dim = infer_input_dim(self.lc_config, config.encoding)
         self.action_size = self.lc_config.action_size
         self.advantage_nets = [
             AdvantageNet(self.input_dim, self.action_size, config.network).to(self.device),
@@ -100,9 +107,12 @@ class DeepCFRTrainer:
             shutil.move(self.metrics_path, archive)
         self.rng = np.random.default_rng(config.seed + 811)
         self.iteration = 0
+        self.self_play_league_snapshots: list[list[dict[str, Any]]] = []
         self.start_time = time.monotonic()
         if resume_path:
             self.load_checkpoint(resume_path)
+        elif init_checkpoint_path:
+            self.initialize_from_checkpoint(init_checkpoint_path)
 
     @property
     def elapsed_seconds(self) -> float:
@@ -120,6 +130,8 @@ class DeepCFRTrainer:
         while self._should_continue():
             self.iteration += 1
             metrics = self.run_iteration(self.iteration)
+            self._maybe_record_self_play_league_snapshot(self.iteration)
+            metrics["self_play_league_snapshots"] = len(self.self_play_league_snapshots)
             self._append_metrics(metrics)
             self._write_progress(metrics)
             if self._should_save(self.iteration):
@@ -173,25 +185,89 @@ class DeepCFRTrainer:
                     device=self.device,
                     max_steps=self.config.evaluation.max_steps,
                     on_max_steps=self.config.evaluation.on_max_steps,
+                    encoding=self.config.encoding,
                 )
                 eval_metrics[f"eval_{opponent_name}_win_rate"] = result["win_rate"]
                 eval_metrics[f"eval_{opponent_name}_avg_diff"] = result["avg_diff"]
                 eval_metrics[f"eval_{opponent_name}_avg_final_score"] = result["avg_final_score"]
                 eval_metrics[f"eval_{opponent_name}_avg_opponent_score"] = result["avg_opponent_score"]
                 eval_metrics[f"eval_{opponent_name}_avg_opened_colors"] = result["avg_opened_colors"]
+                eval_metrics[f"eval_{opponent_name}_opened_colors_std"] = result["opened_colors_std"]
+                eval_metrics[f"eval_{opponent_name}_opened_colors_min"] = result["opened_colors_min"]
+                eval_metrics[f"eval_{opponent_name}_opened_colors_max"] = result["opened_colors_max"]
+                for count in range(self.lc_config.n_colors + 1):
+                    eval_metrics[f"eval_{opponent_name}_opened_colors_count_{count}"] = result[
+                        f"opened_colors_count_{count}"
+                    ]
                 eval_metrics[f"eval_{opponent_name}_avg_opponent_opened_colors"] = result["avg_opponent_opened_colors"]
+                eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_std"] = result[
+                    "opponent_opened_colors_std"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_min"] = result[
+                    "opponent_opened_colors_min"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_max"] = result[
+                    "opponent_opened_colors_max"
+                ]
+                for count in range(self.lc_config.n_colors + 1):
+                    eval_metrics[f"eval_{opponent_name}_opponent_opened_colors_count_{count}"] = result[
+                        f"opponent_opened_colors_count_{count}"
+                    ]
                 eval_metrics[f"eval_{opponent_name}_avg_expedition_cards"] = result["avg_expedition_cards"]
                 eval_metrics[f"eval_{opponent_name}_avg_play_actions"] = result["avg_play_actions"]
                 eval_metrics[f"eval_{opponent_name}_avg_discard_actions"] = result["avg_discard_actions"]
+                eval_metrics[f"eval_{opponent_name}_avg_draw_deck_actions"] = result["avg_draw_deck_actions"]
+                eval_metrics[f"eval_{opponent_name}_avg_draw_pile_actions"] = result["avg_draw_pile_actions"]
+                eval_metrics[f"eval_{opponent_name}_avg_game_length"] = result["avg_game_length"]
+                eval_metrics[f"eval_{opponent_name}_policy_entropy"] = result["policy_entropy"]
+                eval_metrics[f"eval_{opponent_name}_opening_play_actions"] = result[
+                    "opening_play_actions"
+                ]
+                eval_metrics[f"eval_{opponent_name}_bad_open_actions"] = result["bad_open_actions"]
+                eval_metrics[f"eval_{opponent_name}_weak_open_actions"] = result["weak_open_actions"]
+                eval_metrics[f"eval_{opponent_name}_good_open_actions"] = result["good_open_actions"]
+                eval_metrics[f"eval_{opponent_name}_bad_open_rate"] = result["bad_open_rate"]
+                eval_metrics[f"eval_{opponent_name}_weak_open_rate"] = result["weak_open_rate"]
+                eval_metrics[f"eval_{opponent_name}_good_open_rate"] = result["good_open_rate"]
+                eval_metrics[f"eval_{opponent_name}_opening_recoverable_score_mean"] = result[
+                    "opening_recoverable_score_mean"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opening_recoverable_score_p25"] = result[
+                    "opening_recoverable_score_p25"
+                ]
+                eval_metrics[f"eval_{opponent_name}_opening_margin_mean"] = result[
+                    "opening_margin_mean"
+                ]
+                eval_metrics[f"eval_{opponent_name}_avg_score_per_opened_color"] = result[
+                    "avg_score_per_opened_color"
+                ]
                 eval_metrics[f"eval_{opponent_name}_play_action_rate"] = result["play_action_rate"]
                 eval_metrics[f"eval_{opponent_name}_discard_action_rate"] = result["discard_action_rate"]
+                eval_metrics[f"eval_{opponent_name}_draw_deck_rate"] = result["draw_deck_rate"]
+                eval_metrics[f"eval_{opponent_name}_draw_pile_rate"] = result["draw_pile_rate"]
                 eval_metrics[f"eval_{opponent_name}_max_step_timeouts"] = result["max_step_timeouts"]
         eval_seconds = time.monotonic() - eval_started
 
         nodes_per_second = total_stats.nodes / max(1.0e-9, traversal_seconds)
         cutoff_rate = total_stats.cutoffs / max(1, total_stats.nodes)
         node_limit_cutoff_rate = total_stats.node_limit_cutoffs / max(1, total_stats.nodes)
+        depth_cutoff_traversal_rate = total_stats.cutoffs / max(1, traversals)
+        node_limit_cutoff_traversal_rate = total_stats.node_limit_cutoffs / max(1, traversals)
+        terminal_traversal_rate = total_stats.terminals / max(1, traversals)
+        avg_endpoint_depth = total_stats.endpoint_depth_sum / max(1, total_stats.endpoint_traversals)
+        avg_terminal_depth = total_stats.terminal_depth_sum / max(1, total_stats.terminals)
+        avg_depth_cutoff_depth = total_stats.cutoff_depth_sum / max(1, total_stats.cutoffs)
+        avg_node_limit_cutoff_depth = (
+            total_stats.node_limit_cutoff_depth_sum / max(1, total_stats.node_limit_cutoffs)
+        )
         avg_cutoff_rollout_steps = total_stats.cutoff_rollout_steps / max(1, total_stats.cutoff_rollouts)
+        endpoint_depth_bucket_metrics = {
+            f"endpoint_depth_bucket_{key}": total_stats.endpoint_depth_buckets.get(key, 0)
+            for key in endpoint_depth_bucket_keys(
+                self.config.traversal.endpoint_depth_bucket_width,
+                self.config.traversal.endpoint_depth_bucket_max,
+            )
+        }
         metrics: dict[str, Any] = {
             "iteration": iteration,
             "elapsed_seconds": self.elapsed_seconds,
@@ -204,6 +280,24 @@ class DeepCFRTrainer:
             "cutoff_rate": cutoff_rate,
             "total_node_limit_cutoffs": total_stats.node_limit_cutoffs,
             "node_limit_cutoff_rate": node_limit_cutoff_rate,
+            "depth_cutoff_traversal_rate": depth_cutoff_traversal_rate,
+            "node_limit_cutoff_traversal_rate": node_limit_cutoff_traversal_rate,
+            "terminal_traversal_rate": terminal_traversal_rate,
+            "max_depth_reached": total_stats.max_depth_reached,
+            "endpoint_traversals": total_stats.endpoint_traversals,
+            "avg_endpoint_depth": avg_endpoint_depth,
+            "avg_terminal_depth": avg_terminal_depth,
+            "avg_depth_cutoff_depth": avg_depth_cutoff_depth,
+            "avg_node_limit_cutoff_depth": avg_node_limit_cutoff_depth,
+            **endpoint_depth_bucket_metrics,
+            "league_current_traversals": total_stats.league_current_traversals,
+            "league_recent_traversals": total_stats.league_recent_traversals,
+            "league_older_traversals": total_stats.league_older_traversals,
+            "league_anchor_traversals": total_stats.league_anchor_traversals,
+            "league_current_traversal_rate": total_stats.league_current_traversals / max(1, traversals),
+            "league_recent_traversal_rate": total_stats.league_recent_traversals / max(1, traversals),
+            "league_older_traversal_rate": total_stats.league_older_traversals / max(1, traversals),
+            "league_anchor_traversal_rate": total_stats.league_anchor_traversals / max(1, traversals),
             "cutoff_rollouts": total_stats.cutoff_rollouts,
             "cutoff_rollout_steps": total_stats.cutoff_rollout_steps,
             "cutoff_rollout_max_step_timeouts": total_stats.cutoff_rollout_max_step_timeouts,
@@ -286,9 +380,14 @@ class DeepCFRTrainer:
             cutoff_rollout_policy=self.config.traversal.cutoff_rollout_policy,
             cutoff_rollout_max_steps=self.config.traversal.cutoff_rollout_max_steps,
             opponent_policy=self.config.traversal.opponent_policy,
+            league_advantage_nets=self._materialize_league_advantage_nets(self.device),
+            self_play_league=self.config.traversal.self_play_league,
+            encoding=self.config.encoding,
             outcome_sampling_epsilon=self.config.traversal.outcome_sampling_epsilon,
             outcome_sampling_value_clip=self.config.traversal.outcome_sampling_value_clip,
             outcome_unsampled_regret=self.config.traversal.outcome_unsampled_regret,
+            endpoint_depth_bucket_width=self.config.traversal.endpoint_depth_bucket_width,
+            endpoint_depth_bucket_max=self.config.traversal.endpoint_depth_bucket_max,
             rng=self.rng,
             timing_stats=hotspot_stats,
         )
@@ -328,6 +427,63 @@ class DeepCFRTrainer:
             )
         return frozen_state_dicts
 
+    def _frozen_self_play_league_state_dicts(self) -> list[list[dict[str, Any]]]:
+        return [
+            [
+                {
+                    name: value.detach().cpu().clone() if isinstance(value, torch.Tensor) else copy.deepcopy(value)
+                    for name, value in state_dict.items()
+                }
+                for state_dict in snapshot
+            ]
+            for snapshot in self.self_play_league_snapshots
+        ]
+
+    def _worker_state_dict_payloads(
+        self,
+        state_dicts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                name: value.detach().cpu().numpy().copy()
+                if isinstance(value, torch.Tensor)
+                else copy.deepcopy(value)
+                for name, value in state_dict.items()
+            }
+            for state_dict in state_dicts
+        ]
+
+    def _worker_league_state_dict_payloads(self) -> list[list[dict[str, Any]]]:
+        return [
+            self._worker_state_dict_payloads(snapshot)
+            for snapshot in self.self_play_league_snapshots
+        ]
+
+    def _materialize_league_advantage_nets(self, device: torch.device) -> list[list[AdvantageNet]]:
+        league_nets: list[list[AdvantageNet]] = []
+        for snapshot in self.self_play_league_snapshots:
+            snapshot_nets: list[AdvantageNet] = []
+            for state_dict in snapshot:
+                net = AdvantageNet(self.input_dim, self.action_size, self.config.network).to(device)
+                net.load_state_dict(state_dict)
+                net.eval()
+                snapshot_nets.append(net)
+            league_nets.append(snapshot_nets)
+        return league_nets
+
+    def _maybe_record_self_play_league_snapshot(self, iteration: int) -> None:
+        if self.config.traversal.opponent_policy != "self_play_league":
+            return
+        league_cfg = self.config.traversal.self_play_league
+        if league_cfg.max_snapshots <= 0:
+            return
+        if iteration % league_cfg.snapshot_every != 0:
+            return
+        self.self_play_league_snapshots.append(self._frozen_advantage_state_dicts())
+        overflow = len(self.self_play_league_snapshots) - league_cfg.max_snapshots
+        if overflow > 0:
+            del self.self_play_league_snapshots[:overflow]
+
     def _estimated_traversal_batch_count(self) -> int:
         return self.config.traversal.estimated_num_batches()
 
@@ -338,6 +494,7 @@ class DeepCFRTrainer:
     ) -> list[TraversalWorkerBatch]:
         batches: list[TraversalWorkerBatch] = []
         batch_index = 0
+        league_advantage_net_state_dicts = self._worker_league_state_dict_payloads()
         for player in (0, 1):
             seeds = [
                 self._traversal_seed(iteration, player, index)
@@ -363,6 +520,9 @@ class DeepCFRTrainer:
                         cutoff_rollout_policy=self.config.traversal.cutoff_rollout_policy,
                         cutoff_rollout_max_steps=self.config.traversal.cutoff_rollout_max_steps,
                         opponent_policy=self.config.traversal.opponent_policy,
+                        league_advantage_net_state_dicts=league_advantage_net_state_dicts,
+                        self_play_league=self.config.traversal.self_play_league,
+                        encoding=self.config.encoding,
                         strategy_sample_interval=self.config.traversal.strategy_sample_interval,
                         store_strategy_on_opponent_nodes=self.config.traversal.store_strategy_on_opponent_nodes,
                         store_strategy_on_traverser_nodes=self.config.traversal.store_strategy_on_traverser_nodes,
@@ -371,6 +531,8 @@ class DeepCFRTrainer:
                         outcome_sampling_epsilon=self.config.traversal.outcome_sampling_epsilon,
                         outcome_sampling_value_clip=self.config.traversal.outcome_sampling_value_clip,
                         outcome_unsampled_regret=self.config.traversal.outcome_unsampled_regret,
+                        endpoint_depth_bucket_width=self.config.traversal.endpoint_depth_bucket_width,
+                        endpoint_depth_bucket_max=self.config.traversal.endpoint_depth_bucket_max,
                         worker_seed=self.config.seed + iteration * 10_000_019 + player * 1_000_003 + batch_index,
                     )
                 )
@@ -409,7 +571,9 @@ class DeepCFRTrainer:
         return total_stats, traversals
 
     def _run_traversals_parallel(self, iteration: int) -> tuple[TraversalStats, int, TraversalTimingStats | None]:
-        advantage_net_state_dicts = self._frozen_advantage_state_dicts()
+        advantage_net_state_dicts = self._worker_state_dict_payloads(
+            self._frozen_advantage_state_dicts()
+        )
         batches = self._build_traversal_worker_batches(iteration, advantage_net_state_dicts)
         if not batches:
             return TraversalStats(), 0, TraversalTimingStats() if self.profile_hotspots else None
@@ -537,6 +701,7 @@ class DeepCFRTrainer:
             "input_dim": self.input_dim,
             "action_size": self.action_size,
             "advantage_nets": [net.state_dict() for net in self.advantage_nets],
+            "self_play_league_snapshots": self.self_play_league_snapshots,
             "strategy_net": self.strategy_net.state_dict(),
             "advantage_optimizers": [optimizer.state_dict() for optimizer in self.advantage_optimizers],
             "strategy_optimizer": self.strategy_optimizer.state_dict(),
@@ -553,9 +718,22 @@ class DeepCFRTrainer:
         )
         for net, state_dict in zip(self.advantage_nets, payload["advantage_nets"], strict=True):
             net.load_state_dict(state_dict)
+        self.self_play_league_snapshots = payload.get("self_play_league_snapshots", [])
         self.strategy_net.load_state_dict(payload["strategy_net"])
         if "advantage_optimizers" in payload:
             for optimizer, state_dict in zip(self.advantage_optimizers, payload["advantage_optimizers"], strict=True):
                 optimizer.load_state_dict(state_dict)
         if "strategy_optimizer" in payload:
             self.strategy_optimizer.load_state_dict(payload["strategy_optimizer"])
+
+    def initialize_from_checkpoint(self, path: str | Path) -> None:
+        payload = torch.load(path, map_location=self.device)
+        logger.info(
+            "Initializing networks from {} without restoring optimizers, iteration, memories, RNG, or self-play league snapshots",
+            path,
+        )
+        for net, state_dict in zip(self.advantage_nets, payload["advantage_nets"], strict=True):
+            net.load_state_dict(state_dict)
+        self.strategy_net.load_state_dict(payload["strategy_net"])
+        self.iteration = 0
+        self.self_play_league_snapshots = []

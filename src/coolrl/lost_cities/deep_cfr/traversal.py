@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 
 import numpy as np
@@ -8,9 +8,27 @@ import torch
 
 from ..game import GameState
 from ..bots.heuristic import SafeHeuristicBot
+from .config import EncodingConfig, SelfPlayLeagueConfig
 from .encoding import encode_information_state, legal_mask_array
 from .memory import AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet, regret_matching
+
+DEFAULT_ENDPOINT_DEPTH_BUCKET_WIDTH = 100
+DEFAULT_ENDPOINT_DEPTH_BUCKET_MAX = 1000
+
+
+def endpoint_depth_bucket_keys(width: int, max_depth: int) -> tuple[str, ...]:
+    return tuple(f"{start}_{start + width - 1}" for start in range(0, max_depth, width)) + (
+        f"{max_depth}_plus",
+    )
+
+
+def endpoint_depth_bucket_key(depth: int, width: int, max_depth: int) -> str:
+    if depth >= max_depth:
+        return f"{max_depth}_plus"
+    start = max(0, depth // width * width)
+    end = start + width - 1
+    return f"{start}_{end}"
 
 
 @dataclass(slots=True)
@@ -20,9 +38,37 @@ class TraversalStats:
     cutoffs: int = 0
     node_limit_cutoffs: int = 0
     max_depth_reached: int = 0
+    endpoint_traversals: int = 0
+    endpoint_depth_sum: int = 0
+    terminal_depth_sum: int = 0
+    cutoff_depth_sum: int = 0
+    node_limit_cutoff_depth_sum: int = 0
+    endpoint_depth_bucket_width: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_WIDTH
+    endpoint_depth_bucket_max: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_MAX
+    endpoint_depth_buckets: dict[str, int] = field(default_factory=dict)
+    league_current_traversals: int = 0
+    league_recent_traversals: int = 0
+    league_older_traversals: int = 0
+    league_anchor_traversals: int = 0
     cutoff_rollouts: int = 0
     cutoff_rollout_steps: int = 0
     cutoff_rollout_max_step_timeouts: int = 0
+
+    def __post_init__(self) -> None:
+        self.endpoint_depth_bucket_width = int(self.endpoint_depth_bucket_width)
+        self.endpoint_depth_bucket_max = int(self.endpoint_depth_bucket_max)
+        if self.endpoint_depth_bucket_width <= 0:
+            raise ValueError("endpoint_depth_bucket_width must be positive")
+        if self.endpoint_depth_bucket_max <= 0:
+            raise ValueError("endpoint_depth_bucket_max must be positive")
+        if not self.endpoint_depth_buckets:
+            self.endpoint_depth_buckets = dict.fromkeys(
+                endpoint_depth_bucket_keys(
+                    self.endpoint_depth_bucket_width,
+                    self.endpoint_depth_bucket_max,
+                ),
+                0,
+            )
 
     def accumulate(self, other: TraversalStats) -> None:
         self.nodes += other.nodes
@@ -30,6 +76,17 @@ class TraversalStats:
         self.cutoffs += other.cutoffs
         self.node_limit_cutoffs += other.node_limit_cutoffs
         self.max_depth_reached = max(self.max_depth_reached, other.max_depth_reached)
+        self.endpoint_traversals += other.endpoint_traversals
+        self.endpoint_depth_sum += other.endpoint_depth_sum
+        self.terminal_depth_sum += other.terminal_depth_sum
+        self.cutoff_depth_sum += other.cutoff_depth_sum
+        self.node_limit_cutoff_depth_sum += other.node_limit_cutoff_depth_sum
+        for key, value in other.endpoint_depth_buckets.items():
+            self.endpoint_depth_buckets[key] = self.endpoint_depth_buckets.get(key, 0) + value
+        self.league_current_traversals += other.league_current_traversals
+        self.league_recent_traversals += other.league_recent_traversals
+        self.league_older_traversals += other.league_older_traversals
+        self.league_anchor_traversals += other.league_anchor_traversals
         self.cutoff_rollouts += other.cutoff_rollouts
         self.cutoff_rollout_steps += other.cutoff_rollout_steps
         self.cutoff_rollout_max_step_timeouts += other.cutoff_rollout_max_step_timeouts
@@ -84,9 +141,14 @@ class DeepCFRTraverser:
         cutoff_rollout_policy: str = "random",
         cutoff_rollout_max_steps: int = 10_000,
         opponent_policy: str = "network",
+        league_advantage_nets: list[list[AdvantageNet]] | None = None,
+        self_play_league: SelfPlayLeagueConfig | None = None,
+        encoding: EncodingConfig | None = None,
         outcome_sampling_epsilon: float = 0.0,
         outcome_sampling_value_clip: float | None = None,
         outcome_unsampled_regret: str = "negative_node_value",
+        endpoint_depth_bucket_width: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_WIDTH,
+        endpoint_depth_bucket_max: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_MAX,
         rng: np.random.Generator | None = None,
         timing_stats: TraversalTimingStats | None = None,
     ) -> None:
@@ -105,14 +167,21 @@ class DeepCFRTraverser:
         self.cutoff_rollout_policy = cutoff_rollout_policy
         self.cutoff_rollout_max_steps = max(1, int(cutoff_rollout_max_steps))
         self.opponent_policy = opponent_policy
+        self.league_advantage_nets = league_advantage_nets or []
+        self.self_play_league = self_play_league or SelfPlayLeagueConfig()
+        self.encoding = encoding or EncodingConfig()
         self.outcome_sampling_epsilon = float(outcome_sampling_epsilon)
         self.outcome_sampling_value_clip = (
             None if outcome_sampling_value_clip is None else max(1.0e-9, float(outcome_sampling_value_clip))
         )
         self.outcome_unsampled_regret = outcome_unsampled_regret
+        self.endpoint_depth_bucket_width = max(1, int(endpoint_depth_bucket_width))
+        self.endpoint_depth_bucket_max = max(1, int(endpoint_depth_bucket_max))
         self.sampling_probability_floor = 1.0e-12
         self.rng = rng or np.random.default_rng()
         self.timing_stats = timing_stats
+        self._active_league_snapshot: list[AdvantageNet] | None = None
+        self._active_league_bucket: str | None = None
         self._safe_heuristic_rollout_bot = (
             SafeHeuristicBot() if self.cutoff_rollout_policy == "safe_heuristic" else None
         )
@@ -120,29 +189,65 @@ class DeepCFRTraverser:
     def _node_budget_reached(self, stats: TraversalStats) -> bool:
         return self.max_nodes_per_traversal is not None and stats.nodes >= self.max_nodes_per_traversal
 
+    def _record_endpoint_depth(self, stats: TraversalStats, depth: int, reason: str) -> None:
+        stats.endpoint_traversals += 1
+        stats.endpoint_depth_sum += depth
+        if reason == "terminal":
+            stats.terminal_depth_sum += depth
+        elif reason == "cutoff":
+            stats.cutoff_depth_sum += depth
+        elif reason == "node_limit_cutoff":
+            stats.node_limit_cutoff_depth_sum += depth
+
+        key = endpoint_depth_bucket_key(
+            depth,
+            self.endpoint_depth_bucket_width,
+            self.endpoint_depth_bucket_max,
+        )
+        stats.endpoint_depth_buckets[key] = stats.endpoint_depth_buckets.get(key, 0) + 1
+
     def traverse(self, state: GameState, traverser: int, iteration: int) -> tuple[float, TraversalStats]:
-        stats = TraversalStats()
-        if self.timing_stats is None:
+        stats = TraversalStats(
+            endpoint_depth_bucket_width=self.endpoint_depth_bucket_width,
+            endpoint_depth_bucket_max=self.endpoint_depth_bucket_max,
+        )
+        if self.opponent_policy == "self_play_league":
+            self._active_league_bucket = self._league_bucket()
+            self._record_league_bucket(stats, self._active_league_bucket)
+            self._active_league_snapshot = self._select_league_snapshot()
+        try:
+            if self.timing_stats is None:
+                value = self._traverse(state, traverser, iteration, 0, stats)
+                return value, stats
+            started = time.perf_counter()
             value = self._traverse(state, traverser, iteration, 0, stats)
+            self.timing_stats.traversal_wall_seconds += time.perf_counter() - started
             return value, stats
-        started = time.perf_counter()
-        value = self._traverse(state, traverser, iteration, 0, stats)
-        self.timing_stats.traversal_wall_seconds += time.perf_counter() - started
-        return value, stats
+        finally:
+            self._active_league_snapshot = None
+            self._active_league_bucket = None
+
+    def _policy_from_net(
+        self,
+        net: AdvantageNet,
+        state: GameState,
+        player: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        info = encode_information_state(state, player, self.encoding)
+        legal = legal_mask_array(state)
+        with torch.inference_mode():
+            x = torch.as_tensor(info, dtype=torch.float32, device=self.device).unsqueeze(0)
+            advantages = net(x).squeeze(0).detach().cpu().numpy()
+        policy = regret_matching(advantages, legal, self.epsilon)
+        return info, legal, np.asarray(policy, dtype=np.float32)
 
     def _policy(self, state: GameState, player: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if self.timing_stats is None:
-            info = encode_information_state(state, player)
-            legal = legal_mask_array(state)
-            with torch.inference_mode():
-                x = torch.as_tensor(info, dtype=torch.float32, device=self.device).unsqueeze(0)
-                advantages = self.advantage_nets[player](x).squeeze(0).detach().cpu().numpy()
-            policy = regret_matching(advantages, legal, self.epsilon)
-            return info, legal, np.asarray(policy, dtype=np.float32)
+            return self._policy_from_net(self.advantage_nets[player], state, player)
 
         self.timing_stats.policy_calls += 1
         started = time.perf_counter()
-        info = encode_information_state(state, player)
+        info = encode_information_state(state, player, self.encoding)
         self.timing_stats.encode_information_state_seconds += time.perf_counter() - started
         legal = legal_mask_array(state)
         started = time.perf_counter()
@@ -154,6 +259,65 @@ class DeepCFRTraverser:
         policy = regret_matching(advantages, legal, self.epsilon)
         self.timing_stats.regret_matching_seconds += time.perf_counter() - started
         return info, legal, np.asarray(policy, dtype=np.float32)
+
+    def _league_bucket(self) -> str:
+        cfg = self.self_play_league
+        recent_count = min(len(self.league_advantage_nets), cfg.recent_window)
+        older_count = max(0, len(self.league_advantage_nets) - recent_count)
+        weights = np.asarray(
+            [
+                cfg.current_weight,
+                cfg.recent_weight if recent_count > 0 else 0.0,
+                cfg.older_weight if older_count > 0 else 0.0,
+                cfg.anchor_weight,
+            ],
+            dtype=np.float64,
+        )
+        total = float(weights.sum())
+        if total <= 0.0:
+            return "current"
+        weights /= total
+        return str(self.rng.choice(["current", "recent", "older", "anchor"], p=weights))
+
+    def _record_league_bucket(self, stats: TraversalStats, bucket: str) -> None:
+        if bucket == "current":
+            stats.league_current_traversals += 1
+        elif bucket == "recent":
+            stats.league_recent_traversals += 1
+        elif bucket == "older":
+            stats.league_older_traversals += 1
+        elif bucket == "anchor":
+            stats.league_anchor_traversals += 1
+
+    def _select_league_snapshot(self, bucket: str | None = None) -> list[AdvantageNet] | None:
+        if bucket is None:
+            bucket = self._active_league_bucket or "current"
+        if bucket in {"current", "anchor"} or not self.league_advantage_nets:
+            return None
+        recent_count = min(len(self.league_advantage_nets), self.self_play_league.recent_window)
+        if bucket == "recent" and recent_count > 0:
+            candidates = self.league_advantage_nets[-recent_count:]
+        else:
+            candidates = self.league_advantage_nets[: max(0, len(self.league_advantage_nets) - recent_count)]
+        if not candidates:
+            return None
+        return candidates[int(self.rng.integers(0, len(candidates)))]
+
+    def _league_advantage_net(self, player: int) -> AdvantageNet:
+        snapshot = self._active_league_snapshot
+        if snapshot is None:
+            return self.advantage_nets[player]
+        return snapshot[player]
+
+    def _self_play_league_action(self, state: GameState, player: int) -> int | None:
+        if self._active_league_bucket == "anchor":
+            return self._rollout_bot_action(state, self.self_play_league.anchor_policy)
+        net = self._league_advantage_net(player)
+        _, legal, policy = self._policy_from_net(net, state, player)
+        legal_actions = np.flatnonzero(legal)
+        if len(legal_actions) == 0:
+            return None
+        return self._sample_legal_action(policy, legal_actions)
 
     def _record_strategy(
         self,
@@ -282,6 +446,8 @@ class DeepCFRTraverser:
     def _fixed_opponent_action(self, state: GameState) -> int | None:
         if self.opponent_policy == "network":
             return None
+        if self.opponent_policy == "self_play_league":
+            return self._self_play_league_action(state, state.current_player)
         return self._rollout_bot_action(state, self.opponent_policy)
 
     def _rollout_value(self, state: GameState, traverser: int, stats: TraversalStats) -> float:
@@ -319,16 +485,18 @@ class DeepCFRTraverser:
         stats: TraversalStats,
     ) -> float:
         stats.nodes += 1
+        stats.max_depth_reached = max(stats.max_depth_reached, depth)
         if self._node_budget_reached(stats):
             stats.node_limit_cutoffs += 1
+            self._record_endpoint_depth(stats, depth, "node_limit_cutoff")
             return self._cutoff_value(state, traverser, stats)
-        stats.max_depth_reached = max(stats.max_depth_reached, depth)
         if state.terminal:
             stats.terminals += 1
+            self._record_endpoint_depth(stats, depth, "terminal")
             return float(state.score_diff(traverser))
         if self.max_depth is not None and depth >= self.max_depth:
             stats.cutoffs += 1
-            stats.max_depth_reached = max(stats.max_depth_reached, depth)
+            self._record_endpoint_depth(stats, depth, "cutoff")
             return self._cutoff_value(state, traverser, stats)
 
         player = state.current_player
@@ -336,6 +504,7 @@ class DeepCFRTraverser:
             action = self._fixed_opponent_action(state)
             if action is None:
                 stats.terminals += 1
+                self._record_endpoint_depth(stats, depth, "terminal")
                 return float(state.score_diff(traverser))
             child = self._child_after_action(state, action)
             return self._traverse(
@@ -351,6 +520,7 @@ class DeepCFRTraverser:
         legal_actions = np.flatnonzero(legal)
         if len(legal_actions) == 0:
             stats.terminals += 1
+            self._record_endpoint_depth(stats, depth, "terminal")
             return float(state.score_diff(traverser))
 
         sampling_policy = self._sampling_policy(policy, legal)
@@ -417,9 +587,13 @@ def cfr_traverse(
     cutoff_rollout_policy: str = "random",
     cutoff_rollout_max_steps: int = 10_000,
     opponent_policy: str = "network",
+    league_advantage_nets: list[list[AdvantageNet]] | None = None,
+    self_play_league: SelfPlayLeagueConfig | None = None,
     outcome_sampling_epsilon: float = 0.0,
     outcome_sampling_value_clip: float | None = None,
     outcome_unsampled_regret: str = "negative_node_value",
+    endpoint_depth_bucket_width: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_WIDTH,
+    endpoint_depth_bucket_max: int = DEFAULT_ENDPOINT_DEPTH_BUCKET_MAX,
     rng: np.random.Generator | None = None,
     timing_stats: TraversalTimingStats | None = None,
 ) -> tuple[float, TraversalStats]:
@@ -439,9 +613,13 @@ def cfr_traverse(
         cutoff_rollout_policy=cutoff_rollout_policy,
         cutoff_rollout_max_steps=cutoff_rollout_max_steps,
         opponent_policy=opponent_policy,
+        league_advantage_nets=league_advantage_nets,
+        self_play_league=self_play_league,
         outcome_sampling_epsilon=outcome_sampling_epsilon,
         outcome_sampling_value_clip=outcome_sampling_value_clip,
         outcome_unsampled_regret=outcome_unsampled_regret,
+        endpoint_depth_bucket_width=endpoint_depth_bucket_width,
+        endpoint_depth_bucket_max=endpoint_depth_bucket_max,
         rng=rng,
         timing_stats=timing_stats,
     )

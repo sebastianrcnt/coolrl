@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ..game import GameState, LostCitiesConfig
-from .config import NetworkConfig
+from .config import EncodingConfig, NetworkConfig, SelfPlayLeagueConfig
 from .memory import _Sample, AdvantageMemory, StrategyMemory
 from .networks import AdvantageNet
 from .traversal import DeepCFRTraverser, TraversalStats, TraversalTimingStats
@@ -35,6 +35,9 @@ class TraversalWorkerBatch:
     cutoff_rollout_policy: str
     cutoff_rollout_max_steps: int
     opponent_policy: str
+    league_advantage_net_state_dicts: list[list[dict[str, Any]]]
+    self_play_league: SelfPlayLeagueConfig
+    encoding: EncodingConfig
     strategy_sample_interval: int
     store_strategy_on_opponent_nodes: bool
     store_strategy_on_traverser_nodes: bool
@@ -43,6 +46,8 @@ class TraversalWorkerBatch:
     outcome_sampling_epsilon: float
     outcome_sampling_value_clip: float | None
     outcome_unsampled_regret: str
+    endpoint_depth_bucket_width: int
+    endpoint_depth_bucket_max: int
     worker_seed: int
 
 
@@ -78,6 +83,18 @@ def _configure_worker_torch_threads() -> None:
     _TORCH_THREADS_CONFIGURED = True
 
 
+def _worker_state_dict_to_tensors(state_dict: dict[str, Any]) -> dict[str, Any]:
+    tensors: dict[str, Any] = {}
+    for name, value in state_dict.items():
+        if isinstance(value, np.ndarray):
+            tensors[name] = torch.as_tensor(value).clone()
+        elif isinstance(value, torch.Tensor):
+            tensors[name] = value.detach().cpu()
+        else:
+            tensors[name] = value
+    return tensors
+
+
 def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerBatchResult:
     _configure_worker_torch_threads()
 
@@ -90,13 +107,18 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
     advantage_nets: list[AdvantageNet] = []
     for state_dict in batch.advantage_net_state_dicts:
         net = AdvantageNet(batch.input_dim, batch.action_size, batch.network_config).to(device)
-        cpu_state_dict = {
-            name: value.detach().cpu() if isinstance(value, torch.Tensor) else value
-            for name, value in state_dict.items()
-        }
-        net.load_state_dict(cpu_state_dict)
+        net.load_state_dict(_worker_state_dict_to_tensors(state_dict))
         net.eval()
         advantage_nets.append(net)
+    league_advantage_nets: list[list[AdvantageNet]] = []
+    for snapshot_state_dicts in batch.league_advantage_net_state_dicts:
+        snapshot_nets: list[AdvantageNet] = []
+        for state_dict in snapshot_state_dicts:
+            net = AdvantageNet(batch.input_dim, batch.action_size, batch.network_config).to(device)
+            net.load_state_dict(_worker_state_dict_to_tensors(state_dict))
+            net.eval()
+            snapshot_nets.append(net)
+        league_advantage_nets.append(snapshot_nets)
 
     memory_capacity = _worker_memory_capacity(batch)
     advantage_memories = [
@@ -122,9 +144,14 @@ def _run_traversal_worker_batch(batch: TraversalWorkerBatch) -> TraversalWorkerB
         cutoff_rollout_policy=batch.cutoff_rollout_policy,
         cutoff_rollout_max_steps=batch.cutoff_rollout_max_steps,
         opponent_policy=batch.opponent_policy,
+        league_advantage_nets=league_advantage_nets,
+        self_play_league=batch.self_play_league,
+        encoding=batch.encoding,
         outcome_sampling_epsilon=batch.outcome_sampling_epsilon,
         outcome_sampling_value_clip=batch.outcome_sampling_value_clip,
         outcome_unsampled_regret=batch.outcome_unsampled_regret,
+        endpoint_depth_bucket_width=batch.endpoint_depth_bucket_width,
+        endpoint_depth_bucket_max=batch.endpoint_depth_bucket_max,
         rng=rng,
         timing_stats=timing_stats,
     )

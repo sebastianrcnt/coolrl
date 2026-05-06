@@ -1,6 +1,6 @@
 # Lost Cities Deep CFR Rollout Cutoff Experiment
 
-> Historical note: this experiment config was removed after the result was documented. Use [`src/coolrl/lost_cities/README.md`](../src/coolrl/lost_cities/README.md) for current runnable training commands.
+> Historical note: this experiment config was removed after the result was documented. Use [`src/coolrl/lost_cities/README.md`](../../../src/coolrl/lost_cities/README.md) for current runnable training commands.
 
 ## Goal
 

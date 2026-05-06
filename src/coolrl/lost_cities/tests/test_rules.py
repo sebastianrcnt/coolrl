@@ -1,4 +1,6 @@
-from coolrl.lost_cities.game import Card, GameState, LostCitiesConfig, build_deck
+import pytest
+
+from coolrl.lost_cities.game import Card, GameState, IllegalMoveError, LostCitiesConfig, build_deck
 
 
 def test_deck_generation_count() -> None:
@@ -38,6 +40,18 @@ def test_cannot_draw_just_discarded_color() -> None:
     state.apply_action(1)
     mask = state.legal_draw_mask()
     assert mask[1 + 2] is False
+
+
+def test_drawing_just_discarded_color_is_rejected() -> None:
+    config = LostCitiesConfig()
+    state = GameState.empty(config)
+    state.hands[0] = [Card(2, 2)]
+    state.deck = [Card(0, 1)]
+
+    state.apply_action(1)
+
+    with pytest.raises(IllegalMoveError):
+        state.apply_action(1 + 2)
 
 
 def test_discarded_color_can_be_drawn_after_turn_advances() -> None:

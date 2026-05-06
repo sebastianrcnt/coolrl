@@ -231,12 +231,48 @@ def test_load_safe_dagger_256_yaml_profile() -> None:
     assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_safe_dagger_256"
 
 
+def test_load_pure_self_play_a_yaml_profile() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_pure_self_play_a.yaml"))
+
+    assert cfg.experiment_name == "lost_cities_deep_cfr_pure_self_play_a"
+    assert cfg.max_hours == 2.0
+    assert cfg.traversal.opponent_policy == "self_play_league"
+    assert cfg.traversal.cutoff_value_mode == "score_diff"
+    assert cfg.traversal.cutoff_rollouts == 0
+    assert cfg.traversal.self_play_league.current_weight == 0.5
+    assert cfg.traversal.self_play_league.recent_weight == 0.3
+    assert cfg.traversal.self_play_league.older_weight == 0.2
+    assert cfg.traversal.self_play_league.recent_window == 5
+    assert cfg.traversal.self_play_league.max_snapshots == 20
+    assert cfg.traversal.traversal_worker_chunk_size == 32
+    assert cfg.traversal.store_strategy_on_opponent_nodes is False
+    assert cfg.evaluation.opponents == [
+        "random",
+        "passive_discard",
+        "safe_heuristic",
+        "safe_heuristic_loose",
+        "safe_heuristic_strict",
+        "noisy_safe",
+    ]
+
+
+def test_load_pure_self_play_b_yaml_profile_matches_safe_adv_imitation_shape() -> None:
+    cfg = load_config(Path("configs/lost_cities_deep_cfr_pure_self_play_b.yaml"))
+
+    assert cfg.experiment_name == "lost_cities_deep_cfr_pure_self_play_b"
+    assert cfg.network.hidden_size == 256
+    assert cfg.network.num_layers == 3
+    assert cfg.traversal.opponent_policy == "self_play_league"
+    assert cfg.checkpoint.directory == "checkpoints/lost_cities_deep_cfr_pure_self_play_b"
+
+
 def test_default_cutoff_config_preserves_score_diff_behavior() -> None:
     cfg = config_from_dict({})
     assert cfg.traversal.cutoff_value_mode == "score_diff"
     assert cfg.traversal.cutoff_rollouts == 0
     assert cfg.traversal.cutoff_rollout_policy == "random"
     assert cfg.traversal.opponent_policy == "network"
+    assert cfg.traversal.self_play_league.current_weight == 0.5
     assert cfg.traversal.max_depth == 8
     assert cfg.traversal.outcome_sampling_epsilon == 0.0
     assert cfg.traversal.outcome_sampling_value_clip is None
