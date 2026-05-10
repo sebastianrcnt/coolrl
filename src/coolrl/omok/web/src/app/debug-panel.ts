@@ -26,6 +26,7 @@ export interface DebugMetricsSource {
   readonly modelBytes: number;
   readonly defaultModelLoadStarted: boolean;
   readonly simsCount: number;
+  readonly difficulty: string;
   readonly maxChildren: number;
   readonly reuseTree: boolean;
   readonly aiProgress: string | null;
@@ -102,7 +103,7 @@ export class DebugPanel {
       ["경과", `${((performance.now() - this.startedAt) / 1000).toFixed(0)}초 · ${document.visibilityState}`],
       ["상태", `${state} · 자동로드 ${src.defaultModelLoadStarted ? "시작" : "전"}`],
       ["백엔드", `${resolvedBackend} · ${evaluatorState}`],
-      ["탐색", `${src.simsCount} · top ${maxChildrenLabel} · ${src.reuseTree ? "reuse" : "no-reuse"}`],
+      ["탐색", `${src.simsCount} · ${src.difficulty} · top ${maxChildrenLabel} · ${src.reuseTree ? "reuse" : "no-reuse"}`],
       ["모델", model],
       ["힙", formatHeap()],
       ["기기", `${nav.deviceMemory ? `${nav.deviceMemory}GB` : "mem n/a"} · dpr ${deviceDpr.toFixed(2)}→${renderDpr.toFixed(2)} · ${nav.hardwareConcurrency ?? "?"}코어`],

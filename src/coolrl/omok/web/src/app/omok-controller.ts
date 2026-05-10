@@ -1,5 +1,13 @@
 import { GameState, type Player } from "../core/game-state";
 import { MCTS, type TreeNode } from "../core/mcts";
+import {
+  DIFFICULTY_PRESETS,
+  DEFAULT_DIFFICULTY,
+  MOBILE_DEFAULT_DIFFICULTY,
+  getDifficultyPreset,
+  type Difficulty,
+  type DifficultyPreset,
+} from "./difficulty-presets";
 import { WorkerEvaluator } from "../evaluator/worker-evaluator";
 import {
   makeMetricsForCanvas,
@@ -34,9 +42,7 @@ import { logDebug, logError, logInfo, logWarn } from "../util/logger";
 
 const BOARD_SIZE = 15;
 const DEFAULT_MODEL_URL = "./best.onnx";
-const DEFAULT_SIMS = 128;
 const MOBILE_MCTS_MAX_CHILDREN = 48;
-const MOBILE_DEFAULT_SIMS = 96;
 
 export interface DomRefs {
   canvas: HTMLCanvasElement;
@@ -45,7 +51,7 @@ export interface DomRefs {
   fileName: HTMLElement;
   colorSelect: HTMLSelectElement;
   backendSelect: HTMLSelectElement;
-  simsSelect: HTMLSelectElement;
+  difficultySelect: HTMLSelectElement;
   btnReset: HTMLButtonElement;
   btnSettings: HTMLButtonElement;
   btnSheetClose: HTMLButtonElement;
@@ -239,7 +245,7 @@ export class OmokController {
       if (!this.initialSetup) this.reloadModelForBackend();
       else this.updateInfo();
     });
-    on(this.dom.simsSelect, "change", () => this.debugPanel.render());
+    on(this.dom.difficultySelect, "change", () => this.debugPanel.render());
     on(this.dom.btnReset, "click", () => { if (!this.busy) this.resetGame(); });
     on(this.dom.btnUndo, "click", () => this.undo());
     on(this.dom.btnAi, "click", () => {
@@ -733,7 +739,7 @@ export class OmokController {
     }
     this.setBusy(true);
     this.thinkingGhosts.start(this.game.toPlay);
-    const sims = this.readSimsValue();
+    const { sims, weakening } = this.readDifficultyPreset();
     const template = pickLookaheadTemplate();
     this.aiProgress = formatLookahead(template, 1);
     this.statusPresenter.setThinking(this.aiProgress);
@@ -742,6 +748,7 @@ export class OmokController {
     try {
       const result = await this.mcts!.run(this.game, sims, {
         reuseRoot: this.reuseSearchTree() ? this.aiSubtree : null,
+        weakening,
         onProgress: (done, _total, candidates) => {
           this.thinkingGhosts.updateCandidates(candidates);
           this.aiProgress = formatLookahead(template, done);
@@ -784,7 +791,7 @@ export class OmokController {
       this.scheduleEvaluatorIdleRelease();
       return;
     }
-    const sims = this.readSimsValue();
+    const { sims } = this.readDifficultyPreset();
     const template = pickLookaheadTemplate();
     this.statusPresenter.setThinking(formatLookahead(template, 1));
     this.setBusy(true);
@@ -884,8 +891,8 @@ export class OmokController {
       this.dom.backendSelect.value = "wasm";
       this.backendChoice = "wasm";
     }
-    if (this.env.isMobile && this.dom.simsSelect.value === String(DEFAULT_SIMS)) {
-      this.dom.simsSelect.value = String(MOBILE_DEFAULT_SIMS);
+    if (this.env.isMobile && this.dom.difficultySelect.value === DEFAULT_DIFFICULTY) {
+      this.dom.difficultySelect.value = MOBILE_DEFAULT_DIFFICULTY;
     }
     if (this.env.isMobile) {
       // WebGPU/WebNN on iOS Safari OOM-kills the tab under sustained MCTS
@@ -901,8 +908,8 @@ export class OmokController {
     }
   }
 
-  private readSimsValue(): number {
-    return parseInt(this.dom.simsSelect.value) || DEFAULT_SIMS;
+  private readDifficultyPreset(): DifficultyPreset {
+    return getDifficultyPreset(this.dom.difficultySelect.value);
   }
 
   private reuseSearchTree(): boolean {
@@ -1067,7 +1074,8 @@ export class OmokController {
       get modelName() { return ctrl.modelSource.name; },
       get modelBytes() { return ctrl.modelSource.bytes; },
       get defaultModelLoadStarted() { return ctrl.defaultModelLoadStarted; },
-      get simsCount() { return ctrl.readSimsValue(); },
+      get simsCount() { return ctrl.readDifficultyPreset().sims; },
+      get difficulty() { return ctrl.readDifficultyPreset().label; },
       get maxChildren() {
         return ctrl.env.isLowMemoryMode ? MOBILE_MCTS_MAX_CHILDREN : Infinity;
       },

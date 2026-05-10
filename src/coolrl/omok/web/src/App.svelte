@@ -9,7 +9,7 @@
   let fileName: HTMLElement;
   let colorSelect: HTMLSelectElement;
   let backendSelect: HTMLSelectElement;
-  let simsSelect: HTMLSelectElement;
+  let difficultySelect: HTMLSelectElement;
   let btnReset: HTMLButtonElement;
   let btnSettings: HTMLButtonElement;
   let btnSheetClose: HTMLButtonElement;
@@ -38,7 +38,7 @@
       fileName,
       colorSelect,
       backendSelect,
-      simsSelect,
+      difficultySelect,
       btnReset,
       btnSettings,
       btnSheetClose,
@@ -158,12 +158,13 @@
       </select>
     </div>
     <div class="sheet-row">
-      <span class="label">탐색 횟수</span>
-      <select bind:this={simsSelect} id="sims">
-        <option value="64">64 · 쉬움</option>
-        <option value="96">96 · 중간</option>
-        <option value="128" selected>128 · 어려움</option>
-        <option value="256">256 · 알파고</option>
+      <span class="label">난이도</span>
+      <select bind:this={difficultySelect} id="difficulty-select">
+        <option value="strong">강함</option>
+        <option value="hard">어려움</option>
+        <option value="normal" selected>보통</option>
+        <option value="easy">쉬움</option>
+        <option value="veryEasy">매우 쉬움</option>
       </select>
     </div>
   </div>
